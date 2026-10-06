@@ -10,6 +10,8 @@ import { openPanel, closePanel, refreshPanel, pickWorkspaceFiles, currentPanel }
 import { showOnboarding, showGreeting, showWorkspaceMissing } from './onboarding.js';
 import { openSettings } from './settings.js';
 import { openImportDialog, entriesFromDrop } from './importer.js';
+import { modelMenuSection, openModelDialog, providerModels, selectedModel, selectedModelLabel } from './modelle.js';
+import { modelLabel } from './modelname.js';
 
 export const S = {
   state: null,
@@ -651,6 +653,9 @@ function renderAssistantMessage(m, isLast) {
       h('div', { class: 'detail' }, m.error || 'Unbekannter Fehler'));
     const hb = hintBox(m.hinweis);
     if (hb) err.append(hb);
+    if (m.hinweis && m.hinweis.aktion === 'modell') {
+      err.append(h('div', { style: { marginTop: '10px' } }, btn('Modell wählen', { iconName: 'sliders', cls: 'btn btn-sm btn-soft', size: 15, onClick: () => openModelDialog(m.provider) })));
+    }
     if (isLast) err.append(h('div', { style: { marginTop: '10px' } }, btn('Erneut senden', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: retryLast })));
     el.append(err);
   }
@@ -658,10 +663,15 @@ function renderAssistantMessage(m, isLast) {
   if (m.status === 'unterbrochen') el.append(h('div', { class: 'msg-note' }, 'Die Antwort wurde unterbrochen, weil die App beendet wurde.'));
   if (!running) {
     el.append(h('div', { class: 'msg-meta' },
-      h('span', {}, `${PROVIDER_NAME[m.provider] || 'KI'}${m.model ? ` · ${m.model}` : ''}`), h('span', { class: 'sep' }, '·'), h('span', {}, fmtTime(m.createdAt)),
+      h('span', { title: m.model || m.modelWahl || '' }, `${PROVIDER_NAME[m.provider] || 'KI'}${modelText(m)}`), h('span', { class: 'sep' }, '·'), h('span', {}, fmtTime(m.createdAt)),
       text ? btn('', { iconName: 'copy', cls: 'btn btn-sm btn-icon', title: 'Antwort kopieren', size: 15, onClick: () => copyText(text) }) : null));
   }
   return el;
+}
+
+function modelText(m) {
+  const id = m.model && m.model !== '<synthetic>' ? m.model : m.modelWahl;
+  return id ? ` · ${modelLabel(id, providerModels(m.provider))}` : '';
 }
 
 function renderMessage(m, isLast) {
@@ -945,9 +955,11 @@ export function updateComposer() {
   const sendBtn = wrap.querySelector('.send-btn');
   const prov = activeProvider();
   const pill = wrap.querySelector('.provider-pill');
-  pill.replaceChildren(h('span', { class: 'status-dot', 'data-s': prov ? prov.status : 'pruefe' }), h('span', {}, prov ? prov.name : 'Anbieter'), iconEl('chevronDown', 14));
-  pill.setAttribute('aria-label', prov ? `KI-Anbieter: ${prov.name}, ${prov.label}. Ändern` : 'KI-Anbieter wählen');
-  pill.title = prov ? `${prov.name}: ${prov.label}` : '';
+  const modelName = prov && selectedModel(prov.id) ? selectedModelLabel(prov.id) : '';
+  pill.replaceChildren(...[h('span', { class: 'status-dot', 'data-s': prov ? prov.status : 'pruefe' }), h('span', { class: 'pp-name' }, prov ? prov.name : 'Anbieter'),
+    modelName ? h('span', { class: 'pp-model' }, modelName) : null, iconEl('chevronDown', 14)].filter(Boolean));
+  pill.setAttribute('aria-label', prov ? `KI-Anbieter: ${prov.name}, ${prov.label}, Modell: ${modelName || 'Standard'}. Ändern` : 'KI-Anbieter wählen');
+  pill.title = prov ? `${prov.name}: ${prov.label} · Modell: ${modelName || 'Standard'}` : '';
   if (isStreaming()) {
     sendBtn.className = 'send-btn stop';
     sendBtn.innerHTML = '';
@@ -1012,6 +1024,20 @@ export async function checkProvider(id) {
   updateComposer();
 }
 
+export async function chooseModel(pid, id) {
+  try {
+    const r = await api.put('/api/settings', { modelle: { [pid]: id } });
+    S.state.settings = r.settings;
+    S.state.providers = r.providers;
+    updateComposer();
+    announce(`Modell für ${PROVIDER_NAME[pid]}: ${modelLabel(id, providerModels(pid))}`);
+    return true;
+  } catch (err) {
+    toast(err.message, { error: true });
+    return false;
+  }
+}
+
 export async function chooseProvider(id) {
   try {
     const r = await api.put('/api/settings', { provider: id });
@@ -1029,7 +1055,7 @@ function providerMenu(anchor) {
     const active = p.id === S.state.settings.provider;
     const b = h('button', { type: 'button', role: 'menuitemradio', 'aria-checked': active ? 'true' : 'false', class: 'menu-item provider-option' },
       h('span', { class: 'status-dot', 'data-s': p.status }),
-      h('span', { class: 'po-main' }, h('span', { class: 'po-name' }, p.name), h('span', { class: 'po-state' }, p.label + (p.model && p.status === 'verbunden' ? ` · ${p.model}` : ''))),
+      h('span', { class: 'po-main' }, h('span', { class: 'po-name' }, p.name), h('span', { class: 'po-state' }, p.label + (p.model && p.status === 'verbunden' ? ` · ${modelLabel(p.model, p.models)}` : ''))),
       active ? iconEl('check', 16, 'check') : null);
     b.addEventListener('click', () => { closePopover(); if (!active) chooseProvider(p.id); });
     return b;
@@ -1037,7 +1063,8 @@ function providerMenu(anchor) {
   const foot = h('div', { class: 'pop-foot' },
     btn('Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm', size: 15, onClick: () => { closePopover(); checkProvider(S.state.settings.provider); } }),
     btn('Einstellungen', { iconName: 'sliders', cls: 'btn btn-sm', size: 15, onClick: () => { closePopover(); openSettings('anbieter'); } }));
-  popover(anchor, [...items, foot], { placement: 'top-start' });
+  const models = modelMenuSection(S.state.settings.provider);
+  popover(anchor, [h('div', { class: 'menu-label', 'aria-hidden': 'true' }, 'Anbieter'), ...items, ...(models.length ? [h('div', { class: 'menu-sep', role: 'separator' }), ...models] : []), foot], { placement: 'top-start' });
 }
 
 // ---------- Anhänge ----------

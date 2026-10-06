@@ -163,6 +163,30 @@ test('Markdown-Renderer maskiert HTML und erkennt Dateien', async () => {
   assert.strictEqual(stripUpdateBlock('Text\n```arbeitsstand\n{"auf'), 'Text');
 });
 
+test('Modelle: IDs, Liste von agy, Fehlererkennung, Anzeigenamen', async () => {
+  const models = require('../server/providers/models');
+  for (const ok of ['', 'sonnet', 'claude-opus-5-5', 'sonnet[1m]', 'gemini-3.1-pro-high', 'us.anthropic.claude-opus-5-5'])
+    assert.ok(models.validModelId(ok), ok);
+  for (const bad of ['opus & calc', 'a b', '-p', '"x"', 'x;y', 'x|y', '%PATH%', '$(id)', 'x'.repeat(101)])
+    assert.ok(!models.validModelId(bad), bad);
+  const list = models.parseAgyModels('\u001b[1mSLUG                      NAME\u001b[0m\ngemini-3.8-flash-high     Gemini 3.8 Flash (High)\n\n* gemini-3.1-pro-high       Gemini 3.1 Pro (High)\nUse --model <slug> to pick one.\n');
+  assert.deepStrictEqual(list.map((m) => [m.id, m.name]), [['gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)'], ['gemini-3.1-pro-high', 'Gemini 3.1 Pro (High)']]);
+  assert.strictEqual(classifyError("There's an issue with the selected model (claude-x). It may not exist or you may not have access to it."), 'modell');
+  assert.strictEqual(classifyError('Error: unknown model "gemini-9"'), 'modell');
+  assert.strictEqual(classifyError('API Error: 529 overloaded'), 'limit');
+  assert.strictEqual(classifyError('Not logged in · Please run /login'), 'anmeldung');
+  const { modelLabel } = await import('../public/js/modelname.js');
+  assert.strictEqual(modelLabel(''), 'Standard');
+  assert.strictEqual(modelLabel('sonnet'), 'Sonnet');
+  assert.strictEqual(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
+  assert.strictEqual(modelLabel('claude-haiku-4-5-20251001'), 'Haiku 4.5');
+  assert.strictEqual(modelLabel('claude-fable-5'), 'Fable 5');
+  assert.strictEqual(modelLabel('opus[1m]'), 'Opus (1M)');
+  assert.strictEqual(modelLabel('gemini-3.1-pro-high'), 'Gemini 3.1 Pro (High)');
+  assert.strictEqual(modelLabel('x-1', [{ id: 'x-1', name: 'Mein Modell' }]), 'Mein Modell');
+  assert.strictEqual(modelLabel('claude-gibtsnicht-9'), 'claude-gibtsnicht-9', 'Unbekanntes bleibt wie eingegeben');
+});
+
 test('Übernahme: Entwurfsstände, Systemdateien und Pfade', () => {
   const importer = require('../server/importer');
   const key = importer.familyKey;

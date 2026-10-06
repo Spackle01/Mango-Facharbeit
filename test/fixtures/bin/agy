@@ -2,14 +2,20 @@
 // Test-Double der Antigravity CLI (Ereignisformat laut https://antigravity.google/docs/cli/headless/).
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('agy 1.2.3'); process.exit(0); }
-if (args[0] === '--help') { console.log('-p, --print  --output-format text|json|stream-json  --conversation  --print-timeout'); process.exit(0); }
+if (args[0] === '--help') { console.log('-p, --print  --output-format text|json|stream-json  --conversation  --print-timeout  --model <slug>'); process.exit(0); }
+if (args[0] === 'models') {
+  console.log('gemini-3.8-flash-high     Gemini 3.8 Flash (High)\ngemini-3.8-flash-medium   Gemini 3.8 Flash (Medium)\ngemini-3.1-pro-high       Gemini 3.1 Pro (High)');
+  process.exit(0);
+}
+if (process.env.FAKE_AGY_LOG) require('fs').appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify({ args }) + '\n');
+const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : '';
 const fmt = args[args.indexOf('--output-format') + 1];
 const prompt = args[args.indexOf('-p') + 1];
 const cid = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : '055a398f-db14-4c5f-abbb-1bf03f8120a7';
 if (process.env.FAKE_AGY_UNAUTH) { process.stderr.write('Error: authentication required\n'); process.exit(1); }
 if (fmt === 'json') { console.log(JSON.stringify({ conversation_id: cid, status: 'SUCCESS', response: 'OK' })); process.exit(0); }
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
-out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['read_file'], permission_mode: 'request-review', model: 'gemini-test' } });
+out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['read_file'], permission_mode: 'request-review', model: model || 'gemini-test' } });
 out({ event: 'step_update', step_update: { conversation_id: cid, step_index: 1, state: 'ACTIVE', step_type: 'tool', tool_name: 'read_file', tool_info: { name: 'read_file', parameters: { AbsolutePath: `${process.cwd()}/00_vorgaben/anforderungen.md` } } } });
 out({ event: 'step_update', step_update: { conversation_id: cid, step_index: 2, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'Hallo ' } });
 out({ event: 'step_update', step_update: { conversation_id: cid, step_index: 2, state: 'DONE', step_type: 'agent_response', text_delta: `von Antigravity (${prompt.length} Zeichen).` } });

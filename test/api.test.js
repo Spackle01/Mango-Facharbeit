@@ -13,6 +13,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-api-'));
 const HOME = path.join(TMP, 'home');
 const WS = path.join(HOME, 'Dokumente', 'Facharbeit Test');
 const LOG = path.join(TMP, 'claude-calls.ndjson');
+const AGY_LOG = path.join(TMP, 'agy-calls.ndjson');
 fs.mkdirSync(path.join(HOME, 'Dokumente'), { recursive: true });
 
 let server;
@@ -25,7 +26,7 @@ function startServer() {
     server = spawn(process.execPath, [path.join(ROOT, 'server/index.js'), '--no-open', '--port', String(port)], {
       env: {
         ...process.env,
-        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), FAKE_LOG: LOG,
+        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), FAKE_LOG: LOG, FAKE_AGY_LOG: AGY_LOG,
         PATH: `${path.join(__dirname, 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -231,6 +232,61 @@ test('Kompletter Ablauf', async (t) => {
     await call('PUT', '/api/settings', { provider: 'claude', theme: 'dark' });
   });
 
+  await t.test('Modellauswahl für beide Anbieter', async () => {
+    let s = await call('GET', '/api/state');
+    assert.deepStrictEqual(s.settings.modelle, { claude: '', antigravity: '' });
+    const claude = s.providers.find((p) => p.id === 'claude');
+    const agy = s.providers.find((p) => p.id === 'antigravity');
+    assert.strictEqual(claude.modelWahl, true);
+    assert.deepStrictEqual(claude.models.filter((m) => m.gruppe === 'familie').map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
+    assert.ok(claude.models.some((m) => m.id === 'claude-opus-5-5' && m.name === 'Opus 5.5'));
+    assert.deepStrictEqual(agy.models.map((m) => m.id), ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.1-pro-high'], 'Liste aus „agy models“');
+    assert.strictEqual(agy.models[2].name, 'Gemini 3.1 Pro (High)');
+
+    await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus & calc' } }), (e) => e.status === 400);
+    await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus"; rm -rf /' } }), (e) => e.status === 400);
+    let r = await call('PUT', '/api/settings', { modelle: { claude: 'opus' } });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: '' });
+
+    const chat = await call('POST', '/api/chats');
+    let res = await send(chat.id, 'Mit Opus bitte');
+    let calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    let args = calls[calls.length - 1].args;
+    assert.strictEqual(args[args.indexOf('--model') + 1], 'opus');
+    assert.strictEqual(res.done.message.model, 'fake-opus');
+    assert.strictEqual(res.done.message.modelWahl, 'opus');
+
+    // Nicht verfügbares Modell: verständlicher Hinweis, Anbieter bleibt nutzbar.
+    await call('PUT', '/api/settings', { modelle: { claude: 'claude-gibtsnicht-9' } });
+    res = await send(chat.id, 'Und jetzt?');
+    assert.strictEqual(res.done.message.status, 'fehler');
+    assert.strictEqual(res.done.message.errorKind, 'modell');
+    assert.strictEqual(res.done.message.hinweis.aktion, 'modell');
+    assert.match(res.done.message.hinweis.text, /„claude-gibtsnicht-9“ ist bei Claude Code nicht verfügbar/);
+    s = await call('GET', '/api/state');
+    assert.strictEqual(s.providers.find((p) => p.id === 'claude').usable, true);
+
+    // Standard: kein --model, Sitzung läuft weiter.
+    await call('PUT', '/api/settings', { modelle: { claude: '' } });
+    res = await send(chat.id, 'Wieder Standard');
+    assert.strictEqual(res.done.message.status, 'fertig');
+    calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    args = calls[calls.length - 1].args;
+    assert.ok(!args.includes('--model'));
+    assert.ok(args.includes('--resume'), 'Modellwechsel behält die Sitzung');
+
+    // Antigravity bekommt das gewählte Modell ebenfalls.
+    await call('PUT', '/api/settings', { provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } });
+    res = await send(chat.id, 'Mit Gemini Pro');
+    assert.strictEqual(res.done.message.model, 'gemini-3.1-pro-high');
+    const agyCalls = fs.readFileSync(AGY_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const agyArgs = agyCalls[agyCalls.length - 1].args;
+    assert.strictEqual(agyArgs[agyArgs.indexOf('--model') + 1], 'gemini-3.1-pro-high');
+    assert.strictEqual(agyArgs[agyArgs.length - 2], '-p', 'Prompt bleibt das letzte Argument');
+    r = await call('PUT', '/api/settings', { provider: 'claude', modelle: { claude: 'sonnet', antigravity: '' } });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '' });
+  });
+
   await t.test('Exporte: Gesprächsverläufe, Word, Gesamtarbeit, Sicherung', async () => {
     const tr = await call('POST', '/api/export/transcripts');
     const md = fs.readFileSync(path.join(WS, tr.path), 'utf8');
@@ -429,6 +485,7 @@ test('Neustart: Arbeitsstand bleibt erhalten, verschobener Arbeitsraum wird erka
   let s = await call('GET', '/api/state');
   assert.strictEqual(s.project.angaben.lehrkraft, 'Frau Muster');
   assert.strictEqual(s.settings.theme, 'dark');
+  assert.strictEqual(s.settings.modelle.claude, 'sonnet', 'Modellwahl bleibt gespeichert');
   assert.strictEqual(s.project.aufgaben.find((a) => a.id === 'expose').status, 'erledigt');
   assert.ok(s.chats.some((c) => c.title === 'Exposé-Planung'));
   assert.match(s.project.uebernahme.zusammenfassung, /Goldener Schnitt/);

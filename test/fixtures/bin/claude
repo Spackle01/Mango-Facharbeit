@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-if (args[0] === '--help') { console.log('--include-partial-messages --permission-mode --session-id --append-system-prompt --allowedTools --disallowedTools\nCommands:\n  auth'); process.exit(0); }
+if (args[0] === '--help') { console.log('--include-partial-messages --permission-mode --session-id --append-system-prompt --allowedTools --disallowedTools --model <model>\nCommands:\n  auth'); process.exit(0); }
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: process.env.FAKE_LOGGED_OUT ? false : true })); process.exit(0); }
 let input = '';
 process.stdin.on('data', (d) => { input += d; });
@@ -17,7 +17,14 @@ process.stdin.on('end', () => {
     out({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login', session_id: sid });
     return;
   }
-  out({ type: 'system', subtype: 'init', model: 'fake-model', session_id: sid });
+  const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : '';
+  if (model.includes('gibtsnicht')) {
+    const t = `There's an issue with the selected model (${model}). It may not exist or you may not have access to it.`;
+    out({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: t }] } });
+    out({ type: 'result', subtype: 'success', is_error: true, result: t, session_id: sid });
+    return;
+  }
+  out({ type: 'system', subtype: 'init', model: model ? `fake-${model}` : 'fake-model', session_id: sid });
   const msg = input.split('Nachricht der Schülerin bzw. des Schülers:\n').pop();
   if (msg.includes('DATEI')) {
     const file = path.join(process.cwd(), '02_expose_und_zeitplan', 'expose_v1.md');

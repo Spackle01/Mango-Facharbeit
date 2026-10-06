@@ -30,8 +30,17 @@ function autoTitle(text, attachments) {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-function errorHint(kind, providerState) {
+function errorHint(kind, providerState, model = '') {
   if ((kind === 'anmeldung' || kind === 'vertrauen') && providerState && providerState.hint) return providerState.hint;
+  if (kind === 'modell') {
+    const name = providerState ? providerState.name : 'dem Anbieter';
+    return {
+      text: model
+        ? `Das Modell „${model}“ ist bei ${name} nicht verfügbar oder für dein Konto nicht freigeschaltet. Wähle ein anderes Modell.`
+        : `${name} meldet ein Problem mit dem Modell. Wähle ein Modell aus.`,
+      aktion: 'modell',
+    };
+  }
   if (kind === 'limit') return { text: 'Der Anbieter ist gerade überlastet oder dein Nutzungslimit ist erreicht. Warte etwas oder wechsle den Anbieter.' };
   if (kind === 'netz') return { text: 'Keine Verbindung zum Anbieter. Prüfe die Internetverbindung und versuche es erneut.' };
   return null;
@@ -93,6 +102,7 @@ class RunManager {
     if (this.runs.has(chatId)) throw Object.assign(new Error('In diesem Chat läuft bereits eine Antwort.'), { status: 409 });
     const chat = project.getChat(chatId);
     const providerId = this.settings().provider;
+    const model = ((this.settings().modelle || {})[providerId]) || '';
     const pstate = this.providers.state[providerId];
     if (!this.providers.usable(providerId)) {
       const err = new Error(`${pstate.name}: ${pstate.label || pstate.detail || 'nicht verfügbar'}`);
@@ -123,7 +133,7 @@ class RunManager {
       const earlier = chat.messages.slice();
       const userMsg = { id: newId(), role: 'user', text: cleanText, attachments: atts, createdAt: nowIso() };
       const msg = {
-        id: newId(), role: 'assistant', provider: providerId, model: '', text: '', status: 'laeuft',
+        id: newId(), role: 'assistant', provider: providerId, model: '', modelWahl: model, text: '', status: 'laeuft',
         activity: [], files: [], updates: null, createdAt: nowIso(),
       };
       if (inv) {
@@ -188,7 +198,7 @@ class RunManager {
         }
         if (providerId === 'claude' && !sessionId) { sessionId = newId(); resume = false; }
         run.handle = this.providers.run(providerId, {
-          cwd: project.workspace, prompt: finalPrompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly: !!inv,
+          cwd: project.workspace, prompt: finalPrompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly: !!inv, model,
         });
         if (run.stopRequested) run.handle.cancel();
         return run.handle.done;
@@ -239,11 +249,11 @@ class RunManager {
         msg.errorKind = res.errorKind;
       } else msg.status = 'fertig';
 
-      if (res.sessionId && !(res.error && ['sitzung', 'anmeldung'].includes(res.errorKind))) {
+      if (res.sessionId && !(res.error && ['sitzung', 'anmeldung', 'modell'].includes(res.errorKind))) {
         chat.sessions[providerId] = { id: res.sessionId, contextHash: context.hash };
       }
       this.providers.noteResult(providerId, res, project.workspace);
-      if (msg.status === 'fehler') msg.hinweis = errorHint(res.errorKind, this.providers.state[providerId]);
+      if (msg.status === 'fehler') msg.hinweis = errorHint(res.errorKind, this.providers.state[providerId], model);
       chat.updatedAt = nowIso();
       await project.saveChat(chat);
       broadcast({ type: 'done', message: msg, chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt }, providers: this.providers.publicState() });

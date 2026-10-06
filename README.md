@@ -37,6 +37,11 @@ Optionen: `--port 4317`, `--no-open`, `--data-dir <Ordner>`.
 - **Rechts:** der Chat. `Enter` sendet, `Umschalt + Enter` macht einen Zeilenumbruch. Während einer Antwort wird der Senden-Knopf zum Stopp-Knopf.
 - **Anhänge:** Büroklammer (vom Computer oder aus dem Arbeitsraum), Drag-and-drop oder Einfügen. Vor dem Senden erscheinen sie als Chips mit Name, Typ und Entfernen-Knopf. Nicht lesbare Dateien werden markiert.
 - **Oben rechts:** „Arbeitsstand“ (Aufgabenliste), „Arbeitsraum“ (Dateien, „Arbeitsraum öffnen“, Exporte) und „Projekt“ (Angaben, gemerkte Ergebnisse).
+- **Modell:** ebenfalls über den Anbieter-Knopf im Eingabefeld oder in den Einstellungen, getrennt je Anbieter.
+  - **Claude Code:** Standard (Voreinstellung der CLI), die Modellfamilien Fable, Opus, Sonnet und Haiku (immer die neueste Version), feste Versionen wie Opus 5.5 oder Sonnet 4.6 oder eine eigene Modell-ID.
+  - **Antigravity:** Die Liste kommt aus `agy models`; eine eigene Modell-ID ist ebenfalls möglich.
+  - Die Auswahl gilt ab der nächsten Nachricht, auch in laufenden Chats, und wird als `--model` an die CLI übergeben. Unter jeder Antwort steht, welches Modell geantwortet hat.
+  - Ist ein Modell für das Konto nicht verfügbar, erscheint ein Hinweis mit „Modell wählen“.
 - **Anbieter:** unten im Eingabefeld. Punktfarbe: grün = angemeldet/verbunden, grau = wird geprüft bzw. noch nicht geprüft, gelb = Anmeldung oder Ordnerfreigabe nötig, rot = Fehler. Ist etwas einzurichten, steht der konkrete Befehl über dem Eingabefeld.
 - **Darstellung:** Hell, Dunkel oder System (Einstellungen).
 

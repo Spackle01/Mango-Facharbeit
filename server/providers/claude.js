@@ -2,6 +2,7 @@
 // Anbindung an die Claude Code CLI im Headless-Modus (claude -p, stream-json).
 const { which, runCapture, spawnProgram, killTree, onJsonLines, needsShell, IS_WIN } = require('./proc');
 const { describeTool, classifyError } = require('./activity');
+const { CLAUDE_MODELS } = require('./models');
 
 const ID = 'claude';
 const NAME = 'Claude Code';
@@ -38,9 +39,10 @@ async function detect() {
     appendFile: /append-system-prompt(-file|\[-file\])/.test(h),
     allowedTools: /--allowed-?tools|--allowedTools/i.test(h),
     disallowedTools: /--disallowed-?tools|--disallowedTools/i.test(h),
+    model: h.includes('--model'),
     auth: /\bauth\b/.test(h),
   };
-  const base = { id: ID, name: NAME, installed: true, bin, version, caps };
+  const base = { id: ID, name: NAME, installed: true, bin, version, caps, models: CLAUDE_MODELS };
   if (process.env.ANTHROPIC_API_KEY) return { ...base, status: 'bereit', detail: 'API-Schlüssel gefunden' };
   if (!caps.auth) return { ...base, status: 'bereit', detail: 'Anmeldung wird beim ersten Senden geprüft' };
   const auth = await runCapture(bin, ['auth', 'status', '--json'], { timeout: 20000 });
@@ -54,9 +56,10 @@ async function detect() {
 }
 
 // Startet einen Durchlauf. Gibt { cancel, done: Promise } zurück.
-function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly = false }) {
+function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly = false, model: modelWahl = '' }) {
   const caps = info.caps || {};
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
+  if (modelWahl && caps.model !== false) args.push('--model', modelWahl);
   if (caps.partial) args.push('--include-partial-messages');
   if (caps.permissionMode) args.push('--permission-mode', 'acceptEdits');
   if (caps.allowedTools !== false) args.push('--allowedTools', readOnly ? READ_ONLY_TOOLS : ALLOWED_TOOLS);

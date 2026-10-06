@@ -3,6 +3,8 @@ import { api } from './api.js';
 import { h, iconEl, btn, toast, dialog, copyText } from './ui.js';
 import { S, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp } from './app.js';
 import { showOnboarding, chooseFolder } from './onboarding.js';
+import { openModelDialog, selectedModel, selectedModelLabel } from './modelle.js';
+import { modelLabel } from './modelname.js';
 
 export function openSettings(focusSection) {
   const body = h('div');
@@ -33,8 +35,11 @@ export function openSettings(focusSection) {
         h('span', { class: 'radio', 'aria-hidden': 'true' }),
         h('div', { class: 'pc-main' },
           h('div', { class: 'pc-name' }, p.id === 'claude' ? 'Claude Code CLI' : 'Antigravity CLI (agy)'),
-          h('div', { class: 'pc-state' }, h('span', { class: 'status-dot', 'data-s': p.status }), h('span', {}, [p.label, p.version ? `Version ${p.version}` : '', p.status === 'verbunden' && p.model ? p.model : ''].filter(Boolean).join(' · '))),
-          p.hint ? hintEl(p.hint) : (p.status === 'fehler' && p.detail ? h('div', { class: 'hint-box' }, p.detail) : null)));
+          h('div', { class: 'pc-state' }, h('span', { class: 'status-dot', 'data-s': p.status }), h('span', {}, [p.label, p.version ? `Version ${p.version}` : '', p.status === 'verbunden' && p.model ? `zuletzt ${modelLabel(p.model, p.models)}` : ''].filter(Boolean).join(' · '))),
+          p.hint ? hintEl(p.hint) : (p.status === 'fehler' && p.detail ? h('div', { class: 'hint-box' }, p.detail) : null),
+          p.modelWahl !== false ? h('div', { class: 'pc-model' },
+            h('span', {}, 'Modell:'), h('b', { title: selectedModel(p.id) || 'Voreinstellung der CLI' }, selectedModelLabel(p.id)),
+            btn('Ändern', { cls: 'btn btn-sm', attrs: { 'aria-label': `Modell für ${p.name} ändern` }, onClick: () => openModelDialog(p.id, { onClose: render }) })) : null));
       const choose = async () => { if (!active) { await chooseProvider(p.id); render(); } };
       card.addEventListener('click', (e) => { if (!e.target.closest('button')) choose(); });
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });

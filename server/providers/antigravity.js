@@ -5,6 +5,7 @@
 // als Prompt – deshalb steht es immer am Ende.
 const { which, runCapture, spawnProgram, killTree, onJsonLines, IS_WIN } = require('./proc');
 const { describeTool, classifyError } = require('./activity');
+const { parseAgyModels } = require('./models');
 
 const ID = 'antigravity';
 const NAME = 'Antigravity';
@@ -29,9 +30,10 @@ function trustHint(cwd) {
 async function detect() {
   const bin = which('agy');
   if (!bin) return { id: ID, name: NAME, installed: false, status: 'nicht_installiert', hint: installHint() };
-  const [ver, help] = await Promise.all([
+  const [ver, help, list] = await Promise.all([
     runCapture(bin, ['--version'], { timeout: 20000 }),
     runCapture(bin, ['--help'], { timeout: 20000 }),
+    runCapture(bin, ['models'], { timeout: 30000 }), // verfügbare Modelle („agy models“)
   ]);
   if (ver.error) return { id: ID, name: NAME, installed: true, bin, status: 'fehler', detail: 'agy lässt sich nicht starten.', hint: installHint() };
   const h = `${help.stdout}\n${help.stderr}`;
@@ -39,9 +41,11 @@ async function detect() {
     printTimeout: h.includes('--print-timeout'),
     conversation: h.includes('--conversation'),
     streamJson: !h || h.includes('stream-json') || h.includes('--output-format'),
+    model: h.includes('--model'),
   };
+  const models = list && !list.error && list.code === 0 ? parseAgyModels(list.stdout) : [];
   const version = (/(\d+\.\d+(?:\.\d+)?)/.exec(`${ver.stdout} ${ver.stderr}`) || [])[1] || '';
-  return { id: ID, name: NAME, installed: true, bin, version, caps, status: 'ungeprueft', detail: 'Verbindung noch nicht geprüft' };
+  return { id: ID, name: NAME, installed: true, bin, version, caps, models, status: 'ungeprueft', detail: 'Verbindung noch nicht geprüft' };
 }
 
 // Kurzer echter Testaufruf, weil agy keinen eigenen Anmeldestatus-Befehl hat.
@@ -66,9 +70,10 @@ async function verify(info, cwd) {
   };
 }
 
-function run(info, { cwd, prompt, sessionId, onEvent }) {
+function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '' }) {
   const caps = info.caps || {};
   const args = ['--output-format', 'stream-json'];
+  if (modelWahl && caps.model) args.push('--model', modelWahl);
   if (caps.printTimeout) args.push('--print-timeout', '30m');
   if (sessionId) args.push('--conversation', sessionId);
   args.push('-p', prompt);

@@ -384,7 +384,10 @@ kbd, .cmd {
 .send-btn:active { transform: scale(0.95); }
 .send-btn[disabled] { opacity: 0.35; cursor: default; }
 .send-btn.stop { background: var(--text); color: var(--bg); }
-.provider-pill { gap: 7px; font-size: 13px; color: var(--text-2); padding: 0 10px; min-height: 32px; border-radius: 999px; }
+.provider-pill { gap: 7px; font-size: 13px; color: var(--text-2); padding: 0 10px; min-height: 32px; border-radius: 999px; max-width: 100%; min-width: 0; }
+.provider-pill .pp-name { white-space: nowrap; }
+.provider-pill .pp-model { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.provider-pill .pp-model::before { content: '·'; margin-right: 7px; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--neutral); }
 .status-dot[data-s="verbunden"], .status-dot[data-s="bereit"] { background: var(--ok); }
 .status-dot[data-s="pruefe"], .status-dot[data-s="ungeprueft"] { background: var(--neutral); }
@@ -437,6 +440,12 @@ kbd, .cmd {
 .provider-option .po-name { font-weight: 550; display: flex; align-items: center; gap: 8px; }
 .provider-option .po-state { font-size: 12.5px; color: var(--text-3); }
 .provider-option .check { color: var(--accent); }
+.popover { max-height: calc(100vh - 16px); overflow-y: auto; }
+.menu-label { padding: 8px 10px 4px; font-size: 12px; font-weight: 600; color: var(--text-3); letter-spacing: 0.02em; }
+.model-option { min-height: 34px; padding: 6px 10px 6px 12px; }
+.model-option .mo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-option .check { color: var(--accent); }
+.model-option.more { color: var(--text-2); }
 .popover .pop-foot { display: flex; gap: 4px; padding: 6px 4px 2px; border-top: 1px solid var(--border); margin-top: 6px; }
 .popover .hint-box { padding: 0 10px 8px; font-size: 13px; color: var(--text-2); margin-top: 0; }
 
@@ -575,6 +584,27 @@ button.status-pill:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px
 .provider-card .pc-name { font-weight: 600; font-size: 14.5px; }
 .provider-card .pc-state { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-2); margin-top: 2px; }
 .provider-card .hint-box { font-size: 13px; color: var(--text-2); }
+.provider-card .pc-model { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--text-2); }
+.provider-card .pc-model b { color: var(--text); font-weight: 600; }
+.provider-card .pc-model .btn { min-height: 28px; }
+.model-group { margin: 0 0 16px; }
+.model-group h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.mg-note { margin: -2px 0 8px; font-size: 12.5px; color: var(--text-2); }
+.mg-note.foot { margin: 4px 0 0; }
+.model-list { display: flex; flex-direction: column; gap: 4px; }
+.model-row {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 9px 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); transition: border-color var(--t-fast), background var(--t-fast);
+}
+.model-row:hover { border-color: var(--border-strong); }
+.model-row[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.model-row .radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--text-3); flex: none; margin-top: 3px; display: grid; place-items: center; }
+.model-row[aria-checked="true"] .radio { border-color: var(--accent); }
+.model-row[aria-checked="true"] .radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.model-row .mr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.model-row .mr-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-weight: 600; font-size: 14px; }
+.model-row .mr-name code { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--text-3); }
+.model-row .mr-info { font-size: 13px; color: var(--text-2); line-height: 1.45; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13.5px; color: var(--text-2); }
 .kv code { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; color: var(--text); }
 

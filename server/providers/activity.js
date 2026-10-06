@@ -63,6 +63,7 @@ function describeTool(name, input, cwd) {
 function classifyError(text) {
   const t = String(text || '');
   if (/not logged in|please run \/login|\/login|invalid api key|authentication|unauthori[sz]ed|\b401\b|oauth|sign in|log ?in required|credentials/i.test(t)) return 'anmeldung';
+  if (/issue with the selected model|unrecognized_model|model[_ ]not[_ ]found|no such model|(unknown|invalid|unsupported|unrecognized) model|model\b.{0,60}\b(does not exist|doesn't exist|not found|not available|is not supported|not supported)/i.test(t)) return 'modell';
   if (/trust/i.test(t) && /folder|workspace|director/i.test(t)) return 'vertrauen';
   if (/no conversation found|conversation .*not found|session .*not found|could not find (session|conversation)/i.test(t)) return 'sitzung';
   if (/already in use/i.test(t)) return 'sitzung_belegt';

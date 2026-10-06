@@ -27,6 +27,7 @@ class Providers {
     return Object.values(this.state).map((s) => ({
       id: s.id, name: s.name, status: s.status, label: STATUS_LABEL[s.status] || s.status,
       detail: s.detail || '', hint: s.hint || null, version: s.version || '', model: s.model || '',
+      models: s.models || [], modelWahl: !!(s.caps ? s.caps.model : s.id === 'claude'),
       checkedAt: s.checkedAt || null, usable: this.usable(s.id),
     }));
   }
