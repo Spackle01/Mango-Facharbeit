@@ -1,0 +1,38 @@
+# 📚 Fachliteraturliste & Quellensammlung
+
+Hier tragen wir alle wissenschaftlichen Bücher, Aufsätze, Studien und digitalen Quellen ein.
+
+---
+
+## 1. Wissenschaftliche Fachbücher & Monografien (mind. 2–3 Standardwerke)
+
+*Format: Nachname, Vorname (Jahr): Titel. Untertitel. ggf. Auflage, Ort: Verlag.*
+
+1. **[Buch 1]**: *Mustermann, Max (2022): Grundlagen der Pädagogik. 3. Aufl., München: Vahlen.*
+2. **[Buch 2]**: ...
+3. **[Buch 3]**: ...
+
+---
+
+## 2. Fachzeitschriften & wissenschaftliche Studien
+
+*Format: Nachname, Vorname (Jahr): Aufsatztitel. In: Name der Zeitschrift, Jg., Heft, S. X–Y.*
+
+1. **[Artikel 1]**: ...
+
+---
+
+## 3. Offizielle Internet- und Statistikquellen
+
+*Format: Organisation/Autor (Jahr): Titel. URL: [Link] [letzter Zugriff am TT.MM.JJJJ].*
+
+1. **[Quelle 1]**: ...
+
+---
+
+## 4. Wichtige Zitate & Exzerpte für den Fließtext
+
+| Thema / Begriff | Zitat (wörtlich oder sinngemäß) | Quelle (Kurzbeleg) | Verwendung in Kapitel |
+| :--- | :--- | :--- | :--- |
+| *Definition Begriff X* | *„...“* | *(Mustermann 2022, S. 45)* | *Kapitel 2.1* |
+| *Ergebnis Studie Y* | *Laut Studie Y stieg die Quote um 15 %...* | *(Vgl. Schmidt 2021, S. 12)* | *Kapitel 2.2* |
