@@ -498,6 +498,13 @@ async function main() {
 
 main().catch((err) => {
   console.error('Start fehlgeschlagen:', err);
+  // Als EXE per Doppelklick gestartet: Fenster offen lassen, damit die Meldung lesbar bleibt.
+  if (process.env.MANGO_EXE && process.stdin.isTTY) {
+    console.log('\nZum Schließen Enter drücken.');
+    process.stdin.resume();
+    process.stdin.once('data', () => process.exit(1));
+    return;
+  }
   process.exit(1);
 });
 

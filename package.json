@@ -1,15 +1,20 @@
 {
   "name": "mango-facharbeit",
-  "version": "1.0.0",
+  "version": "0.1.0-alpha",
   "description": "Agent-first-App, die Schülerinnen und Schüler durch ihre Facharbeit begleitet – mit Claude Code CLI oder Antigravity CLI.",
   "private": true,
   "license": "UNLICENSED",
   "main": "server/index.js",
-  "bin": { "mango-facharbeit": "server/index.js" },
-  "engines": { "node": ">=18.17" },
+  "bin": {
+    "mango-facharbeit": "server/index.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js --no-open",
-    "test": "node --test test/unit.test.js test/api.test.js"
+    "test": "node --test test/unit.test.js test/api.test.js",
+    "build:exe": "node build/build-exe.js"
   }
 }

@@ -6,6 +6,14 @@ Als KI-Anbieter lassen sich die **Claude Code CLI** und die **Antigravity CLI (`
 
 ## Starten
 
+### Windows-EXE (ohne Node.js)
+
+Unter [Releases](https://github.com/Spackle01/Mango-Facharbeit/releases) liegt `Mango-Facharbeit-<version>-win-x64.exe`. Doppelklicken, fertig. Da die Alpha nicht signiert ist, meldet Windows SmartScreen beim ersten Start einen unbekannten Herausgeber („Weitere Informationen → Trotzdem ausführen“). Das Konsolenfenster muss offen bleiben; die App öffnet sich in einem eigenen Fenster. Beim ersten Start werden die Programmdateien nach `%LOCALAPPDATA%\Mango-Facharbeit\programm` entpackt.
+
+Ein KI-Anbieter (siehe unten) wird weiterhin benötigt.
+
+### Aus dem Quellcode
+
 Voraussetzungen:
 
 - [Node.js](https://nodejs.org) ab Version 18 (LTS). Weitere Pakete sind nicht nötig, `npm install` entfällt.
@@ -84,11 +92,14 @@ Der Assistent meldet Änderungen in einem unsichtbaren Block am Ende seiner Antw
 ## Entwicklung
 
 ```
+build/       EXE-Build (Node Single Executable Application), Symbol, Release-Notizen
 server/      Node-Server ohne Abhängigkeiten (HTTP-API, Speicher, Anbieter, Kontext, Exporte)
 public/      Oberfläche (HTML, CSS, JavaScript-Module, Schrift Inter)
 ressourcen/  Regeln, Wissensbasis, Schulvorgaben, Vorlagen für den Arbeitsraum, Skills
 test/        Unit- und API-Tests; test/fixtures/bin enthält Test-Doubles beider CLIs
 ```
+
+Windows-EXE bauen: `npm run build:exe` (lädt das offizielle `node.exe` derselben Node-Version von nodejs.org, prüft dessen SHA-256, setzt Symbol und Versionsinfo mit `resedit` und fügt die App mit `postject` ein; Ergebnis in `dist/`). Mit `--target current` entsteht ein Programm für das aktuelle System zum Testen. Ein Tag `v*` startet den Workflow `.github/workflows/release.yml`: Tests, Build, Starttest der EXE auf einem Windows-Runner, danach das GitHub-Release.
 
 Tests: `npm test`. Die API-Tests laufen gegen Test-Doubles der beiden CLIs, damit sie ohne Konto und Netz reproduzierbar sind. Das Ereignisformat des Antigravity-Doubles folgt der [Headless-Dokumentation](https://antigravity.google/docs/cli/headless/).
 

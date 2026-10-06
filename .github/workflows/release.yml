@@ -1,0 +1,87 @@
+name: Release (Windows-EXE)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Tests und EXE bauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Tests
+        run: npm test
+      - name: Windows-EXE bauen
+        run: node build/build-exe.js --target win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mango-facharbeit-win-x64
+          path: |
+            dist/Mango-Facharbeit-*-win-x64.exe
+            dist/Mango-Facharbeit-*-win-x64.exe.sha256
+          if-no-files-found: error
+
+  smoke:
+    name: Starttest unter Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mango-facharbeit-win-x64
+      - name: EXE starten und Oberfläche abrufen
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Filter 'Mango-Facharbeit-*-win-x64.exe' | Select-Object -First 1
+          $env:MANGO_DATA_DIR = Join-Path $env:RUNNER_TEMP 'mango-daten'
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--no-open', '--port', '4517' -PassThru `
+            -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+              $html = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4517/).Content
+              if ($html -match 'name="mango-token" content="([a-f0-9]+)"') {
+                $state = Invoke-RestMethod -Uri http://127.0.0.1:4517/api/state -Headers @{ 'x-mango-token' = $Matches[1] }
+                Write-Host "Version: $($state.version), Plattform: $($state.platform)"
+                $state.providers | ForEach-Object { Write-Host "Anbieter $($_.name): $($_.label)" }
+                $ok = $state.platform -eq 'win32'
+                break
+              }
+            } catch { }
+          }
+          Get-Content out.txt, err.txt -ErrorAction SilentlyContinue
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw 'Die EXE hat die Oberfläche nicht ausgeliefert.' }
+
+  release:
+    name: Release veröffentlichen
+    needs: smoke
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mango-facharbeit-win-x64
+          path: dist
+      - name: GitHub-Release anlegen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="build/release-notes-${TAG#v}.md"
+          [ -f "$notes" ] || notes="build/release-notes.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --prerelease --title "Mango Facharbeit ${TAG#v}" --notes-file "$notes"
+          fi
