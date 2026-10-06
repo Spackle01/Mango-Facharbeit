@@ -16,9 +16,15 @@ export const S = {
   chat: null,
   fileIndex: new Set(),
   pending: [],
-  streaming: false,
+  streams: new Map(), // chatId -> Anzahl offener Streams
+  viewStream: {}, // chatId -> Stream, dessen Ereignisse die Ansicht aktualisieren
   els: {},
 };
+
+let streamSeq = 0;
+export function isStreaming(chatId = S.chatId) {
+  return (S.streams.get(chatId) || 0) > 0;
+}
 
 const STATUS_SYMBOL = { offen: '×', in_arbeit: '?', erledigt: '✓' };
 const STATUS_LABEL = { offen: 'Offen', in_arbeit: 'In Arbeit', erledigt: 'Erledigt' };
@@ -197,7 +203,7 @@ export function renderChatList() {
   const chats = S.state.chats || [];
   if (!chats.length) list.append(h('div', { class: 'empty-note' }, 'Noch keine Chats'));
   for (const c of chats) {
-    const running = S.state.running.includes(c.id) || (S.streaming && c.id === S.chatId);
+    const running = S.state.running.includes(c.id) || isStreaming(c.id);
     const item = h('div', { class: `chat-item${c.id === S.chatId ? ' active' : ''}`, 'data-id': c.id });
     const link = h('button', { type: 'button', class: 'chat-link', 'aria-current': c.id === S.chatId ? 'page' : null, title: c.title }, c.title || 'Neuer Chat');
     link.addEventListener('click', () => { openChat(c.id); toggleSidebarMobileClose(); });
@@ -330,7 +336,7 @@ export async function openChat(id) {
     scrollToEnd(false);
     updateComposer();
     if (chat.running) attachStream(id);
-    if (!S.streaming) S.els.composerWrap.querySelector('textarea').focus({ preventScroll: true });
+    if (!isStreaming(id)) S.els.composerWrap.querySelector('textarea').focus({ preventScroll: true });
   } catch (err) {
     toast(err.message, { error: true });
   }
@@ -569,9 +575,13 @@ function onThreadClick(e) {
 
 // ---------- Senden und Streamen ----------
 
-function handleEvent(chatId, ev) {
-  if (chatId !== S.chatId || !S.chat) {
-    if (ev.type === 'done') { refreshAfterRun(ev); }
+function handleEvent(chatId, ev, sid) {
+  // Nur der aktuelle Stream eines sichtbaren Chats aktualisiert die Ansicht.
+  if (chatId !== S.chatId || !S.chat || S.chat.id !== chatId || S.viewStream[chatId] !== sid) {
+    if (ev.type === 'done' && S.viewStream[chatId] === sid) {
+      if (ev.chat) upsertChatMeta(ev.chat);
+      refreshAfterRun(ev);
+    }
     return;
   }
   const msgs = S.chat.messages;
@@ -624,12 +634,13 @@ async function refreshAfterRun(ev) {
 }
 
 async function runStream(chatId, method, url, body) {
-  S.streaming = true;
-  if (!S.state.running.includes(chatId)) S.state.running.push(chatId);
+  const sid = ++streamSeq;
+  S.viewStream[chatId] = sid;
+  S.streams.set(chatId, (S.streams.get(chatId) || 0) + 1);
   updateComposer();
   renderChatList();
   try {
-    await api.stream(method, url, body, (ev) => handleEvent(chatId, ev));
+    await api.stream(method, url, body, (ev) => handleEvent(chatId, ev, sid));
   } catch (err) {
     if (chatId === S.chatId && S.chat) {
       const ti = S.chat.messages.findIndex((m) => m.temp);
@@ -644,24 +655,33 @@ async function runStream(chatId, method, url, body) {
     }
     return false;
   } finally {
-    S.state.running = S.state.running.filter((x) => x !== chatId);
-    S.streaming = false;
+    const n = (S.streams.get(chatId) || 1) - 1;
+    if (n > 0) S.streams.set(chatId, n); else { S.streams.delete(chatId); S.state.running = S.state.running.filter((x) => x !== chatId); }
     updateComposer();
     renderChatList();
   }
   return true;
 }
 
+// Erneut an eine laufende Antwort anhängen (z. B. nach Chatwechsel oder Neuladen).
+// Der neue Stream liefert zuerst den aktuellen Stand und übernimmt die Ansicht.
 function attachStream(chatId) {
-  if (S.streaming) return;
-  runStream(chatId, 'GET', `/api/chats/${chatId}/stream`);
+  runStream(chatId, 'GET', `/api/chats/${chatId}/stream`).then(async (ok) => {
+    // Antwort war schon fertig: gespeicherten Stand laden.
+    if (ok || S.chatId !== chatId) return;
+    try {
+      const chat = await api.get(`/api/chats/${chatId}`);
+      if (S.chatId === chatId && !chat.running) { S.chat = chat; renderThread(); scrollToEnd(false); }
+    } catch { /* Chat wurde gelöscht */ }
+  });
 }
 
 async function send() {
+  const chatId = S.chatId;
   const ta = S.els.composerWrap.querySelector('textarea');
   const text = ta.value.trim();
   const ready = S.pending.filter((p) => p.status === 'ready');
-  if (S.streaming || (!text && !ready.length)) return;
+  if (isStreaming() || (!text && !ready.length)) return;
   if (S.pending.some((p) => p.status === 'uploading')) { toast('Bitte warte, bis alle Dateien hochgeladen sind.'); return; }
   const prov = activeProvider();
   if (prov && !prov.usable) {
@@ -689,8 +709,8 @@ async function send() {
   autosize(ta);
   S.pending = [];
   renderAttachments();
-  const ok = await runStream(S.chatId, 'POST', `/api/chats/${S.chatId}/messages`, { text, attachments });
-  if (!ok && !ta.value) {
+  const ok = await runStream(chatId, 'POST', `/api/chats/${chatId}/messages`, { text, attachments });
+  if (!ok && !ta.value && S.chatId === chatId) {
     // Entwurf wiederherstellen, damit nichts verloren geht.
     ta.value = draft.text;
     S.pending = draft.pending;
@@ -701,7 +721,7 @@ async function send() {
 }
 
 async function retryLast() {
-  if (!S.chat || S.streaming) return;
+  if (!S.chat || isStreaming()) return;
   const lastUser = [...S.chat.messages].reverse().find((m) => m.role === 'user');
   if (!lastUser) return;
   const ta = S.els.composerWrap.querySelector('textarea');
@@ -752,7 +772,7 @@ function buildComposer() {
   });
   fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
   providerBtn.addEventListener('click', () => providerMenu(providerBtn));
-  sendBtn.addEventListener('click', () => (S.streaming ? stop() : send()));
+  sendBtn.addEventListener('click', () => (isStreaming() ? stop() : send()));
   S.els.textarea = ta;
   updateComposer();
 }
@@ -771,7 +791,7 @@ export function updateComposer() {
   pill.replaceChildren(h('span', { class: 'status-dot', 'data-s': prov ? prov.status : 'pruefe' }), h('span', {}, prov ? prov.name : 'Anbieter'), iconEl('chevronDown', 14));
   pill.setAttribute('aria-label', prov ? `KI-Anbieter: ${prov.name}, ${prov.label}. Ändern` : 'KI-Anbieter wählen');
   pill.title = prov ? `${prov.name}: ${prov.label}` : '';
-  if (S.streaming) {
+  if (isStreaming()) {
     sendBtn.className = 'send-btn stop';
     sendBtn.innerHTML = '';
     sendBtn.append(iconEl('stop', 16));
