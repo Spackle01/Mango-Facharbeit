@@ -3,8 +3,10 @@ import { api } from './api.js';
 import { h, iconEl, btn, toast, menu, popover, dialog, fmtRelative, fmtDate, parseLocal, daysUntil, parseDateDE, formatDateDE, shortPath } from './ui.js';
 import { fileIcon } from './icons.js';
 import {
-  S, project, setProject, statusPill, statusMenu, setTaskStatus, openFile, refreshFiles, renderTopbar,
+  S, project, setProject, statusPill, statusMenu, setTaskStatus, openFile, refreshFiles, renderTopbar, startImportChat,
 } from './app.js';
+import { openImportDialog } from './importer.js';
+import { renderMarkdown } from './markdown.js';
 
 let current = null; // { id, el, scrim, prevFocus }
 
@@ -150,7 +152,7 @@ function groupLabel(dir) {
     '00_vorgaben': 'Vorgaben der Schule', '01_themenfindung_und_mindmap': 'Themenfindung und Mindmap', '02_expose_und_zeitplan': 'Exposé und Zeitplan',
     '03_literatur_und_quellen': 'Literatur und Quellen', '04_forschung_und_eigenanteil': 'Forschung und Eigenanteil', '05_facharbeit_entwurf': 'Facharbeit (Entwurf)',
     '06_lerntagebuch_und_konsultationen': 'Lerntagebuch und Konsultationen', '07_ki_prompts_anhang': 'KI-Nutzung und Anhang', '08_praesentation_verteidigung': 'Präsentation und Verteidigung',
-    anhaenge: 'Anhänge aus dem Chat', exporte: 'Exporte', '': 'Hauptordner',
+    anhaenge: 'Anhänge aus dem Chat', uebernommen: 'Übernommene Arbeit', exporte: 'Exporte', '': 'Hauptordner',
   };
   return names[dir] || dir;
 }
@@ -225,6 +227,7 @@ async function renderFiles(body, headExtra) {
     { label: 'Sicherung als ZIP herunterladen', icon: 'archive', onClick: () => { window.location.href = `/api/export/backup?t=${encodeURIComponent(document.querySelector('meta[name="mango-token"]').content)}`; } },
   ]));
   tools.append(moreBtn);
+  tools.append(btn('Arbeit übernehmen', { iconName: 'archive', cls: 'btn btn-soft', onClick: () => { closePanel(); openImportDialog([], (inv) => startImportChat(inv)); } }));
   body.append(h('div', { class: 'ws-path', title: p.workspace }, iconEl('folder', 15), h('span', {}, shortPath(p.workspace))), tools);
 
   const search = h('input', { class: 'input', type: 'search', placeholder: 'Dateien durchsuchen', 'aria-label': 'Dateien durchsuchen', value: fileFilter });
@@ -386,6 +389,16 @@ function renderProject(body) {
   });
   body.append(form);
 
+  if (p.uebernahme && p.uebernahme.zusammenfassung) {
+    const u = p.uebernahme;
+    const box = h('div', { class: 'memory takeover' },
+      h('h3', {}, 'Übernommener Stand'),
+      h('div', { class: 'field-note' }, (u.importe || []).length > 1
+        ? `Zuletzt übernommen am ${fmtDate(u.am)} · ${u.anzahl} Dateien aus ${u.importe.length} Übernahmen`
+        : `Übernommen am ${fmtDate(u.am)} · ${u.anzahl} Dateien in ${u.ordner}/`),
+      h('div', { class: 'content', html: renderMarkdown(u.zusammenfassung, { isFile: (x) => S.fileIndex.has(x) }) }));
+    body.append(box);
+  }
   const mem = h('div', { class: 'memory' }, h('h3', {}, 'Gemerkte Ergebnisse'));
   if (!p.merken.length) mem.append(h('div', { class: 'field-note' }, 'Noch nichts gemerkt.'));
   else {

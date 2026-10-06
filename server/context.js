@@ -101,6 +101,15 @@ function renderOverview(project, now = new Date()) {
     }
   }
   lines.push('');
+  const u = project.data.uebernahme;
+  if (u && u.zusammenfassung) {
+    lines.push('## Übernommener Stand');
+    lines.push('');
+    lines.push(`*Mitgebrachte Arbeit, zuletzt übernommen am ${formatDateDE(u.am)} (${u.anzahl} Dateien in ${(u.importe || [{ ordner: u.ordner }]).map((i) => `\`${i.ordner}/\``).join(', ')}).*`);
+    lines.push('');
+    lines.push(u.zusammenfassung);
+    lines.push('');
+  }
   lines.push('## Gemerkte Ergebnisse und Entscheidungen');
   lines.push('');
   if (!project.data.merken.length) lines.push('- (noch keine)');
@@ -114,7 +123,7 @@ function renderOverview(project, now = new Date()) {
 async function recentFiles(project, files, max = 25) {
   const created = Date.parse(project.data.createdAt || 0) || 0;
   return files
-    .filter((f) => !f.path.startsWith('00_vorgaben/') && f.path !== 'FACHARBEIT.md' && f.mtime > created + 60000)
+    .filter((f) => !f.path.startsWith('00_vorgaben/') && !f.path.startsWith('uebernommen/') && f.path !== 'FACHARBEIT.md' && f.mtime > created + 60000)
     .sort((x, y) => y.mtime - x.mtime)
     .slice(0, max);
 }
@@ -151,6 +160,14 @@ async function buildContext(project, files, now = new Date()) {
   if (project.data.merken.length) {
     L.push('Gemerkte Ergebnisse und Entscheidungen:');
     for (const m of project.data.merken.slice(-25)) L.push(`- ${m.text}`);
+    L.push('');
+  }
+  const u = project.data.uebernahme;
+  if (u && u.zusammenfassung) {
+    const orte = (u.importe || [{ ordner: u.ordner }]).map((i) => `${i.ordner}/`).join(', ');
+    L.push(`Übernommener Stand (mitgebrachte Arbeit, zuletzt übernommen am ${formatDateDE(u.am)}, Originale in ${orte}, Details in .facharbeit/uebernahme.md):`);
+    L.push(truncate(u.zusammenfassung, 3000));
+    if (u.versionen && u.versionen.length) L.push(`Offene Fragen zu Entwurfsständen: ${u.versionen.map((v) => `${v.frage || 'Welche Fassung ist aktuell?'} (${v.dateien.join(', ')})`).join('; ')}`);
     L.push('');
   }
   const recent = await recentFiles(project, files);
@@ -235,8 +252,8 @@ function nachweisDateiOk(nachweis, files) {
   return files.some((f) => norm.includes(f.path) || norm.includes(f.name));
 }
 
-async function applyUpdate(project, update, files = []) {
-  const result = { aufgaben: [], vorschlaege: [], projekt: [], merken: [], hinweise: [] };
+async function applyUpdate(project, update, files = [], { nurLeereFelder = false } = {}) {
+  const result = { aufgaben: [], vorschlaege: [], projekt: [], merken: [], hinweise: [], konflikte: [] };
   if (!update) return result;
 
   for (const item of update.aufgaben.slice(0, 40)) {
@@ -275,6 +292,11 @@ async function applyUpdate(project, update, files = []) {
     const val = String(v).trim();
     if (!val || val === project.data.angaben[k]) continue;
     if (k === 'abgabedatum' && !/^\d{4}-\d{2}-\d{2}$/.test(val)) continue;
+    // Bei der Übernahme nur leere Felder füllen; Abweichungen bestätigt die Person selbst.
+    if (nurLeereFelder && project.data.angaben[k]) {
+      result.konflikte.push({ feld: k, label: FELD_LABEL[k], bisher: project.data.angaben[k], gefunden: val.slice(0, 600) });
+      continue;
+    }
     patch[k] = val;
   }
   if (Object.keys(patch).length) {

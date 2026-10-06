@@ -162,3 +162,50 @@ test('Markdown-Renderer maskiert HTML und erkennt Dateien', async () => {
   assert.match(html, /class="file-ref" data-path="a\/b\.md"/);
   assert.strictEqual(stripUpdateBlock('Text\n```arbeitsstand\n{"auf'), 'Text');
 });
+
+test('Übernahme: Entwurfsstände, Systemdateien und Pfade', () => {
+  const importer = require('../server/importer');
+  const key = importer.familyKey;
+  assert.strictEqual(key('Facharbeit_v2.docx'), 'facharbeit');
+  assert.strictEqual(key('Facharbeit final (1) - Kopie.docx'), 'facharbeit');
+  assert.strictEqual(key('Facharbeit 2026-10-05.pdf'), 'facharbeit');
+  assert.strictEqual(key('Exposé Stand 3.md'), 'exposé');
+  assert.strictEqual(key('Lerntagebuch.docx'), 'lerntagebuch');
+  assert.notStrictEqual(key('Kapitel 2.docx'), key('Fragebogen.docx'));
+  for (const junk of ['a/.DS_Store', 'Thumbs.db', '~$Facharbeit.docx', '__MACOSX/a/b.md', 'x/.git/config', 'datei.tmp', 'a/'])
+    assert.ok(importer.isJunk(junk), junk);
+  assert.ok(!importer.isJunk('Ordner/Facharbeit.docx'));
+  assert.strictEqual(importer.cleanRelPath('..\\..\\Ordner/./Unter:ordner/Datei?.md'), 'Ordner/Unter_ordner/Datei_.md');
+  assert.strictEqual(importer.cleanRelPath('/etc/passwd'), 'etc/passwd');
+  assert.strictEqual(importer.guessCategory('Mindmap_Thema.png', '').id, 'mindmap');
+  assert.deepStrictEqual(importer.guessCategory('scan1.pdf', 'Fragebogen zur Mediennutzung'), { id: 'eigenanteil', label: 'Eigenanteil (Erhebung, Daten)', sicher: false });
+});
+
+test('Übernahme: Ergebnis-Block wird gelesen und entfernt', async () => {
+  const importer = require('../server/importer');
+  const text = 'Einschätzung.\n\n```arbeitsstand\n{"aufgaben":[]}\n```\n\n```uebernahme\n{"zusammenfassung":"Thema X","vorhanden":["A","B",],"fehlt":"Zeitplan","naechsterSchritt":"Zeitplan","versionen":[{"dateien":["a.md","b.md"],"frage":"Welche?"},{"dateien":[]}]}\n```';
+  const r = importer.parseResult(ctx.parseUpdate(text).text);
+  assert.strictEqual(r.text, 'Einschätzung.');
+  assert.strictEqual(r.invalid, false);
+  assert.deepStrictEqual(r.result.vorhanden, ['A', 'B']);
+  assert.deepStrictEqual(r.result.fehlt, ['Zeitplan'], 'einzelner Text wird zur Liste');
+  assert.strictEqual(r.result.versionen.length, 1, 'leere Gruppen fallen weg');
+  const bad = importer.parseResult('Text\n```uebernahme\n{kaputt\n```');
+  assert.strictEqual(bad.result, null);
+  assert.strictEqual(bad.invalid, true);
+  assert.strictEqual(bad.text, 'Text');
+  const { stripUpdateBlock } = await import('../public/js/markdown.js');
+  assert.strictEqual(stripUpdateBlock('Text\n```arbeitsstand\n{}\n```\n```uebernahme\n{"zus'), 'Text');
+});
+
+test('Übernahme: vorhandene Projektangaben werden nicht überschrieben', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ws-'));
+  const p = await Project.create(dir, { name: 'Alex', titel: 'Mein Thema' });
+  const r = await ctx.applyUpdate(p, { aufgaben: [], projekt: { titel: 'Anderes Thema', fach: 'Kunst', name: 'Alex' }, merken: [] }, [], { nurLeereFelder: true });
+  assert.strictEqual(p.data.angaben.titel, 'Mein Thema');
+  assert.strictEqual(p.data.angaben.fach, 'Kunst');
+  assert.deepStrictEqual(r.konflikte, [{ feld: 'titel', label: 'Titel', bisher: 'Mein Thema', gefunden: 'Anderes Thema' }]);
+  const normal = await ctx.applyUpdate(p, { aufgaben: [], projekt: { titel: 'Anderes Thema' }, merken: [] }, []);
+  assert.strictEqual(normal.konflikte.length, 0);
+  assert.strictEqual(p.data.angaben.titel, 'Anderes Thema');
+});

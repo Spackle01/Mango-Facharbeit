@@ -49,6 +49,7 @@ Du arbeitest im Arbeitsraum-Ordner der Facharbeit:
 - `00_vorgaben/` Schulvorgaben (nur lesen)
 - `01_themenfindung_und_mindmap/` bis `08_praesentation_verteidigung/` Arbeitsordner mit Vorlagen
 - `anhaenge/` Dateien, die im Chat angehängt wurden (Originale, nur lesen)
+- `uebernommen/` mitgebrachte Materialien einer bereits begonnenen Arbeit (Originale, nur lesen; Zusammenfassung des übernommenen Stands steht im Projektkontext)
 - `.facharbeit/extrakte/` Textauszüge aus Word- und PDF-Dateien, die die App erstellt hat
 
 Regeln:
@@ -90,6 +91,7 @@ Im Arbeitsraum liegen Skills unter `.agents/skills/` bzw. `.claude/skills/`. Lie
 - `sprachpruefung`: Text auf Füllwörter, vage Belege und typische KI-Muster prüfen
 - `quellenrecherche`: Literatur suchen, prüfen und dokumentieren
 - `abgabe-pruefen`: Facharbeit oder Teile davon gegen die Vorgaben prüfen
+- `bestehende-arbeit-uebernehmen`: mitgebrachte, außerhalb der App begonnene Arbeit auswerten (nur lesen)
 
 ## Prüfen
 

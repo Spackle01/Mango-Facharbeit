@@ -9,6 +9,7 @@ import { renderMarkdown, stripUpdateBlock } from './markdown.js';
 import { openPanel, closePanel, refreshPanel, pickWorkspaceFiles, currentPanel } from './panels.js';
 import { showOnboarding, showGreeting, showWorkspaceMissing } from './onboarding.js';
 import { openSettings } from './settings.js';
+import { openImportDialog, entriesFromDrop } from './importer.js';
 
 export const S = {
   state: null,
@@ -453,6 +454,17 @@ function kindName(kind) {
 
 function renderUserMessage(m) {
   const el = h('div', { class: 'msg user', 'data-id': m.id });
+  if (m.import) {
+    const i = m.import;
+    const parts = [`${i.anzahl} ${i.anzahl === 1 ? 'Datei' : 'Dateien'} übernommen`];
+    if (i.ordnerAnzahl) parts.push(`${i.ordnerAnzahl} Ordner`);
+    if (i.unlesbar) parts.push(`${i.unlesbar} nicht lesbar`);
+    if (i.nichtUebernommen) parts.push(`${i.nichtUebernommen} nicht übernommen`);
+    const chip = h('div', { class: 'chip file-chip import-chip' + (i.unlesbar || i.nichtUebernommen ? ' unreadable' : '') },
+      h('button', { type: 'button', class: 'chip-main', title: `${i.ordner} öffnen` }, iconEl('folder', 16), h('span', { class: 'name' }, parts.join(' · '))));
+    chip.querySelector('button').addEventListener('click', () => openPanel('dateien'));
+    el.append(h('div', { class: 'msg-atts' }, chip));
+  }
   if (m.attachments && m.attachments.length) el.append(attachmentChips(m.attachments));
   if (m.text) el.append(h('div', { class: 'bubble' }, m.text));
   el.append(h('div', { class: 'msg-meta' },
@@ -477,7 +489,7 @@ function stepsEl(m) {
 function updatesEl(u) {
   const box = h('div', { class: 'updates' });
   for (const a of u.aufgaben || []) {
-    box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Arbeitsstand'), statusPill(a.nach), h('span', {}, a.titel), a.hinweis ? h('span', { class: 'label' }, `(${a.hinweis})`) : null));
+    box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Arbeitsstand'), statusPill(a.nach), h('span', { class: 'grow' }, a.titel), a.hinweis ? h('span', { class: 'label' }, `(${a.hinweis})`) : null));
   }
   for (const v of u.vorschlaege || []) {
     const current = project() && project().aufgaben.find((t) => t.id === v.id);
@@ -488,10 +500,119 @@ function updatesEl(u) {
     box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Vorschlag'), h('span', {}, `${v.titel}:`), b));
   }
   if ((u.projekt || []).length) {
-    box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Projektangaben ergänzt'), h('span', {}, u.projekt.map((p) => p.label).join(', '))));
+    box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Projektangaben ergänzt'), h('span', { class: 'grow' }, u.projekt.map((p) => p.label).join(', '))));
   }
-  for (const m of u.merken || []) box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Gemerkt'), h('span', {}, m)));
+  for (const k of u.konflikte || []) {
+    const current = project() && project().angaben[k.feld];
+    const done = current === k.gefunden;
+    const b = btn(done ? 'Übernommen' : 'Übernehmen', { cls: 'btn btn-sm btn-soft', iconName: done ? 'check' : null, size: 15 });
+    if (done) b.disabled = true;
+    b.addEventListener('click', async () => {
+      try {
+        setProject(await api.put('/api/project', { angaben: { [k.feld]: k.gefunden } }));
+        b.disabled = true;
+        b.replaceChildren(iconEl('check', 15), h('span', {}, 'Übernommen'));
+        refreshPanel();
+      } catch (err) { toast(err.message, { error: true }); }
+    });
+    box.append(h('div', { class: 'update conflict' },
+      h('span', { class: 'label' }, `${k.label}:`),
+      h('span', { class: 'grow' }, `In deinen Angaben „${k.bisher}“, in den Dateien „${k.gefunden}“.`), b));
+  }
+  for (const m of u.merken || []) box.append(h('div', { class: 'update' }, h('span', { class: 'label' }, 'Gemerkt'), h('span', { class: 'grow' }, m)));
   return box;
+}
+
+function listSection(title, items, cls = '') {
+  if (!items || !items.length) return null;
+  return h('section', { class: `ic-sec ${cls}` }, h('h4', {}, title), h('ul', {}, items.map((x) => h('li', { html: renderMarkdown(x, { isFile: (p) => S.fileIndex.has(p) }).replace(/^<p>|<\/p>$/g, '') }))));
+}
+
+function shortName(p) {
+  return p.split('/').pop();
+}
+
+function sameFiles(a, b) {
+  return a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
+}
+
+// Frage nach der aktuellen Fassung: Auswahl wird gespeichert und dem Assistenten mitgeteilt.
+function versionChoiceEl(v, isLast) {
+  const row = h('div', { class: 'ic-version' }, h('div', {}, v.frage || 'Mehrere Fassungen gefunden:'));
+  const u = project() && project().uebernahme;
+  const decided = u && (u.entscheidungen || []).find((e) => sameFiles(e.dateien, v.dateien));
+  if (decided) {
+    row.append(h('div', { class: 'ic-decided' }, iconEl('check', 15), h('span', {}, 'Aktuell: '), h('b', { title: decided.gewaehlt }, shortName(decided.gewaehlt))));
+    return row;
+  }
+  const btns = h('div', { class: 'ic-choices' });
+  for (const f of v.dateien) {
+    btns.append(btn(shortName(f), { cls: 'btn btn-sm btn-soft', title: f, onClick: async () => {
+      if (isStreaming()) { toast('Bitte warte, bis die aktuelle Antwort fertig ist.'); return; }
+      try {
+        setProject(await api.post('/api/uebernahme/fassung', { dateien: v.dateien, gewaehlt: f }));
+      } catch (err) { toast(err.message, { error: true }); return; }
+      row.replaceWith(versionChoiceEl(v, isLast));
+      refreshPanel();
+      if (isLast) sendText(`Die aktuelle Fassung ist ${shortName(f)}.`);
+    } }));
+  }
+  row.append(btns);
+  return row;
+}
+
+function importResultEl(r, isLast) {
+  const head = [`${r.anzahl} ${r.anzahl === 1 ? 'Datei' : 'Dateien'} übernommen`];
+  if (r.unlesbar && r.unlesbar.length) head.push(`${r.unlesbar.length} nicht lesbar`);
+  if (r.nichtUebernommen && r.nichtUebernommen.length) head.push(`${r.nichtUebernommen.length} nicht übernommen`);
+  if (r.duplikate && r.duplikate.length) head.push(`${r.duplikate.length} doppelt`);
+  const card = h('div', { class: 'import-card' },
+    h('div', { class: 'ic-head' }, iconEl('folderOpen', 17), h('span', {}, head.join(' · '))));
+  if (!r.analysiert) {
+    card.append(h('p', { class: 'ic-note' }, 'Die Dateien liegen sicher im Arbeitsraum. Die Analyse durch den Assistenten wurde nicht abgeschlossen.'));
+    if (isLast) card.append(btn('Analyse erneut starten', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: () => startImportChat({ id: r.importId }, { sameChat: true }) }));
+  }
+  const grid = h('div', { class: 'ic-grid' });
+  const vorhanden = listSection('Das ist bereits vorhanden', r.vorhanden, 'ok');
+  const fehlt = listSection('Das fehlt noch', r.fehlt, 'todo');
+  if (vorhanden) grid.append(vorhanden);
+  if (fehlt) grid.append(fehlt);
+  if (grid.childNodes.length) card.append(grid);
+  if (r.naechsterSchritt) {
+    const go = btn('Damit anfangen', { cls: 'btn btn-sm btn-primary', onClick: () => {
+      const ta = S.els.composerWrap.querySelector('textarea');
+      ta.value = `Lass uns mit dem nächsten Schritt anfangen: ${r.naechsterSchritt}`;
+      autosize(ta);
+      updateComposer();
+      ta.focus();
+    } });
+    card.append(h('div', { class: 'ic-next' }, h('div', {}, h('b', {}, 'Nächster Schritt: '), r.naechsterSchritt), go));
+  }
+  const unsicher = listSection('Unsicher – bitte prüfen', r.unsicher, 'warn');
+  if (unsicher) card.append(unsicher);
+  if (r.versionen && r.versionen.length) {
+    const sec = h('section', { class: 'ic-sec warn' }, h('h4', {}, 'Welche Fassung ist aktuell?'));
+    for (const v of r.versionen) sec.append(versionChoiceEl(v, isLast));
+    card.append(sec);
+  }
+  if (r.unlesbar && r.unlesbar.length) {
+    card.append(h('details', { class: 'ic-details' }, h('summary', {}, iconEl('chevronRight', 14), `Nicht lesbar (${r.unlesbar.length})`),
+      h('div', { class: 'chips' }, r.unlesbar.map((u) => fileChip({ path: u.pfad, name: shortName(u.pfad), lesbar: 'nein', hinweis: u.hinweis }, { actions: true })))));
+  }
+  if (r.nichtUebernommen && r.nichtUebernommen.length) {
+    card.append(h('details', { class: 'ic-details', open: true }, h('summary', {}, iconEl('chevronRight', 14), `Nicht übernommen (${r.nichtUebernommen.length})`),
+      h('ul', {}, r.nichtUebernommen.map((f) => h('li', {}, h('b', {}, f.pfad), ` – ${f.grund}`)))));
+  }
+  if (r.duplikate && r.duplikate.length) {
+    card.append(h('details', { class: 'ic-details' }, h('summary', {}, iconEl('chevronRight', 14), `Doppelte Dateien (${r.duplikate.length} ${r.duplikate.length === 1 ? 'Gruppe' : 'Gruppen'})`),
+      h('ul', {}, r.duplikate.map((g) => h('li', {}, g.map(shortName).join(' = '))))));
+  }
+  if (r.analysiert) {
+    const link = h('button', { type: 'button', class: 'link-btn' }, 'Im Projekt ansehen');
+    link.addEventListener('click', () => openPanel('projekt'));
+    card.append(h('div', { class: 'ic-foot' }, iconEl('check', 14), h('span', {}, 'Zusammenfassung gespeichert – spätere Chats bauen darauf auf. '), link));
+  }
+  return card;
 }
 
 function hintBox(hint, { withCheck = false } = {}) {
@@ -513,9 +634,14 @@ function renderAssistantMessage(m, isLast) {
   const content = h('div', { class: 'content' });
   if (text) content.innerHTML = renderMarkdown(text, { isFile: (p) => S.fileIndex.has(p) || /^[\w.-]+\/.+\.\w{1,5}$/.test(p) });
   el.append(content);
-  if (running && (!text || m.phase === 'werkzeug')) el.append(liveStepEl(m));
+  if (running && m.mode === 'import') {
+    el.append(h('div', { class: 'import-progress indeterminate', role: 'status' },
+      h('div', { class: 'ip-label' }, 'Deine bisherige Arbeit wird analysiert'), h('div', { class: 'ip-bar' }, h('i'))));
+    el.append(liveStepEl(m));
+  } else if (running && (!text || m.phase === 'werkzeug')) el.append(liveStepEl(m));
+  if (m.importErgebnis) el.append(importResultEl(m.importErgebnis, isLast && m.status !== 'fehler'));
   if (m.files && m.files.length) {
-    const label = { neu: 'neu', geaendert: 'geändert', geloescht: 'gelöscht' };
+    const label = { neu: 'neu', geaendert: 'geändert', geloescht: 'gelöscht', zurueckgesetzt: 'zurückgesetzt' };
     el.append(h('div', { class: 'chips' }, m.files.map((f) => fileChip({ ...f, kindLabel: kindName(f.kind) }, { badge: label[f.aktion] }))));
   }
   if (m.updates) el.append(updatesEl(m.updates));
@@ -720,10 +846,39 @@ async function send() {
   }
 }
 
+// Startet die Analyse einer Übernahme in einem (neuen) Chat.
+export async function startImportChat(inv, { sameChat = false } = {}) {
+  try {
+    if (!sameChat) {
+      const c = await api.post('/api/chats');
+      if (!S.state.chats.some((x) => x.id === c.id)) S.state.chats.unshift(c);
+      await openChat(c.id);
+    }
+    await refreshFiles();
+    const chatId = S.chatId;
+    S.chat.messages.push({ id: `tmp-a-${Date.now()}`, temp: true, role: 'assistant', mode: 'import', provider: S.state.settings.provider, text: '', status: 'laeuft', activity: [], createdAt: new Date().toISOString() });
+    renderThread();
+    await runStream(chatId, 'POST', `/api/chats/${chatId}/messages`, { importId: inv.id });
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+}
+
+// Kurze Antwort direkt senden (z. B. Auswahl der aktuellen Fassung).
+async function sendText(text) {
+  if (isStreaming()) return;
+  const ta = S.els.composerWrap.querySelector('textarea');
+  ta.value = text;
+  autosize(ta);
+  await send();
+}
+
 async function retryLast() {
   if (!S.chat || isStreaming()) return;
   const lastUser = [...S.chat.messages].reverse().find((m) => m.role === 'user');
   if (!lastUser) return;
+  // Übernahme: Analyse mit demselben Inventar neu starten (die Dateien liegen schon im Arbeitsraum).
+  if (lastUser.import) { await startImportChat({ id: lastUser.import.id }, { sameChat: true }); return; }
   const ta = S.els.composerWrap.querySelector('textarea');
   ta.value = lastUser.text || '';
   S.pending = (lastUser.attachments || []).map((a) => ({ id: Math.random().toString(36).slice(2), name: a.name, path: a.path, kind: a.kind, kindLabel: kindName(a.kind), lesbar: a.lesbar, status: 'ready' }));
@@ -768,6 +923,8 @@ function buildComposer() {
     menu(attachBtn, [
       { label: 'Datei vom Computer', icon: 'upload', onClick: () => fileInput.click() },
       { label: 'Aus dem Arbeitsraum', icon: 'folder', onClick: async () => { const sel = await pickWorkspaceFiles(); if (sel) addWorkspaceFiles(sel); } },
+      'sep',
+      { label: 'Bestehende Arbeit übernehmen …', icon: 'archive', onClick: () => openImportDialog([], (inv) => startImportChat(inv)) },
     ], { placement: 'top-start' });
   });
   fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
@@ -963,11 +1120,18 @@ function setupDragDrop() {
   main.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
   const reset = () => { depth = 0; if (overlay) { overlay.remove(); overlay = null; } S.els.composerWrap.querySelector('.composer').classList.remove('dragging'); };
   main.addEventListener('dragleave', () => { depth -= 1; if (depth <= 0) reset(); });
-  main.addEventListener('drop', (e) => {
+  main.addEventListener('drop', async (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     reset();
-    addFiles([...e.dataTransfer.files]);
+    const d = entriesFromDrop(e.dataTransfer); // synchron lesen, bevor das Ereignis endet
+    const files = [...e.dataTransfer.files];
+    if (d.hasFolder) {
+      // Ordner bringen meist eine ganze Arbeit mit: als Übernahme anbieten.
+      openImportDialog(await d.collect(), (inv) => startImportChat(inv));
+      return;
+    }
+    addFiles(files);
     S.els.textarea.focus();
   });
 }

@@ -237,6 +237,26 @@ async function diffAndBackup(ws, before) {
   return changes;
 }
 
+// Stellt geänderte oder gelöschte Dateien aus der gesicherten Fassung wieder her
+// (für Läufe, die nur lesen dürfen). Neue Dateien bleiben bestehen und werden gemeldet.
+async function restoreChanges(ws, changes) {
+  const out = [];
+  for (const c of changes) {
+    if ((c.aktion === 'geaendert' || c.aktion === 'geloescht') && c.version) {
+      const src = resolveInside(ws, c.version);
+      const dest = resolveInside(ws, c.path);
+      if (src && dest) {
+        await ensureDir(path.dirname(dest));
+        await fsp.copyFile(src, dest);
+        out.push({ ...c, aktion: 'zurueckgesetzt' });
+        continue;
+      }
+    }
+    out.push(c);
+  }
+  return out;
+}
+
 async function listVersions(ws, rel) {
   const dir = await versionDir(ws, rel);
   const entries = await fsp.readdir(dir).catch(() => []);
@@ -346,6 +366,6 @@ async function finalizeAttachment(ws, stagedId) {
 
 module.exports = {
   MARKER, internalDir, suggestWorkspacePath, setupWorkspace, syncManagedFiles, isWorkspace,
-  listFiles, snapshot, diffAndBackup, listVersions, restoreVersionAsCopy, stageUpload,
+  listFiles, snapshot, diffAndBackup, restoreChanges, listVersions, restoreVersionAsCopy, stageUpload,
   discardStaged, cleanupStaging, ensureExtract, finalizeAttachment, defaultWorkspaceParent, RES, ROOT,
 };

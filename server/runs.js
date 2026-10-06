@@ -4,6 +4,7 @@
 const { fsp, path, newId, nowIso, resolveInside, writeTextAtomic, truncate } = require('./util');
 const ws = require('./workspace');
 const ctx = require('./context');
+const importer = require('./importer');
 
 const MAX_ARG_PROMPT = 24000;
 
@@ -31,7 +32,7 @@ function autoTitle(text, attachments) {
 
 function errorHint(kind, providerState) {
   if ((kind === 'anmeldung' || kind === 'vertrauen') && providerState && providerState.hint) return providerState.hint;
-  if (kind === 'limit') return { text: 'Das Nutzungslimit des Anbieters ist erreicht. Warte etwas oder wechsle den Anbieter.' };
+  if (kind === 'limit') return { text: 'Der Anbieter ist gerade überlastet oder dein Nutzungslimit ist erreicht. Warte etwas oder wechsle den Anbieter.' };
   if (kind === 'netz') return { text: 'Keine Verbindung zum Anbieter. Prüfe die Internetverbindung und versuche es erneut.' };
   return null;
 }
@@ -88,7 +89,7 @@ class RunManager {
     return out;
   }
 
-  async start(project, chatId, { text, attachments }, send) {
+  async start(project, chatId, { text, attachments, importId }, send) {
     if (this.runs.has(chatId)) throw Object.assign(new Error('In diesem Chat läuft bereits eine Antwort.'), { status: 409 });
     const chat = project.getChat(chatId);
     const providerId = this.settings().provider;
@@ -98,7 +99,17 @@ class RunManager {
       err.status = 409; err.hint = pstate.hint || null; err.code = 'anbieter';
       throw err;
     }
-    const cleanText = String(text || '').trim();
+    // Übernahme einer bestehenden Arbeit: Inventar muss vorliegen.
+    let inv = null;
+    if (importId) {
+      inv = await importer.loadInventory(project, importId);
+      if (!inv) throw Object.assign(new Error('Die Übernahme wurde noch nicht vorbereitet.'), { status: 400 });
+      if (!inv.anzahl) throw Object.assign(new Error('Es wurden keine Dateien übernommen.'), { status: 400 });
+    }
+    const weiteres = !!(inv && project.data.uebernahme && project.data.uebernahme.importId !== inv.id);
+    const cleanText = String(text || '').trim() || (inv
+      ? (weiteres ? 'Hier ist weiteres Material zu meiner Arbeit. Bitte ergänze den Stand.' : 'Übernimm bitte meine bisherige Arbeit, damit ich direkt weitermachen kann.')
+      : '');
     if (!cleanText && !(attachments && attachments.length)) throw Object.assign(new Error('Die Nachricht ist leer.'), { status: 400 });
 
     // Platz reservieren, bevor asynchron gearbeitet wird.
@@ -115,8 +126,16 @@ class RunManager {
         id: newId(), role: 'assistant', provider: providerId, model: '', text: '', status: 'laeuft',
         activity: [], files: [], updates: null, createdAt: nowIso(),
       };
+      if (inv) {
+        userMsg.import = {
+          id: inv.id, ordner: inv.ordner, anzahl: inv.anzahl, bytes: inv.bytes,
+          ordnerAnzahl: inv.ordnerListe.length, unlesbar: inv.unlesbar.length,
+          nichtUebernommen: (inv.nichtUebernommen || []).length,
+        };
+        msg.mode = 'import';
+      }
       run.message = msg;
-      if (chat.titleAuto && !earlier.some((m) => m.role === 'user')) chat.title = autoTitle(cleanText, atts);
+      if (chat.titleAuto && !earlier.some((m) => m.role === 'user')) chat.title = inv ? (weiteres ? 'Weiteres Material übernommen' : 'Übernahme der bisherigen Arbeit') : autoTitle(cleanText, atts);
       chat.messages.push(userMsg, msg);
       chat.updatedAt = nowIso();
       await project.saveChat(chat);
@@ -131,7 +150,7 @@ class RunManager {
       let history = !sessionId && earlier.length ? ctx.historyTranscript(earlier) : '';
       const buildPrompt = (unchanged) => ctx.buildPrompt({
         context: context.text, contextUnchanged: unchanged, attachments: atts, history,
-        text: cleanText || 'Bitte sieh dir die angehängten Dateien an.',
+        text: inv ? `${cleanText}\n\n${importer.importPrompt(inv, { bisher: project.data.uebernahme })}` : cleanText || 'Bitte sieh dir die angehängten Dateien an.',
       });
       let prompt = buildPrompt(!!sessionId && sess.contextHash === context.hash);
       userMsg.gesendet = prompt;
@@ -169,7 +188,7 @@ class RunManager {
         }
         if (providerId === 'claude' && !sessionId) { sessionId = newId(); resume = false; }
         run.handle = this.providers.run(providerId, {
-          cwd: project.workspace, prompt: finalPrompt, sessionId, resume, rulesText, rulesFile, onEvent,
+          cwd: project.workspace, prompt: finalPrompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly: !!inv,
         });
         if (run.stopRequested) run.handle.cancel();
         return run.handle.done;
@@ -191,16 +210,27 @@ class RunManager {
       // Dateiänderungen erfassen und vorherige Fassungen sichern.
       let changes = [];
       try { changes = await ws.diffAndBackup(project.workspace, before); } catch (err) { changes = []; msg.activity.push({ kind: 'info', label: `Dateiabgleich fehlgeschlagen: ${err.message}` }); }
+      // Bei der Übernahme darf nichts verändert werden: geänderte oder gelöschte Dateien zurückholen.
+      if (inv) changes = await ws.restoreChanges(project.workspace, changes);
 
       const parsed = ctx.parseUpdate(res.text || msg.text);
       const filesAfter = await ws.listFiles(project.workspace);
       let applied = null;
-      if (!res.canceled && parsed.update) applied = await ctx.applyUpdate(project, parsed.update, filesAfter);
+      if (!res.canceled && parsed.update) applied = await ctx.applyUpdate(project, parsed.update, filesAfter, { nurLeereFelder: !!inv });
       if (parsed.invalid) msg.activity.push({ kind: 'info', label: 'Arbeitsstand-Block war nicht lesbar und wurde ignoriert' });
 
-      msg.text = parsed.text;
+      let finalText = parsed.text;
+      if (inv) {
+        const ir = importer.parseResult(finalText);
+        finalText = ir.text;
+        if (ir.invalid) msg.activity.push({ kind: 'info', label: 'Übernahme-Block war nicht lesbar' });
+        if (ir.result && !res.canceled && !res.error) await importer.saveSummary(project, inv, ir.result);
+        msg.importErgebnis = importer.displayResult(inv, !res.canceled && !res.error ? ir.result : null);
+      }
+
+      msg.text = finalText;
       msg.files = changes.slice(0, 100);
-      msg.updates = applied && (applied.aufgaben.length || applied.vorschlaege.length || applied.projekt.length || applied.merken.length) ? applied : null;
+      msg.updates = applied && (applied.aufgaben.length || applied.vorschlaege.length || applied.projekt.length || applied.merken.length || applied.konflikte.length) ? applied : null;
       msg.durationMs = Date.now() - started;
       if (run.stopRequested || res.canceled) msg.status = 'abgebrochen';
       else if (res.error) {

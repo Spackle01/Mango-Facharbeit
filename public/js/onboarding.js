@@ -1,7 +1,8 @@
 // Erster Start, Begrüßung bei späteren Starts und Ordnerauswahl.
 import { api } from './api.js';
 import { h, iconEl, btn, toast, dialog, prefersReducedMotion, parseDateDE } from './ui.js';
-import { enterApp, loadState } from './app.js';
+import { enterApp, loadState, startImportChat } from './app.js';
+import { createPicker, createProgress, runImport } from './importer.js';
 
 const HEADLINE = 'Lass uns mit deiner Facharbeit anfangen.';
 
@@ -80,7 +81,19 @@ export function showOnboarding({ fromSettings = false } = {}) {
   const title = h('h1', { class: 'typewriter' });
   const form = h('form', { class: 'onboard-form', novalidate: true, hidden: true, 'aria-label': 'Angaben zur Facharbeit' });
   const logo = h('span', { class: 'logo', html: '<svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="7" fill="currentColor"/><path d="M7.6 18c-2-2.3-2-6.8.7-9.6 2.8-2.8 7.3-3.4 9.6-1.5-.4 3.1-1.6 6.8-4.2 9.1-2.1 2-4.5 2.9-6.1 2Z" fill="var(--bg)"/></svg>' });
-  root.replaceChildren(h('div', { class: 'onboard' }, h('div', { class: 'onboard-inner' }, logo, title, form)));
+
+  // Zwei gleichwertige Einstiege
+  const choice = h('div', { class: 'choice', role: 'group', 'aria-label': 'Wie möchtest du starten?', hidden: true });
+  const choiceCard = (mode, iconName, label, sub) => {
+    const b = h('button', { type: 'button', class: 'choice-card', 'data-mode': mode },
+      h('span', { class: 'cc-icon' }, iconEl(iconName, 22)), h('span', { class: 'cc-label' }, label), h('span', { class: 'cc-sub' }, sub));
+    b.addEventListener('click', () => setMode(mode));
+    return b;
+  };
+  choice.append(
+    choiceCard('neu', 'plus', 'Neu anfangen', 'Mit den Vorlagen der Schule starten'),
+    choiceCard('import', 'archive', 'Bestehende Arbeit übernehmen', 'Entwürfe, Notizen und Quellen mitbringen'));
+  root.replaceChildren(h('div', { class: 'onboard' }, h('div', { class: 'onboard-inner' }, logo, title, choice, form)));
 
   const field = (key, label, attrs = {}, cls = '') => {
     const id = `ob-${key}`;
@@ -133,11 +146,41 @@ export function showOnboarding({ fromSettings = false } = {}) {
     if (picked) { pathInput.value = picked; userPickedPath = true; inspect(); }
   });
 
+  // Bausteine für beide Wege
+  const grid = h('div', { class: 'form-grid' }, f.name.el, f.klasse.el, f.titel.el, f.fach.el, f.lehrkraft.el, f.abgabedatum.el);
+  const gridHost = h('div', { class: 'grid-host' });
+  const optional = h('details', { class: 'optional-fields' }, h('summary', {}, iconEl('chevronRight', 14), 'Angaben selbst eintragen (optional)'));
+  const picker = createPicker({ onChange: () => { if (mode === 'import') submit.disabled = !picker.valid(); } });
+  const pickerHost = h('div', { class: 'picker-host' }, picker.el);
+  const progress = createProgress();
+  progress.el.hidden = true;
   const submit = btn('Los geht’s', { cls: 'btn btn-primary', attrs: { type: 'submit' } });
-  const actions = h('div', { class: 'actions' }, submit);
+  const back = btn('Zurück', { cls: 'btn', onClick: () => setMode(null) });
+  const actions = h('div', { class: 'actions' }, submit, back);
   if (fromSettings) actions.append(btn('Abbrechen', { cls: 'btn', onClick: () => enterApp() }));
-  const grid = h('div', { class: 'form-grid' }, f.name.el, f.klasse.el, f.titel.el, f.fach.el, f.lehrkraft.el, f.abgabedatum.el, wsField);
-  form.append(grid, actions);
+  form.append(pickerHost, gridHost, h('div', { class: 'form-grid ws-grid' }, wsField), optional, progress.el, actions);
+
+  let mode = null;
+  function setMode(m) {
+    mode = m;
+    choice.hidden = !!m;
+    form.hidden = !m;
+    if (!m) { choice.querySelector('.choice-card').focus(); return; }
+    pickerHost.hidden = m !== 'import';
+    if (m === 'import') {
+      optional.append(grid);
+      optional.hidden = false;
+      submit.querySelector('.lbl').textContent = 'Übernehmen und loslegen';
+      submit.disabled = !picker.valid();
+      setTimeout(() => form.querySelector('.drop-zone').focus());
+    } else {
+      gridHost.append(grid);
+      optional.hidden = true;
+      submit.querySelector('.lbl').textContent = 'Los geht’s';
+      submit.disabled = false;
+      setTimeout(() => f.name.input.focus());
+    }
+  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -146,26 +189,43 @@ export function showOnboarding({ fromSettings = false } = {}) {
     const angaben = {};
     for (const [k, v] of Object.entries(f)) angaben[k] = v.input.value.trim();
     const datum = parseDateDE(angaben.abgabedatum);
-    if (datum === null) { note.className = 'field-note err'; note.textContent = 'Abgabedatum bitte als TT.MM.JJJJ eingeben oder leer lassen.'; f.abgabedatum.input.focus(); return; }
+    if (datum === null) { note.className = 'field-note err'; note.textContent = 'Abgabedatum bitte als TT.MM.JJJJ eingeben oder leer lassen.'; if (mode === 'import') optional.open = true; f.abgabedatum.input.focus(); return; }
     angaben.abgabedatum = datum;
+    if (mode === 'import' && !picker.valid()) { note.className = 'field-note err'; note.textContent = 'Bitte zuerst Dateien oder Ordner auswählen.'; return; }
     submit.disabled = true;
+    back.disabled = true;
     submit.querySelector('.lbl').textContent = 'Wird eingerichtet …';
     try {
       await api.post('/api/setup', { workspace, angaben });
       await loadState();
-      await enterApp();
     } catch (err) {
       submit.disabled = false;
-      submit.querySelector('.lbl').textContent = 'Los geht’s';
+      back.disabled = false;
+      submit.querySelector('.lbl').textContent = mode === 'import' ? 'Übernehmen und loslegen' : 'Los geht’s';
       note.className = 'field-note err';
       note.textContent = err.message;
+      return;
     }
+    if (mode !== 'import') { await enterApp(); return; }
+    // Übernahme: Dateien hochladen und prüfen, danach analysiert der Assistent im Chat.
+    pickerHost.hidden = true;
+    optional.hidden = true;
+    progress.el.hidden = false;
+    actions.hidden = true;
+    let inv = null;
+    try {
+      inv = await runImport(picker.items(), progress, picker.tooLarge());
+    } catch (err) {
+      toast(`Die Übernahme ist nicht vollständig gelungen: ${err.message}`, { error: true, timeout: 7000 });
+    }
+    await enterApp();
+    if (inv) await startImportChat(inv);
   });
 
   suggest();
   typewriter(title, HEADLINE, () => {
-    form.hidden = false;
-    f.name.input.focus();
+    choice.hidden = false;
+    choice.querySelector('.choice-card').focus();
   });
 }
 

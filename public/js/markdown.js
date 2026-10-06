@@ -153,12 +153,15 @@ export function renderMarkdown(src, opts = {}) {
   return out.join('\n');
 }
 
-// Entfernt den (ggf. unvollständigen) Arbeitsstand-Block während des Streamens.
+// Entfernt die (ggf. unvollständigen) Steuerblöcke für Arbeitsstand und Übernahme während des Streamens.
 export function stripUpdateBlock(text) {
-  const idx = text.search(/```[ \t]*arbeitsstand/i);
-  if (idx < 0) return text;
-  const rest = text.slice(idx);
-  const end = rest.indexOf('```', 3);
-  if (end < 0) return text.slice(0, idx).trimEnd();
-  return (text.slice(0, idx) + rest.slice(end + 3)).trim();
+  let out = text;
+  for (;;) {
+    const idx = out.search(/```[ \t]*(arbeitsstand|uebernahme)/i);
+    if (idx < 0) return out;
+    const rest = out.slice(idx);
+    const end = rest.indexOf('```', 3);
+    if (end < 0) return out.slice(0, idx).trimEnd();
+    out = (out.slice(0, idx) + rest.slice(end + 3)).trim();
+  }
 }

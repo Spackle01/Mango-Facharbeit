@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-if (args[0] === '--help') { console.log('--include-partial-messages --permission-mode --session-id --append-system-prompt --allowedTools\nCommands:\n  auth'); process.exit(0); }
+if (args[0] === '--help') { console.log('--include-partial-messages --permission-mode --session-id --append-system-prompt --allowedTools --disallowedTools\nCommands:\n  auth'); process.exit(0); }
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: process.env.FAKE_LOGGED_OUT ? false : true })); process.exit(0); }
 let input = '';
 process.stdin.on('data', (d) => { input += d; });
@@ -26,6 +26,37 @@ process.stdin.on('end', () => {
     const tpl = path.join(process.cwd(), '02_expose_und_zeitplan', 'expose_vorlage.md');
     out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: tpl } }] } });
     fs.appendFileSync(tpl, '\nGeändert vom Test.');
+  }
+  // Übernahme: versucht (unerlaubt) eine Originaldatei zu ändern und liefert beide Blöcke.
+  const imp = /<uebernahme id="([^"]+)" ordner="([^"]+)">/.exec(input);
+  if (imp && process.env.FAKE_IMPORT_ERROR) {
+    out({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Overloaded', session_id: sid });
+    return;
+  }
+  if (imp) {
+    const o = imp[2];
+    const notes = path.join(process.cwd(), ...o.split('/').filter(Boolean), 'Meine Facharbeit', 'Notizen.md');
+    if (fs.existsSync(notes)) {
+      out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'u1', name: 'Edit', input: { file_path: notes } }] } });
+      fs.appendFileSync(notes, '\nVom Assistenten verändert.');
+    }
+    const stand = { aufgaben: [
+      { id: 'fragestellung', status: 'erledigt', notiz: 'Geprüft', nachweis: `${o}Meine Facharbeit/Facharbeit/Expose_v2.md` },
+      { id: 'recherche', status: 'erledigt', notiz: 'Nur erwähnt' },
+    ], projekt: { titel: 'Der Goldene Schnitt in der Kunst', fach: 'Mathematik' }, merken: ['Thema laut Übernahme: Goldener Schnitt'] };
+    const ueb = {
+      zusammenfassung: 'Thema: **Goldener Schnitt** in der Kunst. Exposé liegt in zwei Fassungen vor.',
+      vorhanden: [`Exposé – \`${o}Meine Facharbeit/Facharbeit/Expose_v2.md\``, 'Notizen zur Themenfindung'],
+      fehlt: ['Zeitplan', 'Literaturverzeichnis'],
+      naechsterSchritt: 'Zeitplan nach Vorgabe ergänzen.',
+      unsicher: ['Lerntagebuch: nicht lesbar'],
+      versionen: [{ dateien: [`${o}Meine Facharbeit/Facharbeit/Expose_v1.md`, `${o}Meine Facharbeit/Facharbeit/Expose_v2.md`], frage: 'Welche Exposé-Fassung ist aktuell?' }],
+    };
+    const t = `Ich habe deine Arbeit gelesen. Welches Fach ist dein Bezugsfach?\n\n\`\`\`arbeitsstand\n${JSON.stringify(stand)}\n\`\`\`\n\n\`\`\`uebernahme\n${JSON.stringify(ueb, null, 1)}\n\`\`\``;
+    out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+    for (const chunk of t.match(/[\s\S]{1,40}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: chunk } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
+    return;
   }
   const text = msg.includes('DATEI')
     ? 'Exposé angelegt: `02_expose_und_zeitplan/expose_v1.md`.\n\n```arbeitsstand\n{"aufgaben":[{"id":"expose","status":"erledigt","nachweis":"02_expose_und_zeitplan/expose_v1.md"},{"id":"thema","status":"erledigt","nachweis":"Lehrkraft hat bestätigt"},{"id":"gliederung","status":"erledigt"}],"projekt":{"forschungsfrage":"Nutzt KI den Goldenen Schnitt?"},"merken":["Methode: Bildanalyse"]}\n```'

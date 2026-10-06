@@ -8,6 +8,7 @@ Die App kopiert diese Skills in jeden Arbeitsraum (`.agents/skills/` für Antigr
 | `sprachpruefung` | `Humanize skills/SKILL-3.md` („ai-tell-audit“) und `Humanize skills/ai_tell_scan.py` | Prüfablauf, Berichtsformat, vollständige Checkliste, Skript unverändert unter `scripts/ai_tell_scan.py`, deutsche Erklärung der Skriptausgabe; ergänzt um die Kriterien nach Noll/Vode aus der Handreichung | Abschnitt über die Funktionsweise kommerzieller KI-Detektoren (nicht Ziel der Facharbeit) |
 | `quellenrecherche` | `Research God skill.md` („deep-invention“) | Begrenzte Rechercheschleifen, Quellenhierarchie, Belegtabelle (Belegt/Abgeleitet/Vermutung/Offene Frage), Umgang mit widersprüchlichen Quellen, Alternativenvergleich (für die Methodenwahl), Nachrechnen, Prüffragen, keine Umgehung von Zugangsbeschränkungen | Software-Leistung, Spielmechaniken, Sicherheitstests, Neuheitsprüfung von Erfindungen (für die Facharbeit nicht relevant) |
 | `abgabe-pruefen` | neu, aus Handreichung, Zeitschiene, Bewertungsbögen und Lerntagebuch-Vorlage | Prüfpunkte zu Inhalt, Umfang, Zitieren, KI-Kennzeichnung, Bestandteilen, Form, Abgabe; Berichtsformat; Regeln für den Arbeitsstand | – |
+| `bestehende-arbeit-uebernehmen` | neu, für die Übernahme bereits begonnener Arbeiten | Nur-lesen-Ablauf, Abgleich mit den Vorgaben, Regeln für „erledigt erst nach Prüfung“, Nachfragen bei unklaren Entwurfsständen, Ausgabeformat für Arbeitsstand und Zusammenfassung | – |
 
 Weitere Ausgangsdateien:
 

@@ -6,6 +6,7 @@ const { describeTool, classifyError } = require('./activity');
 const ID = 'claude';
 const NAME = 'Claude Code';
 const ALLOWED_TOOLS = 'Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,TodoWrite,Skill';
+const READ_ONLY_TOOLS = 'Read,Glob,Grep,TodoWrite,Skill';
 
 function installHint() {
   return IS_WIN
@@ -36,6 +37,7 @@ async function detect() {
     appendPrompt: h.includes('--append-system-prompt'),
     appendFile: /append-system-prompt(-file|\[-file\])/.test(h),
     allowedTools: /--allowed-?tools|--allowedTools/i.test(h),
+    disallowedTools: /--disallowed-?tools|--disallowedTools/i.test(h),
     auth: /\bauth\b/.test(h),
   };
   const base = { id: ID, name: NAME, installed: true, bin, version, caps };
@@ -52,12 +54,14 @@ async function detect() {
 }
 
 // Startet einen Durchlauf. Gibt { cancel, done: Promise } zurück.
-function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEvent }) {
+function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly = false }) {
   const caps = info.caps || {};
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (caps.partial) args.push('--include-partial-messages');
   if (caps.permissionMode) args.push('--permission-mode', 'acceptEdits');
-  if (caps.allowedTools !== false) args.push('--allowedTools', ALLOWED_TOOLS);
+  if (caps.allowedTools !== false) args.push('--allowedTools', readOnly ? READ_ONLY_TOOLS : ALLOWED_TOOLS);
+  // Nur lesen (z. B. bei der Übernahme): Schreibwerkzeuge ausdrücklich sperren.
+  if (readOnly && caps.disallowedTools) args.push('--disallowedTools', 'Write,Edit,MultiEdit,NotebookEdit,Bash');
   if (sessionId) {
     if (resume) args.push('--resume', sessionId);
     else if (caps.sessionId) args.push('--session-id', sessionId);

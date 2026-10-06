@@ -40,6 +40,19 @@ Optionen: `--port 4317`, `--no-open`, `--data-dir <Ordner>`.
 - **Anbieter:** unten im Eingabefeld. Punktfarbe: grün = angemeldet/verbunden, grau = wird geprüft bzw. noch nicht geprüft, gelb = Anmeldung oder Ordnerfreigabe nötig, rot = Fehler. Ist etwas einzurichten, steht der konkrete Befehl über dem Eingabefeld.
 - **Darstellung:** Hell, Dunkel oder System (Einstellungen).
 
+## Bestehende Arbeit übernehmen
+
+Wer schon außerhalb der App angefangen hat, wählt beim ersten Start „Bestehende Arbeit übernehmen“ statt „Neu anfangen“. Später geht das über die Büroklammer („Bestehende Arbeit übernehmen …“), im Arbeitsraum („Arbeit übernehmen“) oder indem man einen Ordner in den Chat zieht.
+
+- **Auswahl:** mehrere Dateien und ganze Ordner, per Knopf oder Drag-and-drop. Systemdateien (`.DS_Store`, `Thumbs.db`, `~$…`-Sperrdateien) werden übersprungen. Grenzen: 2000 Dateien, 200 MB je Datei, 1 GB insgesamt.
+- **Originale bleiben unverändert:** Die App kopiert alles mit Ordnerstruktur und Änderungsdatum nach `uebernommen/<Datum_Uhrzeit>/`. Gleichnamige Dateien bekommen „ (2)“ angehängt, nichts wird überschrieben. Während der Analyse darf der Assistent nur lesen (bei Claude Code sind Schreibwerkzeuge gesperrt). Ändert er trotzdem etwas, stellt die App die Datei aus der Sicherung wieder her und zeigt das als „zurückgesetzt“ an.
+- **Prüfung durch die App:** Textauszüge, Lesbarkeit, Umfang in Wörtern, vermutliche Art (Exposé, Lerntagebuch, Literatur …), identische Dateien, mögliche Entwurfsstände (z. B. `Facharbeit_v2.docx` und `Facharbeit final.docx`) und Dateien, die schon im Arbeitsraum liegen. Das Ergebnis steht in `.facharbeit/import/<id>/inventar.md`. Dateien, die der Browser nicht senden konnte, werden als „nicht übernommen“ aufgeführt.
+- **Analyse durch den Assistenten** (Skill `bestehende-arbeit-uebernehmen`): erkennt Thema, Fragestellung, Gliederung, Texte, Quellen, Eigenanteil und bisherige Ergebnisse und gleicht sie mit den Vorgaben ab. Er stellt höchstens drei gezielte Fragen.
+- **Projektangaben:** Erkennbare Angaben aus den eigenen Dateien (Titel, Name, Klasse, Fach …) werden in leere Felder eingetragen. Weicht eine schon ausgefüllte Angabe ab, zeigt der Chat beide Werte mit dem Knopf „Übernehmen“.
+- **Arbeitsstand:** Vorhandene Inhalte werden erst nach der Prüfung gegen die Vorgaben „Erledigt“, sonst „In Arbeit“. Es gelten dieselben Regeln wie immer, siehe unten.
+- **Übersicht im Chat:** „Das ist bereits vorhanden“, „Das fehlt noch“, nächster Schritt (Knopf „Damit anfangen“), unsichere Einschätzungen, Frage nach der aktuellen Fassung (Auswahl per Knopf, wird gemerkt), nicht lesbare und doppelte Dateien.
+- **Dauerhafte Zusammenfassung:** Sie steht im Projekt-Panel und in `.facharbeit/uebernahme.md` und wird in jedem späteren Chat mitgegeben. Weiteres Material ergänzt den Stand; getroffene Entscheidungen bleiben erhalten.
+
 ## Arbeitsraum
 
 Jede Facharbeit hat einen eigenen Ordner (Vorschlag: `Dokumente/Facharbeit – <Titel>`). Ein vorhandener Ordner kann gewählt werden; vorhandene Dateien bleiben unverändert.
@@ -50,10 +63,11 @@ Jede Facharbeit hat einen eigenen Ordner (Vorschlag: `Dokumente/Facharbeit – <
 ├── 00_vorgaben/                   Schulvorgaben: anforderungen.md + Original-PDFs
 ├── 01_themenfindung_und_mindmap/  … bis 08_praesentation_verteidigung/ (Vorlagen)
 ├── anhaenge/JJJJ-MM-TT/           Dateien, die im Chat angehängt wurden
+├── uebernommen/<Datum_Uhrzeit>/   mitgebrachte Arbeit (unveränderte Originale)
 ├── exporte/                       Word-Export der Gesamtarbeit
 ├── AGENTS.md, CLAUDE.md           kurze Hinweise für KI-Werkzeuge (nur angelegt, wenn nicht vorhanden)
 ├── .agents/rules/, .agents/skills/, .claude/skills/   Regeln und Skills für beide Anbieter
-└── .facharbeit/                   projekt.json, arbeitsstand.json, chats/, versionen/, extrakte/, regeln.md
+└── .facharbeit/                   projekt.json, arbeitsstand.json, chats/, versionen/, extrakte/, import/, uebernahme.md, regeln.md
 ```
 
 - **Versionen:** Ändert der Assistent eine vorhandene Datei, sichert die App die vorherige Fassung unter `.facharbeit/versionen/`. Im Chat steht „geändert“ mit Link zur alten Fassung; im Arbeitsraum gibt es „Frühere Fassungen“ und „Als Kopie wiederherstellen“. Der Assistent ist außerdem angewiesen, Überarbeitungen als `_v2`, `_v3` zu speichern.
@@ -87,7 +101,7 @@ Der Assistent meldet Änderungen in einem unsichtbaren Block am Ende seiner Antw
 
 - Alle Daten liegen lokal: Projektdaten im Arbeitsraum, App-Einstellungen unter `%APPDATA%\Mango-Facharbeit` (Windows), `~/Library/Application Support/Mango-Facharbeit` (macOS) bzw. `~/.config/mango-facharbeit` (Linux).
 - Der Server lauscht nur auf `127.0.0.1`, prüft Host und Ursprung jeder Anfrage und verlangt ein Sitzungstoken.
-- Dateizugriffe sind auf den Arbeitsraum beschränkt. Die App gibt dem Claude-Anbieter Datei-, Such- und Webwerkzeuge frei (`Read, Write, Edit, MultiEdit, Glob, Grep, WebSearch, WebFetch, TodoWrite, Skill`) im Modus `acceptEdits`, aber keine allgemeine Freigabe für Befehle. Antigravity läuft mit seinen Standardrechten im Headless-Modus (Lesen und Schreiben im Arbeitsraum, Befehle nur nach eigener Freigabe).
+- Dateizugriffe sind auf den Arbeitsraum beschränkt. Die App gibt dem Claude-Anbieter Datei-, Such- und Webwerkzeuge frei (`Read, Write, Edit, MultiEdit, Glob, Grep, WebSearch, WebFetch, TodoWrite, Skill`) im Modus `acceptEdits`, aber keine allgemeine Freigabe für Befehle. Bei der Übernahme einer bestehenden Arbeit sind nur Lesewerkzeuge freigegeben (`Read, Glob, Grep, TodoWrite, Skill`), Schreibwerkzeuge und Befehle sind ausdrücklich gesperrt. Antigravity läuft mit seinen Standardrechten im Headless-Modus (Lesen und Schreiben im Arbeitsraum, Befehle nur nach eigener Freigabe).
 
 ## Entwicklung
 
@@ -99,7 +113,7 @@ ressourcen/  Regeln, Wissensbasis, Schulvorgaben, Vorlagen für den Arbeitsraum,
 test/        Unit- und API-Tests; test/fixtures/bin enthält Test-Doubles beider CLIs
 ```
 
-Windows-EXE bauen: `npm run build:exe` (lädt das offizielle `node.exe` derselben Node-Version von nodejs.org, prüft dessen SHA-256, setzt Symbol und Versionsinfo mit `resedit` und fügt die App mit `postject` ein; Ergebnis in `dist/`). Mit `--target current` entsteht ein Programm für das aktuelle System zum Testen. Der Workflow `.github/workflows/release.yml` läuft bei jedem Push: Tests, Build, Starttest der EXE auf einem Windows-Runner. Gibt es für die Version aus `package.json` noch kein Release, legt er Tag `v<version>` und Release an (Versionen mit Bindestrich, z. B. `0.1.0-alpha`, als Vorabversion). Für ein neues Release also die Version erhöhen.
+Windows-EXE bauen: `npm run build:exe` (lädt das offizielle `node.exe` derselben Node-Version von nodejs.org, prüft dessen SHA-256, setzt Symbol und Versionsinfo mit `resedit` und fügt die App mit `postject` ein; Ergebnis in `dist/`). Mit `--target current` entsteht ein Programm für das aktuelle System zum Testen. Der Workflow `.github/workflows/release.yml` läuft bei jedem Push: Tests, Build, Starttest der EXE auf einem Windows-Runner. Gibt es für die Version aus `package.json` noch kein Release, legt er Tag `v<version>` und Release an (Versionen mit Bindestrich, z. B. `0.1.1-alpha`, als Vorabversion). Für ein neues Release also die Version erhöhen.
 
 Tests: `npm test`. Die API-Tests laufen gegen Test-Doubles der beiden CLIs, damit sie ohne Konto und Netz reproduzierbar sind. Das Ereignisformat des Antigravity-Doubles folgt der [Headless-Dokumentation](https://antigravity.google/docs/cli/headless/).
 

@@ -11,6 +11,7 @@ const { RunManager } = require('./runs');
 const ws = require('./workspace');
 const ctx = require('./context');
 const exporter = require('./export');
+const importer = require('./importer');
 const system = require('./system');
 const { STATUS_INFO, PHASEN } = require('./aufgaben');
 const { kindLabel } = require('./extract');
@@ -46,6 +47,7 @@ function projectPayload(p) {
     workspace: p.workspace,
     angaben: p.data.angaben,
     merken: p.data.merken,
+    uebernahme: p.data.uebernahme || null,
     createdAt: p.data.createdAt,
     aufgaben: p.aufgaben(),
     fristen: ctx.naechsteFristen(p).map((f) => ({ id: f.id, titel: f.titel, frist: f.frist, text: ctx.fristText(f.frist) })),
@@ -310,7 +312,7 @@ route('POST', /^\/api\/chats\/([\w-]+)\/messages$/, async (req, url, m, res) => 
   let closed = false;
   res.on('close', () => { closed = true; });
   try {
-    await runs.start(p, m[1], { text: body.text, attachments: body.attachments }, (ev) => { if (!closed) stream.send(ev); });
+    await runs.start(p, m[1], { text: body.text, attachments: body.attachments, importId: body.importId }, (ev) => { if (!closed) stream.send(ev); });
   } catch (err) {
     if (stream.isStarted()) { stream.send({ type: 'error', message: err.message }); stream.send(null); return undefined; }
     throw err;
@@ -332,6 +334,51 @@ route('POST', /^\/api\/uploads$/, async (req) => {
   const name = decodeURIComponent(String(req.headers['x-filename'] || 'datei'));
   const info = await ws.stageUpload(p.workspace, name, req);
   return { ...info, kindLabel: kindLabel(info.kind), sizeLabel: humanSize(info.size) };
+});
+
+// ---------- Übernahme einer bestehenden Arbeit ----------
+
+function inventorySummary(inv) {
+  const { dateien, ...rest } = inv;
+  return { ...rest, kategorien: dateien.reduce((acc, d) => { if (d.vermutlich) acc[d.vermutlich.label] = (acc[d.vermutlich.label] || 0) + 1; return acc; }, {}) };
+}
+
+route('POST', /^\/api\/import$/, async () => importer.createImport(requireProject()));
+
+route('POST', /^\/api\/import\/([\w-]+)\/dateien$/, async (req, url, m) => {
+  const p = requireProject();
+  const rel = decodeURIComponent(String(req.headers['x-relpath'] || req.headers['x-filename'] || 'datei'));
+  return importer.addFile(p, m[1], rel, req, { lastModified: req.headers['x-last-modified'] });
+});
+
+route('POST', /^\/api\/import\/([\w-]+)\/analyse$/, async (req, url, m, res) => {
+  const p = requireProject();
+  await importer.loadStatus(p, m[1]);
+  const body = await readBody(req);
+  const stream = ndjson(res);
+  let last = 0;
+  const inv = await importer.analyse(p, m[1], (ev) => {
+    const now = Date.now();
+    if (ev.phase !== 'fertig' && now - last < 120 && ev.aktuell !== ev.gesamt) return;
+    last = now;
+    stream.send({ type: 'fortschritt', ...ev });
+  }, { fehlgeschlagen: body.fehlgeschlagen });
+  stream.send({ type: 'fertig', inventar: inventorySummary(inv) });
+  stream.send(null);
+  return undefined;
+});
+
+route('GET', /^\/api\/import\/([\w-]+)$/, async (req, url, m) => {
+  const inv = await importer.loadInventory(requireProject(), m[1]);
+  if (!inv) throw new HttpError(404, 'Unbekannte Übernahme');
+  return inventorySummary(inv);
+});
+
+route('POST', /^\/api\/uebernahme\/fassung$/, async (req) => {
+  const p = requireProject();
+  const body = await readBody(req);
+  await importer.chooseVersion(p, body.dateien, String(body.gewaehlt || ''));
+  return projectPayload(p);
 });
 
 route('DELETE', /^\/api\/uploads\/([\w-]+)$/, async (req, url, m) => {
