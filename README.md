@@ -99,7 +99,7 @@ ressourcen/  Regeln, Wissensbasis, Schulvorgaben, Vorlagen für den Arbeitsraum,
 test/        Unit- und API-Tests; test/fixtures/bin enthält Test-Doubles beider CLIs
 ```
 
-Windows-EXE bauen: `npm run build:exe` (lädt das offizielle `node.exe` derselben Node-Version von nodejs.org, prüft dessen SHA-256, setzt Symbol und Versionsinfo mit `resedit` und fügt die App mit `postject` ein; Ergebnis in `dist/`). Mit `--target current` entsteht ein Programm für das aktuelle System zum Testen. Ein Tag `v*` startet den Workflow `.github/workflows/release.yml`: Tests, Build, Starttest der EXE auf einem Windows-Runner, danach das GitHub-Release.
+Windows-EXE bauen: `npm run build:exe` (lädt das offizielle `node.exe` derselben Node-Version von nodejs.org, prüft dessen SHA-256, setzt Symbol und Versionsinfo mit `resedit` und fügt die App mit `postject` ein; Ergebnis in `dist/`). Mit `--target current` entsteht ein Programm für das aktuelle System zum Testen. Der Workflow `.github/workflows/release.yml` läuft bei jedem Push: Tests, Build, Starttest der EXE auf einem Windows-Runner. Gibt es für die Version aus `package.json` noch kein Release, legt er Tag `v<version>` und Release an (Versionen mit Bindestrich, z. B. `0.1.0-alpha`, als Vorabversion). Für ein neues Release also die Version erhöhen.
 
 Tests: `npm test`. Die API-Tests laufen gegen Test-Doubles der beiden CLIs, damit sie ohne Konto und Netz reproduzierbar sind. Das Ereignisformat des Antigravity-Doubles folgt der [Headless-Dokumentation](https://antigravity.google/docs/cli/headless/).
 

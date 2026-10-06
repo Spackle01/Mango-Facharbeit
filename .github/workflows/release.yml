@@ -1,12 +1,20 @@
 name: Release (Windows-EXE)
 
+# Läuft bei jedem Push: Tests, Build und Starttest der EXE unter Windows.
+# Ein Release entsteht, wenn es für die Version aus package.json noch keines gibt
+# (Tag v<version> wird dabei angelegt) oder wenn ein Tag v* gepusht wird.
 on:
   push:
+    branches: ['main', 'claude/**']
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -65,7 +73,6 @@ jobs:
   release:
     name: Release veröffentlichen
     needs: smoke
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,12 +83,22 @@ jobs:
       - name: GitHub-Release anlegen
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          notes="build/release-notes-${TAG#v}.md"
+          if [ "$REF_TYPE" = "tag" ]; then TAG="$REF_NAME"; else TAG="v$(node -p "require('./package.json').version")"; fi
+          VERSION="${TAG#v}"
+          notes="build/release-notes-${VERSION}.md"
           [ -f "$notes" ] || notes="build/release-notes.md"
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+            if [ "$REF_TYPE" = "tag" ]; then
+              gh release upload "$TAG" dist/* --clobber
+            else
+              echo "Release $TAG gibt es schon – nichts zu tun. Für ein neues Release die Version in package.json erhöhen."
+            fi
           else
-            gh release create "$TAG" dist/* --prerelease --title "Mango Facharbeit ${TAG#v}" --notes-file "$notes"
+            gh release create "$TAG" dist/* --target "$GITHUB_SHA" $prerelease \
+              --title "Mango Facharbeit ${VERSION}" --notes-file "$notes"
           fi
