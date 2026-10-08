@@ -1,6 +1,6 @@
 {
   "name": "mango-facharbeit",
-  "version": "0.2.1-beta",
+  "version": "0.2.2-beta",
   "description": "Agent-first-App, die Schülerinnen und Schüler durch ihre Facharbeit begleitet – mit Claude Code CLI oder Antigravity CLI.",
   "private": true,
   "license": "UNLICENSED",
