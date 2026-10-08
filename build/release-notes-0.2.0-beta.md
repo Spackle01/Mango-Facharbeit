@@ -1,9 +1,9 @@
-Vierte Testversion (Alpha) von **Mango Facharbeit**. Die App ist jetzt eine richtige Windows-App: aufgeräumter, einfacher, mit Drop-in und neuem Logo.
+Erste Beta-Version von **Mango Facharbeit**. Die App ist jetzt eine richtige Windows-App: aufgeräumter, einfacher, mit Drop-in und neuem Logo.
 
 ## Neu
 
 - **Eigenes Fenster ohne Titelleiste.** Keine farbige Windows-Leiste und kein Konsolenfenster mehr. Minimieren, Maximieren und Schließen sitzen oben rechts in den Farben der App (hell und dunkel).
-- **Installer statt EXE mit Konsole.** `Mango-Facharbeit-Setup-0.2.0-alpha.exe` installiert die App in Sekunden für dich (ohne Administratorrechte). Danach findest du sie im Startmenü und auf dem Desktop.
+- **Installer statt EXE mit Konsole.** `Mango-Facharbeit-Setup-0.2.0-beta.exe` installiert die App in Sekunden für dich (ohne Administratorrechte). Danach findest du sie im Startmenü und auf dem Desktop.
 - **Drop-in:** Zieh alles, was du schon für deine Facharbeit gemacht hast, einfach ins Fenster: Entwürfe, Notizen, Quellen, Bilder oder ganze Ordner.
   - Mango sortiert alles in die passenden Ordner ein, wandelt Word-Dateien bei Bedarf wortgetreu in bearbeitbaren Text um und ergänzt z. B. die Literaturliste.
   - Arbeitsstand und Projektangaben werden aktualisiert.
@@ -26,7 +26,7 @@ Vierte Testversion (Alpha) von **Mango Facharbeit**. Die App ist jetzt eine rich
 
 ## Download
 
-- **`Mango-Facharbeit-Setup-0.2.0-alpha.exe`** für Windows 10/11 (64 Bit).
+- **`Mango-Facharbeit-Setup-0.2.0-beta.exe`** für Windows 10/11 (64 Bit).
 - `….exe.sha256` enthält die Prüfsumme.
 
 ## Voraussetzung
@@ -39,12 +39,12 @@ Mindestens ein KI-Anbieter, installiert und einmal angemeldet:
 ## Installieren
 
 1. Setup herunterladen und doppelklicken.
-2. Windows SmartScreen meldet einen „unbekannten Herausgeber“, weil diese Alpha nicht signiert ist: **Weitere Informationen → Trotzdem ausführen**.
+2. Windows SmartScreen meldet einen „unbekannten Herausgeber“, weil diese Beta nicht signiert ist: **Weitere Informationen → Trotzdem ausführen**.
 3. Die App installiert sich und startet. Deinstallieren über die Windows-Einstellungen; deine Projekte und Einstellungen bleiben erhalten.
 
-Projekte und Einstellungen aus den früheren Versionen werden weiterverwendet. Die alte EXE (0.1.x) kann gelöscht werden.
+Projekte und Einstellungen aus den Alpha-Versionen werden weiterverwendet. Die alte EXE (0.1.x) kann gelöscht werden.
 
-## Bekannte Einschränkungen der Alpha
+## Bekannte Einschränkungen der Beta
 
 - Installer und App sind nicht signiert (SmartScreen-Hinweis).
 - Welche festen Claude-Versionen dein Konto nutzen darf, kann die App vorab nicht prüfen. Nicht freigeschaltete Modelle meldet sie beim Senden.

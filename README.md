@@ -121,7 +121,7 @@ ressourcen/  Regeln, Wissensbasis, Schulvorgaben, Vorlagen für den Arbeitsraum,
 test/        Unit- und API-Tests; test/fixtures/bin enthält Test-Doubles beider CLIs
 ```
 
-Desktop-App: `npm install`, dann `npm run desktop` (Electron). Windows-Installer bauen: `npm run dist:win` (electron-builder, NSIS, Ergebnis in `dist/`). Starttest ohne Fenster: `"Mango Facharbeit.exe" --smoke-test=<ergebnis.json>`. Der Workflow `.github/workflows/release.yml` läuft bei jedem Push: Tests, Bau des Installers auf einem Windows-Runner, Starttest der gebauten und der still installierten App. Gibt es für die Version aus `package.json` noch kein Release, legt er Tag `v<version>` und Release an (Versionen mit Bindestrich, z. B. `0.1.2-alpha`, als Vorabversion). Für ein neues Release also die Version erhöhen.
+Desktop-App: `npm install`, dann `npm run desktop` (Electron). Windows-Installer bauen: `npm run dist:win` (electron-builder, NSIS, Ergebnis in `dist/`). Starttest ohne Fenster: `"Mango Facharbeit.exe" --smoke-test=<ergebnis.json>`. Der Workflow `.github/workflows/release.yml` läuft bei jedem Push: Tests, Bau des Installers auf einem Windows-Runner, Starttest der gebauten und der still installierten App. Gibt es für die Version aus `package.json` noch kein Release, legt er Tag `v<version>` und Release an (Versionen mit Bindestrich, z. B. `0.2.0-beta`, als Vorabversion). Für ein neues Release also die Version erhöhen.
 
 Tests: `npm test`. Die API-Tests laufen gegen Test-Doubles der beiden CLIs, damit sie ohne Konto und Netz reproduzierbar sind. Das Ereignisformat des Antigravity-Doubles folgt der [Headless-Dokumentation](https://antigravity.google/docs/cli/headless/).
 
