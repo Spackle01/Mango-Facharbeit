@@ -10,6 +10,7 @@ const { kindOf } = require('./extract');
 const { GRUENDLICHKEIT } = require('./providers/models');
 
 const MAX_ARG_PROMPT = 24000;
+const RETRY_DELAY_MS = Number(process.env.MANGO_RETRY_DELAY_MS || 3000);
 
 function autoTitle(text, attachments) {
   let t = String(text || '').split('\n').find((l) => l.trim()) || '';
@@ -227,6 +228,17 @@ class RunManager {
         msg.activity.push({ kind: 'info', label: 'Sitzung neu gestartet' });
         res = await launch(prompt);
       }
+      // Verbindungsabbruch oder leere Antwort (z. B. bei Antigravity): einmal kurz warten und neu senden.
+      if (res.error && res.retryable && !run.stopRequested && !res.canceled) {
+        msg.activity.push({ kind: 'info', label: `${pstate.name} hat abgebrochen (${String(res.error).split('\n')[0].slice(0, 120)}) – neuer Versuch` });
+        Object.assign(msg, { text: '' });
+        broadcast({ type: 'snapshot', message: msg });
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        if (!run.stopRequested) {
+          if (!sess.id) { sessionId = null; resume = false; }
+          res = await launch(prompt);
+        }
+      }
       // Modell abgelehnt: einmal so wiederholen, wie die CLI im Terminal startet (ohne --model und
       // --effort). Ein automatisch gewähltes Modell nimmt die App danach aus der Auswahl, ein selbst
       // gewähltes bleibt und wird unter der Antwort gemeldet.
@@ -244,6 +256,7 @@ class RunManager {
         if (!res.error && abgelehnt && !selbstGewaehlt) await this.modellAbgelehnt(providerId, abgelehnt).catch(() => {});
         if (selbstGewaehlt) msg.modellSelbst = true;
       }
+      if (res.denied && res.denied.length) msg.activity.push({ kind: 'info', label: `Nicht erlaubt: ${res.denied.join(', ')}` });
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
 
       // Dateiänderungen erfassen und vorherige Fassungen sichern.

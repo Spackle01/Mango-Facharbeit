@@ -110,7 +110,7 @@ Der Assistent meldet Änderungen in einem unsichtbaren Block am Ende seiner Antw
 
 - Alle Daten liegen lokal: Projektdaten im Arbeitsraum, App-Einstellungen unter `%APPDATA%\Mango-Facharbeit` (Windows), `~/Library/Application Support/Mango-Facharbeit` (macOS) bzw. `~/.config/mango-facharbeit` (Linux).
 - Der Server lauscht nur auf `127.0.0.1`, prüft Host und Ursprung jeder Anfrage und verlangt ein Sitzungstoken.
-- Dateizugriffe sind auf den Arbeitsraum beschränkt. Die App gibt dem Claude-Anbieter Datei-, Such- und Webwerkzeuge frei (`Read, Write, Edit, MultiEdit, Glob, Grep, WebSearch, WebFetch, TodoWrite, Skill`) im Modus `acceptEdits`, aber keine Freigabe für Befehle. Originale (`uebernommen/`, `anhaenge/`) sind schreibgeschützt und werden nach jedem Durchlauf geprüft und bei Bedarf wiederhergestellt. Antigravity läuft mit seinen Standardrechten im Headless-Modus (Lesen und Schreiben im Arbeitsraum, Befehle nur nach eigener Freigabe).
+- Dateizugriffe sind auf den Arbeitsraum beschränkt. Die App gibt dem Claude-Anbieter Datei-, Such- und Webwerkzeuge frei (`Read, Write, Edit, MultiEdit, Glob, Grep, WebSearch, WebFetch, TodoWrite, Skill`) im Modus `acceptEdits`, aber keine Freigabe für Befehle. Originale (`uebernommen/`, `anhaenge/`) sind schreibgeschützt und werden nach jedem Durchlauf geprüft und bei Bedarf wiederhergestellt. Antigravity läuft im Headless-Modus mit `--mode accept-edits`: Dateiänderungen im Arbeitsraum sind freigegeben, Befehle und andere Aktionen ohne Freigabe werden verweigert und unter der Antwort als „Nicht erlaubt“ angezeigt. Bricht agy wegen eines Verbindungs- oder Modellfehlers ab (Exit-Code 3, Zeile `AGY_ERROR` auf stderr) oder kommt eine leere Antwort, sendet die App die Nachricht einmal neu.
 
 ## Entwicklung
 

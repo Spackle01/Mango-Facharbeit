@@ -44,6 +44,8 @@ async function detect() {
     streamJson: !h || h.includes('stream-json') || h.includes('--output-format'),
     model: h.includes('--model'),
     effort: h.includes('--effort'),
+    // Ohne Freigabe verweigert agy im Hintergrund jede Dateiänderung (denied_actions).
+    acceptEdits: h.includes('--mode') && h.includes('accept-edits'),
   };
   const models = list && !list.error && list.code === 0 ? parseAgyModels(list.stdout) : [];
   const version = (/(\d+\.\d+(?:\.\d+)?)/.exec(`${ver.stdout} ${ver.stderr}`) || [])[1] || '';
@@ -72,6 +74,23 @@ async function verify(info, cwd) {
   };
 }
 
+// „AGY_ERROR: {…}“ (agy ab 1.2): Fehlermeldung und Wiederholbarkeit auslesen.
+function parseAgyError(stderr) {
+  const lines = String(stderr || '').split('\n').filter((l) => /^\s*AGY_ERROR:/.test(l));
+  if (!lines.length) return null;
+  const raw = lines[lines.length - 1].replace(/^\s*AGY_ERROR:\s*/, '');
+  let j = null;
+  try { j = JSON.parse(raw); } catch { return { text: raw.slice(0, 300), retryable: true }; }
+  const text = [j.short_error, j.message, j.error, j.status].find((x) => typeof x === 'string' && x.trim()) || 'Antigravity hat die Antwort abgebrochen.';
+  return { text: String(text).slice(0, 500), retryable: j.retryable !== false };
+}
+
+function deniedLabel(a) {
+  if (typeof a === 'string') return a;
+  if (!a || typeof a !== 'object') return '';
+  return String(a.tool_name || a.tool || a.name || a.action || a.command || '').slice(0, 80);
+}
+
 const hatStufe = (id) => /-(low|medium|high)$/i.test(id || '');
 
 function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', effort = '' }) {
@@ -81,6 +100,7 @@ function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', eff
   // Viele Modelle tragen die Denkstufe schon im Namen (z. B. gemini-3.1-pro-high). Dann gilt diese
   // Stufe; eine abweichende --effort-Angabe würde ihr widersprechen.
   if (effort && caps.effort && !hatStufe(modelWahl)) args.push('--effort', effort);
+  if (caps.acceptEdits) args.push('--mode', 'accept-edits');
   if (caps.printTimeout) args.push('--print-timeout', '30m');
   if (sessionId) args.push('--conversation', sessionId);
   args.push('-p', prompt);
@@ -95,6 +115,7 @@ function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', eff
   let sawEvent = false;
   let canceled = false;
   const toolSteps = new Set();
+  const deltaSteps = new Set();
 
   const emitText = (delta) => {
     if (!delta) return;
@@ -112,10 +133,17 @@ function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', eff
     } else if (ev.event === 'step_update' && ev.step_update) {
       const su = ev.step_update;
       if (su.conversation_id && !cid) cid = su.conversation_id;
-      if (su.step_type === 'agent_response' && su.text_delta) {
-        if (lastTextStep !== null && lastTextStep !== su.step_index && text && !text.endsWith('\n\n')) emitText('\n\n');
-        lastTextStep = su.step_index;
-        emitText(su.text_delta);
+      if (su.step_type === 'agent_response') {
+        // Normalfall: Text kommt stückweise als text_delta. Liefert ein Schritt seinen Text nur
+        // vollständig (z. B. beim Abschluss), wird er übernommen, sofern noch nichts davon kam.
+        const voll = typeof su.text === 'string' ? su.text : typeof su.response === 'string' ? su.response : '';
+        const teil = su.text_delta || (su.state === 'DONE' && !deltaSteps.has(su.step_index) ? voll : '');
+        if (teil) {
+          if (lastTextStep !== null && lastTextStep !== su.step_index && text && !text.endsWith('\n\n')) emitText('\n\n');
+          lastTextStep = su.step_index;
+          if (su.text_delta) deltaSteps.add(su.step_index);
+          emitText(teil);
+        }
       } else if (su.step_type === 'tool' && !toolSteps.has(su.step_index)) {
         toolSteps.add(su.step_index);
         const ti = su.tool_info || {};
@@ -135,16 +163,30 @@ function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', eff
       if (settled) return;
       settled = true;
       let error = null;
+      // Abbruch durch einen Modell- oder Verbindungsfehler: agy endet mit Code 3 und einer
+      // Zeile „AGY_ERROR: {…}“ auf stderr (mit Angabe, ob ein neuer Versuch sinnvoll ist).
+      const agyError = parseAgyError(stderr);
+      const stderrTail = stderr.split('\n').filter((l) => l.trim() && !/^AGY_ERROR:/.test(l)).slice(-6).join('\n').trim();
+      const denied = result && Array.isArray(result.denied_actions) ? result.denied_actions.map(deniedLabel).filter(Boolean) : [];
       if (spawnError) error = `agy konnte nicht gestartet werden: ${spawnError.message}`;
       else if (canceled) error = null;
+      else if (agyError) error = agyError.text;
       else if (result && result.status && result.status !== 'SUCCESS') error = result.error || `Antigravity meldet: ${result.status}`;
-      else if (!sawEvent) error = stderr.trim().split('\n').slice(-6).join('\n') || 'Antigravity hat keine Antwort geliefert. Bitte „agy update“ ausführen und erneut versuchen.';
-      else if (!result && code !== 0) error = stderr.trim().split('\n').slice(-6).join('\n') || `agy wurde unerwartet beendet (Code ${code}).`;
-      if (!text && result && result.response && !error) emitText(result.response);
-      if (!error && !canceled && !text) error = 'Antigravity hat eine leere Antwort geliefert.';
+      else if (!sawEvent) error = stderrTail || 'Antigravity hat keine Antwort geliefert. Bitte „agy update“ ausführen und erneut versuchen.';
+      else if (!result && code !== 0) error = stderrTail || `agy wurde unerwartet beendet (Code ${code}).`;
+      // Teilantwort aus dem Ergebnis übernehmen, falls nichts gestreamt wurde.
+      if (!text && result && !canceled) emitText(result.response || result.partial_response || '');
+      if (!error && !canceled && !text) {
+        error = denied.length
+          ? `Antigravity durfte nicht alles ausführen und hat deshalb nicht geantwortet: ${denied.join(', ')}.`
+          : `Antigravity hat eine leere Antwort geliefert.${stderrTail ? `\n${stderrTail}` : ''}`;
+      }
+      const errorKind = error ? classifyError(`${error}\n${stderr}`) : null;
       resolve({
-        text, model, sessionId: cid, canceled, error,
-        errorKind: error ? classifyError(`${error}\n${stderr}`) : null,
+        text, model, sessionId: cid, canceled, error, errorKind, denied,
+        // Neuer Versuch lohnt sich bei Verbindungsabbrüchen und leeren Antworten, nicht bei Anmeldung/Modell.
+        retryable: !!error && !canceled && !spawnError && !['anmeldung', 'vertrauen', 'modell'].includes(errorKind)
+          && (agyError ? agyError.retryable : true) && !denied.length,
         stderr: stderr.slice(-4000),
       });
     };

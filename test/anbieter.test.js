@@ -162,3 +162,40 @@ test('Abgelehntes Modell: Antwort mit der Voreinstellung, Senden wartet auf die 
   assert.ok(!s.settings.modellAbgelehnt.antigravity);
   await srv.stop();
 });
+
+// Verhalten der echten CLI (agy 1.3): Abbruch mit „AGY_ERROR“ und Exit-Code 3, verweigerte
+// Aktionen ohne Antwort, Antworttext erst am Schrittende.
+async function einmalSenden(name, env) {
+  const srv = await starte(name, ['agy'], { MANGO_RETRY_DELAY_MS: '50', ...env });
+  await fertig(srv.call);
+  await srv.call('POST', '/api/setup', { workspace: path.join(srv.home, 'Facharbeit'), angaben: {} });
+  const chat = await srv.call('POST', '/api/chats');
+  const done = await srv.send(chat.id, 'Hallo');
+  const state = await srv.call('GET', '/api/settings');
+  await srv.stop();
+  return { done, state };
+}
+
+test('Antigravity: Verbindungsabbruch wird einmal wiederholt, Dateiänderungen sind freigegeben', { skip: SYSTEMWEIT && 'CLI systemweit installiert' }, async () => {
+  const log = path.join(TMP, 'agy-flaky.ndjson');
+  const { done, state } = await einmalSenden('flaky', { FAKE_AGY_FLAKY: path.join(TMP, 'flaky-zaehler'), FAKE_AGY_LOG: log });
+  assert.strictEqual(done.message.status, 'fertig');
+  assert.match(done.message.text, /Hallo von Antigravity/);
+  assert.ok(!done.message.text.includes('Ich fange an'), 'abgebrochene Teilantwort verworfen');
+  assert.ok(done.message.activity.some((a) => /hat abgebrochen \(stream closed: connection reset by peer\) – neuer Versuch/.test(a.label)));
+  assert.strictEqual(state.providers.find((p) => p.id === 'antigravity').status, 'verbunden');
+  const runs = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l).args).filter((a) => a.includes('stream-json'));
+  assert.strictEqual(runs.length, 2);
+  for (const a of runs) assert.strictEqual(a[a.indexOf('--mode') + 1], 'accept-edits');
+});
+
+test('Antigravity: verweigerte Aktionen und Text am Schrittende', { skip: SYSTEMWEIT && 'CLI systemweit installiert' }, async () => {
+  let r = await einmalSenden('verweigert', { FAKE_AGY_DENIED: '1' });
+  assert.strictEqual(r.done.message.status, 'fehler');
+  assert.match(r.done.message.error, /durfte nicht alles ausführen.*write_to_file/);
+  assert.ok(r.done.message.activity.some((a) => a.label === 'Nicht erlaubt: write_to_file'));
+  assert.ok(!r.done.message.activity.some((a) => /neuer Versuch/.test(a.label)), 'kein sinnloser zweiter Versuch');
+  r = await einmalSenden('volltext', { FAKE_AGY_FULLTEXT: '1' });
+  assert.strictEqual(r.done.message.status, 'fertig');
+  assert.strictEqual(r.done.message.text, 'Vollständige Antwort am Schrittende.');
+});
