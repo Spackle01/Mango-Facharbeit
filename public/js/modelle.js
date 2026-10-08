@@ -105,7 +105,7 @@ export function openModelDialog(pid, { onClose } = {}) {
       group('Immer die neueste Version', models.filter((m) => m.gruppe === 'familie')),
       group('Bestimmte Version', models.filter((m) => m.gruppe === 'version'), 'Bleibt fest, auch wenn neuere Versionen erscheinen.'));
   } else {
-    const g = group('Verfügbare Modelle', models.filter((m) => m.gruppe === 'verfuegbar'), 'Liste aus „agy models“.');
+    const g = group('Verfügbare Modelle', models.filter((m) => m.gruppe === 'verfuegbar'), 'Liste aus „agy models“. Steht eine Denkstufe im Namen (Low, Medium, High), gilt sie statt der Gründlichkeit.');
     body.append(g || h('p', { class: 'mg-note' }, 'Die Modellliste von Antigravity konnte nicht gelesen werden. Prüfe den Anbieter in den Einstellungen oder trage die Modell-ID selbst ein.'));
   }
 

@@ -18,7 +18,7 @@ const SYSTEMWEIT = process.platform === 'win32'
 
 const servers = [];
 
-async function starte(name, programme) {
+async function starte(name, programme, env = {}) {
   const dir = path.join(TMP, name);
   const bin = path.join(dir, 'bin');
   const home = path.join(dir, 'home');
@@ -30,7 +30,7 @@ async function starte(name, programme) {
   }
   const port = 5200 + Math.floor(Math.random() * 400);
   const proc = spawn(process.execPath, [path.join(ROOT, 'server/index.js'), '--no-open', '--port', String(port)], {
-    env: { ...process.env, HOME: home, USERPROFILE: home, MANGO_DATA_DIR: path.join(dir, 'data'), PATH: bin, ANTHROPIC_API_KEY: '' },
+    env: { ...process.env, HOME: home, USERPROFILE: home, MANGO_DATA_DIR: path.join(dir, 'data'), PATH: bin, ANTHROPIC_API_KEY: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   servers.push(proc);
@@ -56,7 +56,15 @@ async function starte(name, programme) {
     return data;
   };
   const stop = async () => { proc.kill(); await new Promise((r) => (proc.exitCode !== null ? r() : proc.once('exit', r))); };
-  return { call, stop };
+  const send = async (chatId, text) => {
+    const res = await fetch(`${base}/api/chats/${chatId}/messages`, {
+      method: 'POST', headers: { 'x-mango-token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    if (!res.ok) { const d = await res.json(); throw Object.assign(new Error(d.error), { status: res.status }); }
+    const events = (await res.text()).trim().split('\n').map((l) => JSON.parse(l));
+    return events.find((e) => e.type === 'done');
+  };
+  return { call, stop, send, home };
 }
 
 // Wartet, bis Erkennung und automatische Auswahl abgeschlossen sind.
@@ -117,5 +125,40 @@ test('Kein Anbieter installiert: Hinweise mit Anleitung und Installationsbefehl'
   assert.strictEqual(s.settings.provider, 'antigravity');
   assert.strictEqual(s.settings.modelle.antigravity, 'gemini-3.1-pro-high');
   assert.strictEqual(s.providers.find((p) => p.id === 'antigravity').status, 'verbunden');
+  await srv.stop();
+});
+
+test('Abgelehntes Modell: Antwort mit der Voreinstellung, Senden wartet auf die Prüfung', { skip: SYSTEMWEIT && 'CLI systemweit installiert' }, async () => {
+  const log = path.join(TMP, 'agy-abgelehnt.ndjson');
+  const env = { FAKE_AGY_REJECT: 'gemini-3.1-pro-high', FAKE_AGY_VERIFY_DELAY: '1500', FAKE_AGY_LOG: log };
+  let srv = await starte('abgelehnt', ['agy'], env);
+  // Sofort einrichten und senden, während die Verbindung noch geprüft wird.
+  await srv.call('POST', '/api/setup', { workspace: path.join(srv.home, 'Facharbeit'), angaben: {} });
+  const chat = await srv.call('POST', '/api/chats');
+  const vorher = await srv.call('GET', '/api/settings');
+  assert.ok(vorher.pruefung, 'Prüfung läuft noch');
+  const done = await srv.send(chat.id, 'Hallo');
+  assert.strictEqual(done.message.status, 'fertig', 'wartet auf die Prüfung statt abzubrechen');
+  assert.strictEqual(done.message.provider, 'antigravity');
+  assert.strictEqual(done.message.modellErsatz, 'gemini-3.1-pro-high');
+  assert.ok(done.message.activity.some((a) => /nicht verfügbar – Voreinstellung von Antigravity/.test(a.label)));
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l).args).filter((a) => a.includes('stream-json'));
+  assert.strictEqual(calls.length, 2);
+  assert.strictEqual(calls[0][calls[0].indexOf('--model') + 1], 'gemini-3.1-pro-high');
+  assert.ok(!calls[0].includes('--effort'), 'Denkstufe steht schon im Modellnamen');
+  assert.ok(!calls[1].includes('--model') && !calls[1].includes('--effort'), 'zweiter Versuch wie im Terminal');
+  let s = await srv.call('GET', '/api/settings');
+  assert.strictEqual(s.settings.modelle.antigravity, '');
+  assert.strictEqual(s.settings.modellAbgelehnt.antigravity, 'gemini-3.1-pro-high');
+  assert.ok(!(s.settings.modellGewaehlt || {}).antigravity);
+
+  // Nach einem Neustart bleibt es bei der Voreinstellung.
+  await srv.stop();
+  srv = await starte('abgelehnt', ['agy'], env);
+  s = await fertig(srv.call);
+  assert.strictEqual(s.settings.modelle.antigravity, '');
+  // Eine eigene Wahl hebt die Sperre auf.
+  s = await srv.call('PUT', '/api/settings', { modelle: { antigravity: 'gemini-3.8-flash-high' } });
+  assert.ok(!s.settings.modellAbgelehnt.antigravity);
   await srv.stop();
 });

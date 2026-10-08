@@ -72,11 +72,15 @@ async function verify(info, cwd) {
   };
 }
 
+const hatStufe = (id) => /-(low|medium|high)$/i.test(id || '');
+
 function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', effort = '' }) {
   const caps = info.caps || {};
   const args = ['--output-format', 'stream-json'];
   if (modelWahl && caps.model) args.push('--model', modelWahl);
-  if (effort && caps.effort) args.push('--effort', effort);
+  // Viele Modelle tragen die Denkstufe schon im Namen (z. B. gemini-3.1-pro-high). Dann gilt diese
+  // Stufe; eine abweichende --effort-Angabe würde ihr widersprechen.
+  if (effort && caps.effort && !hatStufe(modelWahl)) args.push('--effort', effort);
   if (caps.printTimeout) args.push('--print-timeout', '30m');
   if (sessionId) args.push('--conversation', sessionId);
   args.push('-p', prompt);

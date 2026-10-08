@@ -13,7 +13,12 @@ const fmt = args[args.indexOf('--output-format') + 1];
 const prompt = args[args.indexOf('-p') + 1];
 const cid = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : '055a398f-db14-4c5f-abbb-1bf03f8120a7';
 if (process.env.FAKE_AGY_UNAUTH) { process.stderr.write('Error: authentication required\n'); process.exit(1); }
-if (fmt === 'json') { console.log(JSON.stringify({ conversation_id: cid, status: 'SUCCESS', response: 'OK' })); process.exit(0); }
+// Laut Doku: unbekanntes --model → Exit-Code 1, Grund auf stderr.
+if (model && model === process.env.FAKE_AGY_REJECT) { process.stderr.write(`Error: invalid model "${model}"\n`); process.exit(1); }
+if (fmt === 'json') {
+  setTimeout(() => console.log(JSON.stringify({ conversation_id: cid, status: 'SUCCESS', response: 'OK' })), Number(process.env.FAKE_AGY_VERIFY_DELAY || 0));
+  return;
+}
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['read_file'], permission_mode: 'request-review', model: model || 'gemini-test' } });
 out({ event: 'step_update', step_update: { conversation_id: cid, step_index: 1, state: 'ACTIVE', step_type: 'tool', tool_name: 'read_file', tool_info: { name: 'read_file', parameters: { AbsolutePath: `${process.cwd()}/00_vorgaben/anforderungen.md` } } } });

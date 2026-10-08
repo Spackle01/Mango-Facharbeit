@@ -50,9 +50,13 @@ function errorHint(kind, providerState, model = '') {
 }
 
 class RunManager {
-  constructor({ providers, settings }) {
+  // bereit: liefert ein Promise, das nach laufenden Anbieterprüfungen erfüllt ist.
+  // modellAbgelehnt(anbieter, id): ein automatisch gewähltes Modell wurde abgelehnt.
+  constructor({ providers, settings, bereit = async () => {}, modellAbgelehnt = async () => {} }) {
     this.providers = providers;
     this.settings = settings; // Funktion, liefert aktuelle Einstellungen
+    this.bereit = bereit;
+    this.modellAbgelehnt = modellAbgelehnt;
     this.runs = new Map();
   }
 
@@ -104,9 +108,13 @@ class RunManager {
   async start(project, chatId, { text, attachments, importId }, send) {
     if (this.runs.has(chatId)) throw Object.assign(new Error('In diesem Chat läuft bereits eine Antwort.'), { status: 409 });
     const chat = project.getChat(chatId);
+    // Läuft noch die Anbieterprüfung (z. B. direkt nach dem Start), erst deren Auswahl abwarten.
+    await this.bereit();
+    if (this.runs.has(chatId)) throw Object.assign(new Error('In diesem Chat läuft bereits eine Antwort.'), { status: 409 });
     const providerId = this.settings().provider;
-    const model = ((this.settings().modelle || {})[providerId]) || '';
-    const effort = GRUENDLICHKEIT[this.settings().gruendlichkeit] || '';
+    let model = ((this.settings().modelle || {})[providerId]) || '';
+    let effort = GRUENDLICHKEIT[this.settings().gruendlichkeit] || '';
+    const selbstGewaehlt = !!(this.settings().modellGewaehlt || {})[providerId];
     const pstate = this.providers.state[providerId];
     if (!this.providers.usable(providerId)) {
       const err = new Error(`${pstate.name}: ${pstate.label || pstate.detail || 'nicht verfügbar'}`);
@@ -219,6 +227,23 @@ class RunManager {
         msg.activity.push({ kind: 'info', label: 'Sitzung neu gestartet' });
         res = await launch(prompt);
       }
+      // Modell abgelehnt: einmal so wiederholen, wie die CLI im Terminal startet (ohne --model und
+      // --effort). Ein automatisch gewähltes Modell nimmt die App danach aus der Auswahl, ein selbst
+      // gewähltes bleibt und wird unter der Antwort gemeldet.
+      if (res.error && res.errorKind === 'modell' && !run.stopRequested && (model || effort)) {
+        const abgelehnt = model;
+        model = '';
+        effort = '';
+        // Die abgelehnte Anfrage hat keinen Verlauf erzeugt: Eine bestehende Sitzung läuft weiter,
+        // sonst beginnt eine neue (bei Claude mit neuer Sitzungs-ID).
+        if (!sess.id) { sessionId = null; resume = false; }
+        Object.assign(msg, { text: '', modelWahl: '', modellErsatz: abgelehnt || null });
+        msg.activity.push({ kind: 'info', label: abgelehnt ? `Modell „${abgelehnt}“ nicht verfügbar – Voreinstellung von ${pstate.name}` : `Neuer Versuch mit der Voreinstellung von ${pstate.name}` });
+        broadcast({ type: 'snapshot', message: msg });
+        res = await launch(prompt);
+        if (!res.error && abgelehnt && !selbstGewaehlt) await this.modellAbgelehnt(providerId, abgelehnt).catch(() => {});
+        if (selbstGewaehlt) msg.modellSelbst = true;
+      }
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
 
       // Dateiänderungen erfassen und vorherige Fassungen sichern.
@@ -276,7 +301,7 @@ class RunManager {
       if (msg.status === 'fehler') msg.hinweis = errorHint(res.errorKind, this.providers.state[providerId], model);
       chat.updatedAt = nowIso();
       await project.saveChat(chat);
-      broadcast({ type: 'done', message: msg, chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt }, providers: this.providers.publicState() });
+      broadcast({ type: 'done', message: msg, chat: { id: chat.id, title: chat.title, updatedAt: chat.updatedAt }, providers: this.providers.publicState(), settings: this.settings() });
     } catch (err) {
       if (run.message) {
         run.message.status = 'fehler';

@@ -268,14 +268,19 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(res.done.message.model, 'fake-opus');
     assert.strictEqual(res.done.message.modelWahl, 'opus');
 
-    // Nicht verfügbares Modell: verständlicher Hinweis, Anbieter bleibt nutzbar.
+    // Nicht verfügbares Modell: Antwort mit der Voreinstellung, Hinweis, eigene Wahl bleibt.
     await call('PUT', '/api/settings', { modelle: { claude: 'claude-gibtsnicht-9' } });
     res = await send(chat.id, 'Und jetzt?');
-    assert.strictEqual(res.done.message.status, 'fehler');
-    assert.strictEqual(res.done.message.errorKind, 'modell');
-    assert.strictEqual(res.done.message.hinweis.aktion, 'modell');
-    assert.match(res.done.message.hinweis.text, /„claude-gibtsnicht-9“ ist bei Claude Code nicht verfügbar/);
+    assert.strictEqual(res.done.message.status, 'fertig');
+    assert.strictEqual(res.done.message.modellErsatz, 'claude-gibtsnicht-9');
+    assert.strictEqual(res.done.message.modellSelbst, true);
+    assert.ok(!/issue with the selected model/.test(res.done.message.text), 'Fehlertext des ersten Versuchs entfernt');
+    calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    args = calls[calls.length - 1].args;
+    assert.ok(!args.includes('--model') && !args.includes('--effort'), 'zweiter Versuch wie im Terminal');
+    assert.ok(args.includes('--resume'), 'bestehende Sitzung läuft weiter');
     s = await call('GET', '/api/state');
+    assert.strictEqual(s.settings.modelle.claude, 'claude-gibtsnicht-9', 'eigene Wahl wird nicht verändert');
     assert.strictEqual(s.providers.find((p) => p.id === 'claude').usable, true);
 
     // Standard: kein --model, Sitzung läuft weiter.
@@ -294,8 +299,14 @@ test('Kompletter Ablauf', async (t) => {
     const agyCalls = fs.readFileSync(AGY_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const agyArgs = agyCalls[agyCalls.length - 1].args;
     assert.strictEqual(agyArgs[agyArgs.indexOf('--model') + 1], 'gemini-3.1-pro-high');
-    assert.strictEqual(agyArgs[agyArgs.indexOf('--effort') + 1], 'high');
+    assert.ok(!agyArgs.includes('--effort'), 'Denkstufe steht im Modellnamen');
     assert.strictEqual(agyArgs[agyArgs.length - 2], '-p', 'Prompt bleibt das letzte Argument');
+    // Modell ohne Stufe im Namen: Gründlichkeit wird als --effort übergeben.
+    await call('PUT', '/api/settings', { modelle: { antigravity: 'gemini-3.8-flash' } });
+    res = await send(chat.id, 'Mit Flash');
+    const lastAgy = fs.readFileSync(AGY_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).pop().args;
+    assert.strictEqual(lastAgy[lastAgy.indexOf('--model') + 1], 'gemini-3.8-flash');
+    assert.strictEqual(lastAgy[lastAgy.indexOf('--effort') + 1], 'high');
     r = await call('PUT', '/api/settings', { provider: 'claude', modelle: { claude: 'sonnet', antigravity: '' }, gruendlichkeit: 'ausgewogen' });
     assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '' });
   });

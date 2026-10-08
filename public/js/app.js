@@ -714,6 +714,12 @@ function renderAssistantMessage(m, isLast) {
     if (isLast) err.append(h('div', { style: { marginTop: '10px' } }, btn('Erneut senden', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: retryLast })));
     el.append(err);
   }
+  if (m.modellErsatz && m.status !== 'fehler' && !running) {
+    const note = h('div', { class: 'msg-note model-ersatz' },
+      `Das Modell „${modelLabel(m.modellErsatz, providerModels(m.provider))}“ war bei ${PROVIDER_NAME[m.provider] || 'dem Anbieter'} nicht verfügbar. Diese Antwort kommt von der Voreinstellung${m.modellSelbst ? '.' : ', die Mango ab jetzt verwendet.'}`);
+    if (m.modellSelbst) note.append(' ', btn('Modell wählen', { cls: 'link-btn', onClick: () => openModelDialog(m.provider) }));
+    el.append(note);
+  }
   if (m.status === 'abgebrochen') el.append(h('div', { class: 'msg-note' }, 'Antwort abgebrochen.'));
   if (m.status === 'unterbrochen') el.append(h('div', { class: 'msg-note' }, 'Die Antwort wurde unterbrochen, weil die App beendet wurde.'));
   if (!running) {
@@ -810,6 +816,7 @@ function handleEvent(chatId, ev, sid) {
 
 async function refreshAfterRun(ev) {
   if (ev.providers) { S.state.providers = ev.providers; }
+  if (ev.settings) S.state.settings = ev.settings; // z. B. nach einem abgelehnten Modell
   const files = refreshFiles();
   if (ev.message && (ev.message.updates || (ev.message.files && ev.message.files.length))) {
     try {
@@ -875,8 +882,9 @@ async function send() {
   if (isStreaming() || (!text && !ready.length)) return;
   if (S.pending.some((p) => p.status === 'uploading')) { toast('Bitte warte, bis alle Dateien hochgeladen sind.'); return; }
   const prov = activeProvider();
-  if (S.state.pruefung || (prov && prov.status === 'pruefe')) { toast('Einen Moment bitte: Die KI-Anbieter werden noch geprüft.'); return; }
-  if (prov && !prov.usable) {
+  // Während der Anbieterprüfung darf gesendet werden: Der Server wartet deren Auswahl ab.
+  const prueft = S.state.pruefung || (prov && prov.status === 'pruefe');
+  if (prov && !prov.usable && !prueft) {
     const banner = S.els.composerWrap.querySelector('.provider-banner');
     if (banner) {
       banner.classList.remove('attention');

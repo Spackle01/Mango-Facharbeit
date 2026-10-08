@@ -89,6 +89,13 @@ class AppStore {
         if (!auto) this.data.settings.modellGewaehlt = { ...(this.data.settings.modellGewaehlt || {}), [anbieter]: true };
       }
     }
+    // Von der App abgelehnte Modelle (siehe runs.js); eine eigene Wahl hebt die Sperre auf.
+    if (auto && patch.modellAbgelehnt && typeof patch.modellAbgelehnt === 'object') {
+      this.data.settings.modellAbgelehnt = { ...(this.data.settings.modellAbgelehnt || {}), ...patch.modellAbgelehnt };
+    }
+    if (!auto && patch.modelle && this.data.settings.modellAbgelehnt) {
+      for (const anbieter of Object.keys(patch.modelle)) delete this.data.settings.modellAbgelehnt[anbieter];
+    }
     await this.save();
     return this.data.settings;
   }

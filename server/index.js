@@ -29,7 +29,13 @@ const app = new AppStore();
 const providers = new Providers();
 let project = null;
 let projectError = null;
-const runs = new RunManager({ providers, settings: () => app.settings });
+const runs = new RunManager({
+  providers,
+  settings: () => app.settings,
+  bereit: async () => { await (pruefung || Promise.resolve()).catch(() => {}); await providers.idle(); },
+  // Abgelehntes Modell aus der automatischen Wahl nehmen; danach gilt die Voreinstellung der CLI.
+  modellAbgelehnt: (anbieter, id) => app.updateSettings({ modelle: { [anbieter]: '' }, modellAbgelehnt: { [anbieter]: id } }, { auto: true }),
+});
 
 class HttpError extends Error {
   constructor(status, message, extra = {}) { super(message); this.status = status; Object.assign(this, extra); }
@@ -55,7 +61,7 @@ async function autoSelect() {
   }
   const patch = {};
   if (ziel !== s.provider) patch.provider = ziel;
-  if (installiert('antigravity') && !(s.modellGewaehlt || {}).antigravity) {
+  if (installiert('antigravity') && !(s.modellGewaehlt || {}).antigravity && !(s.modellAbgelehnt || {}).antigravity) {
     const best = bestGeminiModel(st.antigravity.models);
     if (best && best !== s.modelle.antigravity) patch.modelle = { antigravity: best };
   }

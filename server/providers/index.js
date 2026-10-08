@@ -20,6 +20,7 @@ class Providers {
   constructor() {
     this.state = {};
     this.pending = {};
+    this.verifying = {};
     for (const [id, mod] of Object.entries(MODULES)) this.state[id] = { id, name: mod.NAME, status: 'pruefe' };
   }
 
@@ -58,17 +59,26 @@ class Providers {
 
   // Für Antigravity: echter Testaufruf, da es keinen Statusbefehl gibt.
   async verify(id, cwd) {
-    await this.detect(id);
-    const s = this.state[id];
-    if (!s.installed || id !== 'antigravity') return s;
-    this.state[id] = { ...s, status: 'pruefe' };
-    try {
-      const r = await antigravity.verify(s, cwd);
-      this.state[id] = { ...s, ...r, hint: r.hint || null, checkedAt: new Date().toISOString() };
-    } catch (err) {
-      this.state[id] = { ...s, status: 'fehler', detail: err.message };
-    }
-    return this.state[id];
+    if (this.verifying[id]) return this.verifying[id];
+    this.verifying[id] = (async () => {
+      await this.detect(id);
+      const s = this.state[id];
+      if (!s.installed || id !== 'antigravity') return s;
+      this.state[id] = { ...s, status: 'pruefe' };
+      try {
+        const r = await antigravity.verify(s, cwd);
+        this.state[id] = { ...s, ...r, hint: r.hint || null, checkedAt: new Date().toISOString() };
+      } catch (err) {
+        this.state[id] = { ...s, status: 'fehler', detail: err.message };
+      }
+      return this.state[id];
+    })().finally(() => { delete this.verifying[id]; });
+    return this.verifying[id];
+  }
+
+  // Wartet, bis laufende Erkennungen und Testaufrufe fertig sind.
+  async idle() {
+    await Promise.all([...Object.values(this.pending), ...Object.values(this.verifying)].map((p) => p.catch(() => {})));
   }
 
   async detectAll(activeId, cwd) {

@@ -149,8 +149,11 @@ export function showOnboarding({ fromSettings = false } = {}) {
 
   // Bausteine für beide Wege
   const grid = h('div', { class: 'form-grid' }, f.name.el, f.klasse.el, f.titel.el, f.fach.el, f.lehrkraft.el, f.abgabedatum.el);
-  const gridHost = h('div', { class: 'grid-host' });
-  const optional = h('details', { class: 'optional-fields' }, h('summary', {}, iconEl('chevronRight', 14), 'Angaben selbst eintragen (optional)'));
+  // Beim Drop-in werden die Angaben ebenfalls abgefragt. Was Mango in den Dateien findet,
+  // füllt es nur in leere Felder ein.
+  const importHead = h('div', { class: 'angaben-head' }, h('b', {}, 'Deine Angaben'),
+    h('span', {}, 'Was du leer lässt, ergänzt Mango aus deinen Dateien.'));
+  const gridHost = h('div', { class: 'grid-host' }, importHead, grid);
   const picker = createPicker({ onChange: () => { if (mode === 'import') submit.disabled = !picker.valid(); } });
   const pickerHost = h('div', { class: 'picker-host' }, picker.el);
   const progress = createProgress();
@@ -159,7 +162,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
   const back = btn('Zurück', { cls: 'btn', onClick: () => setMode(null) });
   const actions = h('div', { class: 'actions' }, submit, back);
   if (fromSettings) actions.append(btn('Abbrechen', { cls: 'btn', onClick: () => enterApp() }));
-  form.append(pickerHost, gridHost, optional, h('div', { class: 'ws-grid' }, wsField), progress.el, actions);
+  form.append(pickerHost, gridHost, h('div', { class: 'ws-grid' }, wsField), progress.el, actions);
 
   let mode = null;
   function setMode(m) {
@@ -168,15 +171,12 @@ export function showOnboarding({ fromSettings = false } = {}) {
     form.hidden = !m;
     if (!m) { choice.querySelector('.choice-card').focus(); return; }
     pickerHost.hidden = m !== 'import';
+    importHead.hidden = m !== 'import';
     if (m === 'import') {
-      optional.append(grid);
-      optional.hidden = false;
       submit.querySelector('.lbl').textContent = 'Einsortieren und loslegen';
       submit.disabled = !picker.valid();
       setTimeout(() => form.querySelector('.drop-zone').focus());
     } else {
-      gridHost.append(grid);
-      optional.hidden = true;
       submit.querySelector('.lbl').textContent = 'Los geht’s';
       submit.disabled = false;
       setTimeout(() => f.name.input.focus());
@@ -190,7 +190,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
     const angaben = {};
     for (const [k, v] of Object.entries(f)) angaben[k] = v.input.value.trim();
     const datum = parseDateDE(angaben.abgabedatum);
-    if (datum === null) { note.className = 'field-note err'; note.textContent = 'Abgabedatum bitte als TT.MM.JJJJ eingeben oder leer lassen.'; if (mode === 'import') optional.open = true; f.abgabedatum.input.focus(); return; }
+    if (datum === null) { note.className = 'field-note err'; note.textContent = 'Abgabedatum bitte als TT.MM.JJJJ eingeben oder leer lassen.'; f.abgabedatum.input.focus(); return; }
     angaben.abgabedatum = datum;
     if (mode === 'import' && !picker.valid()) { note.className = 'field-note err'; note.textContent = 'Bitte zuerst Dateien oder Ordner auswählen.'; return; }
     submit.disabled = true;
@@ -210,7 +210,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
     if (mode !== 'import') { await enterApp(); return; }
     // Drop-in: Dateien hochladen und prüfen, danach sortiert der Assistent im Chat ein.
     pickerHost.hidden = true;
-    optional.hidden = true;
+    gridHost.hidden = true;
     progress.el.hidden = false;
     actions.hidden = true;
     let inv = null;
