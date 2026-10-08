@@ -22,8 +22,15 @@ function detached(cmd, args) {
   });
 }
 
+// Die Desktop-App kann eigene Umsetzungen liefern (native Dialoge, shell.openPath …).
+let host = null;
+function setHost(h) {
+  host = h || null;
+}
+
 // Öffnet eine Datei oder einen Ordner mit dem Standardprogramm.
 async function openPath(target) {
+  if (host && host.openPath) return host.openPath(target);
   if (IS_WIN) return detached('explorer.exe', [target]);
   if (IS_MAC) return detached('open', [target]);
   if (which('xdg-open')) return detached('xdg-open', [target]);
@@ -32,6 +39,7 @@ async function openPath(target) {
 
 // Zeigt eine Datei im Dateimanager an.
 async function revealPath(target) {
+  if (host && host.revealPath) return host.revealPath(target);
   if (IS_WIN) return detached('explorer.exe', [`/select,${target}`]);
   if (IS_MAC) return detached('open', ['-R', target]);
   return openPath(path.dirname(target));
@@ -58,6 +66,7 @@ function run(cmd, args, timeout = 10 * 60 * 1000) {
 
 // Nativer Ordnerdialog. supported=false, wenn keiner verfügbar ist.
 async function pickFolder() {
+  if (host && host.pickFolder) return host.pickFolder();
   if (IS_WIN) {
     const ps = [
       '[Console]::OutputEncoding=[Text.Encoding]::UTF8;',
@@ -121,4 +130,4 @@ async function openAppWindow(url) {
   return false;
 }
 
-module.exports = { openPath, revealPath, pickFolder, openAppWindow, antigravityAppAvailable, openInAntigravity };
+module.exports = { setHost, openPath, revealPath, pickFolder, openAppWindow, antigravityAppAvailable, openInAntigravity };

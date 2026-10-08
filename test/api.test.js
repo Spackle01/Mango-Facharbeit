@@ -88,6 +88,7 @@ test('Sicherheit: Token, Host und Ursprung werden geprüft', async () => {
 
 let importId = null;
 let importOrdner = null;
+let anhangPfad = null;
 
 test('Kompletter Ablauf', async (t) => {
   let state = await call('GET', '/api/state');
@@ -184,6 +185,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.match(user.attachments[0].path, /^anhaenge\/\d{4}-\d{2}-\d{2}\/Mein Lerntagebuch\.docx$/);
     assert.ok(fs.existsSync(path.join(WS, user.attachments[0].path)));
     assert.ok(fs.existsSync(path.join(WS, user.attachments[0].extrakt)));
+    anhangPfad = user.attachments[0].path;
     assert.strictEqual(user.attachments[1].lesbar, 'nein');
     assert.strictEqual(done.message.status, 'fertig');
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -234,7 +236,11 @@ test('Kompletter Ablauf', async (t) => {
 
   await t.test('Modellauswahl für beide Anbieter', async () => {
     let s = await call('GET', '/api/state');
-    assert.deepStrictEqual(s.settings.modelle, { claude: '', antigravity: '' });
+    assert.deepStrictEqual(s.settings.modelle, { claude: 'sonnet', antigravity: '' }, 'sparsame Voreinstellung');
+    assert.strictEqual(s.settings.gruendlichkeit, 'ausgewogen');
+    const first = JSON.parse(fs.readFileSync(LOG, 'utf8').trim().split('\n')[0]);
+    assert.strictEqual(first.args[first.args.indexOf('--model') + 1], 'sonnet');
+    assert.strictEqual(first.args[first.args.indexOf('--effort') + 1], 'medium');
     const claude = s.providers.find((p) => p.id === 'claude');
     const agy = s.providers.find((p) => p.id === 'antigravity');
     assert.strictEqual(claude.modelWahl, true);
@@ -245,14 +251,18 @@ test('Kompletter Ablauf', async (t) => {
 
     await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus & calc' } }), (e) => e.status === 400);
     await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus"; rm -rf /' } }), (e) => e.status === 400);
-    let r = await call('PUT', '/api/settings', { modelle: { claude: 'opus' } });
+    let r = await call('PUT', '/api/settings', { modelle: { claude: 'opus' }, gruendlichkeit: 'gruendlich' });
     assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: '' });
+    assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich');
+    r = await call('PUT', '/api/settings', { gruendlichkeit: 'egal' });
+    assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich', 'ungültige Werte werden ignoriert');
 
     const chat = await call('POST', '/api/chats');
     let res = await send(chat.id, 'Mit Opus bitte');
     let calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     let args = calls[calls.length - 1].args;
     assert.strictEqual(args[args.indexOf('--model') + 1], 'opus');
+    assert.strictEqual(args[args.indexOf('--effort') + 1], 'high');
     assert.strictEqual(res.done.message.model, 'fake-opus');
     assert.strictEqual(res.done.message.modelWahl, 'opus');
 
@@ -282,8 +292,9 @@ test('Kompletter Ablauf', async (t) => {
     const agyCalls = fs.readFileSync(AGY_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const agyArgs = agyCalls[agyCalls.length - 1].args;
     assert.strictEqual(agyArgs[agyArgs.indexOf('--model') + 1], 'gemini-3.1-pro-high');
+    assert.strictEqual(agyArgs[agyArgs.indexOf('--effort') + 1], 'high');
     assert.strictEqual(agyArgs[agyArgs.length - 2], '-p', 'Prompt bleibt das letzte Argument');
-    r = await call('PUT', '/api/settings', { provider: 'claude', modelle: { claude: 'sonnet', antigravity: '' } });
+    r = await call('PUT', '/api/settings', { provider: 'claude', modelle: { claude: 'sonnet', antigravity: '' }, gruendlichkeit: 'ausgewogen' });
     assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '' });
   });
 
@@ -373,7 +384,7 @@ test('Kompletter Ablauf', async (t) => {
     importOrdner = imp.ordner;
   });
 
-  await t.test('Übernahme: Analyse durch den Assistenten, nur lesend', async () => {
+  await t.test('Drop-in: Assistent sortiert ein, App kopiert und wandelt um, Originale bleiben', async () => {
     const notizenVorher = fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Notizen.md'), 'utf8');
     const chat = await call('POST', '/api/chats');
     await assert.rejects(call('POST', `/api/chats/${chat.id}/messages`, { importId: '2020-01-01_0000' }), (e) => e.status === 400);
@@ -385,23 +396,41 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(start.userMessage.import.nichtUebernommen, 1);
     assert.strictEqual(start.message.mode, 'import');
     const { message: m, chat: c } = events.find((e) => e.type === 'done');
-    assert.strictEqual(c.title, 'Übernahme der bisherigen Arbeit');
+    assert.strictEqual(c.title, 'Bisherige Arbeit einsortiert');
     assert.strictEqual(m.status, 'fertig', m.error);
 
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const last = calls[calls.length - 1];
-    assert.strictEqual(last.args[last.args.indexOf('--allowedTools') + 1], 'Read,Glob,Grep,TodoWrite,Skill');
-    assert.match(last.args[last.args.indexOf('--disallowedTools') + 1], /Write,Edit/);
-    assert.match(last.input, new RegExp(`<uebernahme id="${importId}"`));
+    assert.match(last.args[last.args.indexOf('--allowedTools') + 1], /Write,Edit/, 'Arbeitsdateien dürfen ergänzt werden');
+    assert.ok(!last.args.includes('--disallowedTools'));
+    assert.match(last.input, new RegExp(`<einsortieren id="${importId}"`));
     assert.match(last.input, /inventar\.md/);
+    assert.match(fs.readFileSync(path.join(WS, '.facharbeit', 'import', importId, 'inventar.md'), 'utf8'), /\| Lerntagebuch \| 06_lerntagebuch_und_konsultationen\/ \|/, 'Ordnervorschlag im Inventar');
 
     // Originale bleiben unverändert, der Versuch wird zurückgesetzt und angezeigt.
     assert.strictEqual(fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Notizen.md'), 'utf8'), notizenVorher);
     assert.strictEqual(m.files.find((f) => f.path.endsWith('Meine Facharbeit/Notizen.md')).aktion, 'zurueckgesetzt');
+    if (process.platform !== 'win32') {
+      assert.strictEqual(fs.statSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md')).mode & 0o222, 0, 'Originale sind schreibgeschützt');
+    }
 
-    assert.ok(!/```(uebernahme|arbeitsstand)/.test(m.text));
+    // Einsortiert: kopiert, umgewandelt, abgelehnt.
+    assert.ok(!/```(uebernahme|arbeitsstand|einsortieren)/.test(m.text));
     assert.match(m.text, /Welches Fach ist dein Bezugsfach\?/);
     const r = m.importErgebnis;
+    const byTarget = Object.fromEntries(r.einsortiert.filter((x) => !x.fehler).map((x) => [x.nach, x]));
+    assert.strictEqual(byTarget['02_expose_und_zeitplan/expose.md'].aktion, 'kopiert');
+    assert.strictEqual(fs.readFileSync(path.join(WS, '02_expose_und_zeitplan/expose.md'), 'utf8'), fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md'), 'utf8'));
+    assert.strictEqual(byTarget['06_lerntagebuch_und_konsultationen/lerntagebuch.md'].aktion, 'umgewandelt');
+    const lt = fs.readFileSync(path.join(WS, '06_lerntagebuch_und_konsultationen/lerntagebuch.md'), 'utf8');
+    assert.match(lt, /^<!-- Arbeitskopie von „Lerntagebuch\.docx“/);
+    assert.match(lt, /Ziele des Lerntagebuchs/, 'Word-Text wortgetreu übernommen');
+    assert.strictEqual(fs.readFileSync(path.join(WS, '01_themenfindung_und_mindmap/Notizen zum Thema.md'), 'utf8'), notizenVorher, 'Kopie vom unveränderten Original');
+    const fehler = r.einsortiert.filter((x) => x.fehler).map((x) => x.fehler);
+    assert.strictEqual(fehler.length, 3);
+    assert.ok(fehler.some((f) => /01_ bis 08_/.test(f)), 'Ziel außerhalb der Arbeitsordner abgelehnt');
+    assert.ok(fehler.some((f) => /uebernommen\/ oder anhaenge\//.test(f)), 'Quelle außerhalb der Originale abgelehnt');
+    assert.ok(m.files.some((f) => f.path === '02_expose_und_zeitplan/expose.md' && f.aktion === 'neu'));
     assert.strictEqual(r.analysiert, true);
     assert.strictEqual(r.anzahl, 8);
     assert.deepStrictEqual(r.fehlt, ['Zeitplan', 'Literaturverzeichnis']);
@@ -456,9 +485,9 @@ test('Kompletter Ablauf', async (t) => {
     const chat = await call('POST', '/api/chats');
     const res = await call('POST', `/api/chats/${chat.id}/messages`, { importId: imp.id }, { raw: true });
     const done = (await res.text()).trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.type === 'done');
-    assert.strictEqual(done.chat.title, 'Weiteres Material übernommen');
+    assert.strictEqual(done.chat.title, 'Neues Material einsortiert');
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    assert.match(calls[calls.length - 1].input, /Es gibt bereits einen übernommenen Stand/);
+    assert.match(calls[calls.length - 1].input, /Es gibt schon einen übernommenen Stand/);
     const u = (await call('GET', '/api/state')).project.uebernahme;
     assert.deepStrictEqual(u.importe.map((i) => i.id), [importId, imp.id]);
     assert.strictEqual(u.anzahl, 9);
@@ -466,6 +495,16 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(u.unlesbar.length, 1, 'Befunde der ersten Übernahme bleiben');
     const md = fs.readFileSync(path.join(WS, '.facharbeit', 'uebernahme.md'), 'utf8');
     assert.match(md, /9 Dateien aus 2 Übernahmen/);
+
+    // Auch Chat-Anhänge lassen sich einsortieren; „ersetzen“ sichert die vorige Fassung.
+    const vorher = fs.readFileSync(path.join(WS, '06_lerntagebuch_und_konsultationen/lerntagebuch.md'), 'utf8');
+    const r2 = await send(chat.id, `SORTIERE: ${anhangPfad}`);
+    const e = r2.done.message.einsortiert[0];
+    assert.strictEqual(e.nach, '06_lerntagebuch_und_konsultationen/lerntagebuch.md');
+    assert.strictEqual(e.ersetzt, true);
+    assert.strictEqual(fs.readFileSync(path.join(WS, e.version), 'utf8'), vorher, 'vorige Fassung gesichert');
+    assert.ok(r2.done.message.files.some((f) => f.path === e.nach && f.aktion === 'geaendert'));
+    assert.strictEqual(r2.done.message.text, 'Erledigt.');
     assert.match(md, /## Festgelegte aktuelle Fassungen/);
   });
 

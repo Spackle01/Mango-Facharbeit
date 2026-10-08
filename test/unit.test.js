@@ -233,3 +233,65 @@ test('Übernahme: vorhandene Projektangaben werden nicht überschrieben', async 
   assert.strictEqual(normal.konflikte.length, 0);
   assert.strictEqual(p.data.angaben.titel, 'Anderes Thema');
 });
+
+test('Word → Markdown: Überschriften, Fett/Kursiv, Listen, Tabellen', () => {
+  const p = (inner, style = '', num = false) => `<w:p><w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ''}${num ? '<w:numPr><w:ilvl w:val="0"/></w:numPr>' : ''}</w:pPr>${inner}</w:p>`;
+  const r = (t, props = '') => `<w:r>${props ? `<w:rPr>${props}</w:rPr>` : ''}<w:t xml:space="preserve">${t}</w:t></w:r>`;
+  const xml = `<?xml version="1.0"?><w:document xmlns:w="w"><w:body>${[
+    p(r('Mein Titel'), 'Title'),
+    p(r('Einleitung'), 'berschrift1'),
+    p(r('Das ist ') + r('wichtig', '<w:b/>') + r(' und ') + r('betont', '<w:i/>') + r(' – ') + r('nicht fett', '<w:b w:val="0"/>') + r('.')),
+    p(r('Punkt A'), '', true),
+    '<w:tbl><w:tr><w:tc>' + p(r('Kopf 1')) + '</w:tc><w:tc>' + p(r('Kopf 2')) + '</w:tc></w:tr><w:tr><w:tc>' + p(r('a|b')) + '</w:tc><w:tc>' + p(r('c')) + '</w:tc></w:tr></w:tbl>',
+  ].join('')}</w:body></w:document>`;
+  const docx = writeZip([{ name: '[Content_Types].xml', data: Buffer.from('<Types/>') }, { name: 'word/document.xml', data: Buffer.from(xml) }]);
+  const md = extract.docxToText(docx);
+  assert.match(md, /^# Mein Titel$/m);
+  assert.match(md, /^# Einleitung$/m);
+  assert.match(md, /^Das ist \*\*wichtig\*\* und \*betont\* – nicht fett\.$/m);
+  assert.match(md, /^- Punkt A$/m);
+  assert.match(md, /^\| Kopf 1 \| Kopf 2 \|\n\| --- \| --- \|\n\| a\\\|b \| c \|$/m);
+});
+
+test('Einsortieren: Plan lesen und sicher ausführen', async () => {
+  const sortieren = require('../server/sortieren');
+  const parsed = sortieren.parsePlan('Fertig.\n\n```einsortieren\n[{"von":"uebernommen/x/a.md","nach":"02_expose_und_zeitplan/expose.md"},{"von":"","nach":"x"},]\n```\n```einsortieren\n{"dateien":[{"quelle":"anhaenge/b.txt","ziel":"01_themenfindung_und_mindmap/b.md","ersetzen":true}]}\n```');
+  assert.strictEqual(parsed.text, 'Fertig.');
+  assert.deepStrictEqual(parsed.plan, [
+    { von: 'uebernommen/x/a.md', nach: '02_expose_und_zeitplan/expose.md', ersetzen: false },
+    { von: 'anhaenge/b.txt', nach: '01_themenfindung_und_mindmap/b.md', ersetzen: true },
+  ]);
+  assert.strictEqual(sortieren.parsePlan('```einsortieren\n[kaputt\n```').invalid, true);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ws-'));
+  const p = await Project.create(dir, { name: 'Test' });
+  const src = path.join(dir, 'uebernommen', 'x');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'a.md'), '# A');
+  fs.writeFileSync(path.join(src, 'notiz.txt'), 'Idee');
+  fs.copyFileSync(path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx'), path.join(src, 'lt.docx'));
+  fs.writeFileSync(path.join(src, 'bild.png'), 'PNG');
+  fs.writeFileSync(path.join(dir, '02_expose_und_zeitplan', 'expose.md'), 'alt');
+  const res = await sortieren.applyPlan(p, [
+    { von: 'uebernommen/x/a.md', nach: '02_expose_und_zeitplan/expose.md' },
+    { von: 'uebernommen/x/a.md', nach: '02_expose_und_zeitplan/expose.md', ersetzen: true },
+    { von: 'uebernommen/x/lt.docx', nach: '06_lerntagebuch_und_konsultationen/lerntagebuch.md' },
+    { von: 'uebernommen/x/notiz.txt', nach: '01_themenfindung_und_mindmap/../../../notiz.md' },
+    { von: 'uebernommen/x/bild.png', nach: '01_themenfindung_und_mindmap/bild.jpg' },
+    { von: 'uebernommen/x/fehlt.md', nach: '01_themenfindung_und_mindmap/fehlt.md' },
+    { von: '02_expose_und_zeitplan/expose.md', nach: '01_themenfindung_und_mindmap/x.md' },
+    { von: 'uebernommen/x/a.md', nach: '.facharbeit/x.md' },
+  ]);
+  assert.strictEqual(res[0].nach, '02_expose_und_zeitplan/expose_v2.md', 'vorhandenes Ziel bleibt, neue Fassung');
+  assert.strictEqual(res[1].ersetzt, true, 'ersetzen sichert die alte Fassung');
+  assert.strictEqual(fs.readFileSync(path.join(dir, res[1].version), 'utf8'), 'alt');
+  assert.strictEqual(fs.readFileSync(path.join(dir, '02_expose_und_zeitplan/expose.md'), 'utf8'), '# A');
+  assert.strictEqual(res[2].aktion, 'umgewandelt');
+  assert.match(fs.readFileSync(path.join(dir, res[2].nach), 'utf8'), /Arbeitskopie von „lt\.docx“[\s\S]*Ziele des Lerntagebuchs/);
+  assert.match(res[3].fehler, /01_ bis 08_/, 'Pfadausbruch abgelehnt');
+  assert.match(res[4].fehler, /\.png lässt sich nicht als \.jpg/);
+  assert.match(res[5].fehler, /nicht gefunden/);
+  assert.match(res[6].fehler, /uebernommen\/ oder anhaenge\//);
+  assert.match(res[7].fehler, /01_ bis 08_/);
+  assert.ok(!fs.existsSync(path.join(dir, 'notiz.md')));
+});

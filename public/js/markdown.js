@@ -87,6 +87,7 @@ export function renderMarkdown(src, opts = {}) {
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim()) { flush(); i++; continue; }
+    if (/^\s*<!--.*-->\s*$/.test(line)) { i++; continue; } // Hinweise wie „Arbeitskopie von …“
     const fence = /^(\s*)(```+|~~~+)\s*([\w+-]*)/.exec(line);
     if (fence) {
       flush();
@@ -157,7 +158,7 @@ export function renderMarkdown(src, opts = {}) {
 export function stripUpdateBlock(text) {
   let out = text;
   for (;;) {
-    const idx = out.search(/```[ \t]*(arbeitsstand|uebernahme)/i);
+    const idx = out.search(/```[ \t]*(arbeitsstand|uebernahme|einsortieren)/i);
     if (idx < 0) return out;
     const rest = out.slice(idx);
     const end = rest.indexOf('```', 3);

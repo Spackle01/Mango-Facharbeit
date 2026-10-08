@@ -13,8 +13,7 @@ Die Prüfung ergänzt die Sprachregeln der Schule (Noll/Vode, `00_vorgaben/anfor
 
 ## Ablauf
 
-1. **Scannen.** Wenn du Befehle ausführen kannst, speichere den Text in einer Datei und führe das Skript aus dem Ordner `scripts/` dieses Skills aus:
-   `python3 scripts/ai_tell_scan.py entwurf.md` (Pfad relativ zum Skill-Ordner, z. B. `.agents/skills/sprachpruefung/scripts/ai_tell_scan.py` oder `.claude/skills/sprachpruefung/scripts/ai_tell_scan.py`). Die Zahlen sind nur ein Ausgangspunkt. Kannst du keine Befehle ausführen, prüfe anhand der Listen unten.
+1. **Scannen.** In der App Mango Facharbeit stehen keine Befehle zur Verfügung: Prüfe direkt anhand der Listen unten, ohne ein Skript zu starten. Nur außerhalb der App (mit Terminal) kannst du das Skript nutzen: `python3 .claude/skills/sprachpruefung/scripts/ai_tell_scan.py entwurf.md`. Seine Zahlen sind nur ein Ausgangspunkt.
 2. **Lesen, was ein Skript nicht findet** (Abschnitt „Inhaltliche Merkmale“): allgemeine Aussagen, aufgeblähte Bedeutung, fehlende Belege, keine eigene Position im Schluss, alles abgedeckt und nichts vertieft, Nominalstil.
 3. **Bericht** in dieser Form:
 

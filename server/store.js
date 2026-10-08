@@ -7,7 +7,7 @@ const {
 } = require('./util');
 const { AUFGABEN, AUFGABEN_BY_ID, STATUS } = require('./aufgaben');
 const ws = require('./workspace');
-const { validModelId } = require('./providers/models');
+const { validModelId, GRUENDLICHKEIT } = require('./providers/models');
 
 function appDataDir() {
   if (process.env.MANGO_DATA_DIR) return path.resolve(process.env.MANGO_DATA_DIR);
@@ -44,7 +44,14 @@ class AppStore {
     this.data = await readJson(this.file, null);
     if (!this.data) this.data = { version: 1, settings: {}, projects: [], lastProjectId: null };
     this.data.settings = { theme: 'system', provider: 'claude', ...this.data.settings };
-    this.data.settings.modelle = { claude: '', antigravity: '', ...(this.data.settings.modelle || {}) };
+    // Neue Installationen: sparsame Voreinstellung (Sonnet, ausgewogen). Ältere Einstellungen ohne
+    // eigene Modellwahl werden einmalig ebenso umgestellt.
+    const s = this.data.settings;
+    const neu = !s.version || s.version < 2;
+    s.modelle = { claude: neu ? 'sonnet' : '', antigravity: '', ...(s.modelle || {}) };
+    if (neu && !s.modelle.claude) s.modelle.claude = 'sonnet';
+    if (!GRUENDLICHKEIT[s.gruendlichkeit]) s.gruendlichkeit = 'ausgewogen';
+    s.version = 2;
     this.data.projects = Array.isArray(this.data.projects) ? this.data.projects : [];
     return this.data;
   }
@@ -60,6 +67,7 @@ class AppStore {
   async updateSettings(patch) {
     if (patch.theme && ['light', 'dark', 'system'].includes(patch.theme)) this.data.settings.theme = patch.theme;
     if (patch.provider && ['claude', 'antigravity'].includes(patch.provider)) this.data.settings.provider = patch.provider;
+    if (patch.gruendlichkeit && GRUENDLICHKEIT[patch.gruendlichkeit]) this.data.settings.gruendlichkeit = patch.gruendlichkeit;
     if (patch.modelle && typeof patch.modelle === 'object') {
       for (const [anbieter, wert] of Object.entries(patch.modelle)) {
         if (!['claude', 'antigravity'].includes(anbieter) || typeof wert !== 'string') continue;

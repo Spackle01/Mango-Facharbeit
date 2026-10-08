@@ -2,7 +2,7 @@
 // Test-Double der Antigravity CLI (Ereignisformat laut https://antigravity.google/docs/cli/headless/).
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('agy 1.2.3'); process.exit(0); }
-if (args[0] === '--help') { console.log('-p, --print  --output-format text|json|stream-json  --conversation  --print-timeout  --model <slug>'); process.exit(0); }
+if (args[0] === '--help') { console.log('-p, --print  --output-format text|json|stream-json  --conversation  --print-timeout  --model <slug>  --effort low|medium|high'); process.exit(0); }
 if (args[0] === 'models') {
   console.log('gemini-3.8-flash-high     Gemini 3.8 Flash (High)\ngemini-3.8-flash-medium   Gemini 3.8 Flash (Medium)\ngemini-3.1-pro-high       Gemini 3.1 Pro (High)');
   process.exit(0);

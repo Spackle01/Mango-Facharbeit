@@ -1,8 +1,8 @@
-name: Release (Windows-EXE)
+name: Release (Windows-App)
 
-# Läuft bei jedem Push: Tests, Build und Starttest der EXE unter Windows.
-# Ein Release entsteht, wenn es für die Version aus package.json noch keines gibt
-# (Tag v<version> wird dabei angelegt) oder wenn ein Tag v* gepusht wird.
+# Läuft bei jedem Push: Tests, Bau des Windows-Installers, Starttest der gebauten und der
+# installierten App. Ein Release entsteht, wenn es für die Version aus package.json noch
+# keines gibt (Tag v<version> wird dabei angelegt) oder wenn ein Tag v* gepusht wird.
 on:
   push:
     branches: ['main', 'claude/**']
@@ -17,8 +17,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Tests und EXE bauen
+  test:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,58 +27,72 @@ jobs:
           node-version: '22'
       - name: Tests
         run: npm test
-      - name: Windows-EXE bauen
-        run: node build/build-exe.js --target win-x64
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mango-facharbeit-win-x64
-          path: |
-            dist/Mango-Facharbeit-*-win-x64.exe
-            dist/Mango-Facharbeit-*-win-x64.exe.sha256
-          if-no-files-found: error
 
-  smoke:
-    name: Starttest unter Windows
-    needs: build
+  build:
+    name: Windows-App bauen und prüfen
+    needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: mango-facharbeit-win-x64
-      - name: EXE starten und Oberfläche abrufen
+          node-version: '22'
+          cache: npm
+      - name: Abhängigkeiten für den Build
+        run: npm ci --no-audit --no-fund
+      - name: Installer bauen
+        run: npx electron-builder --win nsis --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Starttest der gebauten App
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Filter 'Mango-Facharbeit-*-win-x64.exe' | Select-Object -First 1
-          $env:MANGO_DATA_DIR = Join-Path $env:RUNNER_TEMP 'mango-daten'
-          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--no-open', '--port', '4517' -PassThru `
-            -RedirectStandardOutput out.txt -RedirectStandardError err.txt
-          $ok = $false
-          for ($i = 0; $i -lt 60; $i++) {
-            Start-Sleep -Seconds 1
-            try {
-              $html = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4517/).Content
-              if ($html -match 'name="mango-token" content="([a-f0-9]+)"') {
-                $state = Invoke-RestMethod -Uri http://127.0.0.1:4517/api/state -Headers @{ 'x-mango-token' = $Matches[1] }
-                Write-Host "Version: $($state.version), Plattform: $($state.platform)"
-                $state.providers | ForEach-Object { Write-Host "Anbieter $($_.name): $($_.label)" }
-                $ok = $state.platform -eq 'win32'
-                break
-              }
-            } catch { }
+          $out = Join-Path $env:RUNNER_TEMP 'start-gebaut.json'
+          $exe = Get-Item 'dist\win-unpacked\Mango Facharbeit.exe'
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList "--smoke-test=$out" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw 'Zeitüberschreitung beim Starttest' }
+          Get-Content $out
+          $r = Get-Content $out -Raw | ConvertFrom-Json
+          if (-not $r.ok -or $r.platform -ne 'win32' -or -not $r.logo) { throw 'Die App hat die Oberfläche nicht korrekt geladen.' }
+      - name: Installer still ausführen und installierte App starten
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Filter 'Mango-Facharbeit-Setup-*.exe' | Select-Object -First 1
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+          $installed = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter 'Mango Facharbeit.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $installed) { throw 'Die installierte App wurde nicht gefunden.' }
+          Write-Host "Installiert: $($installed.FullName)"
+          $out = Join-Path $env:RUNNER_TEMP 'start-installiert.json'
+          $p = Start-Process -FilePath $installed.FullName -ArgumentList "--smoke-test=$out" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw 'Zeitüberschreitung beim Starttest' }
+          Get-Content $out
+          $r = Get-Content $out -Raw | ConvertFrom-Json
+          if (-not $r.ok) { throw 'Die installierte App startet nicht.' }
+      - name: Prüfsumme
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter 'Mango-Facharbeit-Setup-*.exe' | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Encoding ascii -NoNewline "$($_.FullName).sha256"
+            Write-Host "$($_.Name): $([math]::Round($_.Length / 1MB, 1)) MB, SHA-256 $hash"
           }
-          Get-Content out.txt, err.txt -ErrorAction SilentlyContinue
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          if (-not $ok) { throw 'Die EXE hat die Oberfläche nicht ausgeliefert.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mango-facharbeit-windows
+          path: |
+            dist/Mango-Facharbeit-Setup-*.exe
+            dist/Mango-Facharbeit-Setup-*.exe.sha256
+          if-no-files-found: error
 
   release:
     name: Release veröffentlichen
-    needs: smoke
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: mango-facharbeit-win-x64
+          name: mango-facharbeit-windows
           path: dist
       - name: GitHub-Release anlegen
         env:

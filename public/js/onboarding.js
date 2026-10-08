@@ -1,6 +1,6 @@
 // Erster Start, Begrüßung bei späteren Starts und Ordnerauswahl.
 import { api } from './api.js';
-import { h, iconEl, btn, toast, dialog, prefersReducedMotion, parseDateDE } from './ui.js';
+import { h, iconEl, btn, toast, dialog, prefersReducedMotion, parseDateDE, shortPath } from './ui.js';
 import { enterApp, loadState, startImportChat } from './app.js';
 import { createPicker, createProgress, runImport } from './importer.js';
 
@@ -80,7 +80,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
   const root = document.getElementById('root');
   const title = h('h1', { class: 'typewriter' });
   const form = h('form', { class: 'onboard-form', novalidate: true, hidden: true, 'aria-label': 'Angaben zur Facharbeit' });
-  const logo = h('span', { class: 'logo', html: '<svg width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="7" fill="currentColor"/><path d="M7.6 18c-2-2.3-2-6.8.7-9.6 2.8-2.8 7.3-3.4 9.6-1.5-.4 3.1-1.6 6.8-4.2 9.1-2.1 2-4.5 2.9-6.1 2Z" fill="var(--bg)"/></svg>' });
+  const logo = h('img', { class: 'logo', src: 'logo.png', alt: '', width: '44', height: '44', draggable: 'false' });
 
   // Zwei gleichwertige Einstiege
   const choice = h('div', { class: 'choice', role: 'group', 'aria-label': 'Wie möchtest du starten?', hidden: true });
@@ -92,7 +92,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
   };
   choice.append(
     choiceCard('neu', 'plus', 'Neu anfangen', 'Mit den Vorlagen der Schule starten'),
-    choiceCard('import', 'archive', 'Bestehende Arbeit übernehmen', 'Entwürfe, Notizen und Quellen mitbringen'));
+    choiceCard('import', 'upload', 'Ich habe schon angefangen', 'Dateien reinziehen – Mango sortiert sie ein'));
   root.replaceChildren(h('div', { class: 'onboard' }, h('div', { class: 'onboard-inner' }, logo, title, choice, form)));
 
   const field = (key, label, attrs = {}, cls = '') => {
@@ -112,10 +112,13 @@ export function showOnboarding({ fromSettings = false } = {}) {
   fillDate.addEventListener('click', () => { f.abgabedatum.input.value = '07.12.2026'; });
   f.abgabedatum.el.querySelector('label').replaceWith(h('div', { class: 'label-row' }, h('label', { for: 'ob-abgabedatum', class: 'field-label' }, 'Abgabedatum'), fillDate));
 
-  const pathInput = h('input', { class: 'input', id: 'ob-ws', spellcheck: 'false', 'aria-describedby': 'ob-ws-note' });
+  // Speicherort: wird vorgeschlagen und nur bei Bedarf geändert (kein Pfad zum Abtippen).
+  const pathInput = h('input', { type: 'hidden', id: 'ob-ws' });
+  const pathShow = h('code', { class: 'ws-show' });
   const note = h('div', { class: 'field-note', id: 'ob-ws-note', 'aria-live': 'polite' });
-  const change = btn('Ändern', { cls: 'btn btn-soft' });
-  const wsField = h('div', { class: 'field full' }, h('label', { for: 'ob-ws' }, 'Arbeitsraum (Ordner für alle Dateien)'), h('div', { class: 'path-field' }, pathInput, change), note);
+  const change = h('button', { type: 'button', class: 'link-btn' }, 'Ändern');
+  const wsField = h('div', { class: 'ws-line full' }, iconEl('folder', 15), h('span', {}, 'Speicherort:'), pathShow, change, pathInput, note);
+  const showPath = () => { pathShow.textContent = shortPath(pathInput.value); pathShow.title = pathInput.value; };
 
   let userPickedPath = false;
   const inspect = async () => {
@@ -134,16 +137,14 @@ export function showOnboarding({ fromSettings = false } = {}) {
     if (userPickedPath) return;
     try {
       const r = await api.get(`/api/suggest-workspace?titel=${encodeURIComponent(f.titel.input.value.trim())}`);
-      if (!userPickedPath) { pathInput.value = r.path; inspect(); }
+      if (!userPickedPath) { pathInput.value = r.path; showPath(); inspect(); }
     } catch { /* still */ }
   };
   let suggestTimer = null;
   f.titel.input.addEventListener('input', () => { clearTimeout(suggestTimer); suggestTimer = setTimeout(suggest, 400); });
-  pathInput.addEventListener('input', () => { userPickedPath = true; });
-  pathInput.addEventListener('change', inspect);
   change.addEventListener('click', async () => {
     const picked = await chooseFolder(pathInput.value.trim());
-    if (picked) { pathInput.value = picked; userPickedPath = true; inspect(); }
+    if (picked) { pathInput.value = picked; userPickedPath = true; showPath(); inspect(); }
   });
 
   // Bausteine für beide Wege
@@ -158,7 +159,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
   const back = btn('Zurück', { cls: 'btn', onClick: () => setMode(null) });
   const actions = h('div', { class: 'actions' }, submit, back);
   if (fromSettings) actions.append(btn('Abbrechen', { cls: 'btn', onClick: () => enterApp() }));
-  form.append(pickerHost, gridHost, h('div', { class: 'form-grid ws-grid' }, wsField), optional, progress.el, actions);
+  form.append(pickerHost, gridHost, optional, h('div', { class: 'ws-grid' }, wsField), progress.el, actions);
 
   let mode = null;
   function setMode(m) {
@@ -170,7 +171,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
     if (m === 'import') {
       optional.append(grid);
       optional.hidden = false;
-      submit.querySelector('.lbl').textContent = 'Übernehmen und loslegen';
+      submit.querySelector('.lbl').textContent = 'Einsortieren und loslegen';
       submit.disabled = !picker.valid();
       setTimeout(() => form.querySelector('.drop-zone').focus());
     } else {
@@ -185,7 +186,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const workspace = pathInput.value.trim();
-    if (!workspace) { note.className = 'field-note err'; note.textContent = 'Bitte einen Speicherort angeben.'; pathInput.focus(); return; }
+    if (!workspace) { note.className = 'field-note err'; note.textContent = 'Bitte einen Speicherort wählen.'; change.focus(); return; }
     const angaben = {};
     for (const [k, v] of Object.entries(f)) angaben[k] = v.input.value.trim();
     const datum = parseDateDE(angaben.abgabedatum);
@@ -201,13 +202,13 @@ export function showOnboarding({ fromSettings = false } = {}) {
     } catch (err) {
       submit.disabled = false;
       back.disabled = false;
-      submit.querySelector('.lbl').textContent = mode === 'import' ? 'Übernehmen und loslegen' : 'Los geht’s';
+      submit.querySelector('.lbl').textContent = mode === 'import' ? 'Einsortieren und loslegen' : 'Los geht’s';
       note.className = 'field-note err';
       note.textContent = err.message;
       return;
     }
     if (mode !== 'import') { await enterApp(); return; }
-    // Übernahme: Dateien hochladen und prüfen, danach analysiert der Assistent im Chat.
+    // Drop-in: Dateien hochladen und prüfen, danach sortiert der Assistent im Chat ein.
     pickerHost.hidden = true;
     optional.hidden = true;
     progress.el.hidden = false;
@@ -216,7 +217,7 @@ export function showOnboarding({ fromSettings = false } = {}) {
     try {
       inv = await runImport(picker.items(), progress, picker.tooLarge());
     } catch (err) {
-      toast(`Die Übernahme ist nicht vollständig gelungen: ${err.message}`, { error: true, timeout: 7000 });
+      toast(`Das Einsortieren ist nicht vollständig gelungen: ${err.message}`, { error: true, timeout: 7000 });
     }
     await enterApp();
     if (inv) await startImportChat(inv);

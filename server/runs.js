@@ -5,6 +5,9 @@ const { fsp, path, newId, nowIso, resolveInside, writeTextAtomic, truncate } = r
 const ws = require('./workspace');
 const ctx = require('./context');
 const importer = require('./importer');
+const sortieren = require('./sortieren');
+const { kindOf } = require('./extract');
+const { GRUENDLICHKEIT } = require('./providers/models');
 
 const MAX_ARG_PROMPT = 24000;
 
@@ -103,6 +106,7 @@ class RunManager {
     const chat = project.getChat(chatId);
     const providerId = this.settings().provider;
     const model = ((this.settings().modelle || {})[providerId]) || '';
+    const effort = GRUENDLICHKEIT[this.settings().gruendlichkeit] || '';
     const pstate = this.providers.state[providerId];
     if (!this.providers.usable(providerId)) {
       const err = new Error(`${pstate.name}: ${pstate.label || pstate.detail || 'nicht verfügbar'}`);
@@ -118,7 +122,7 @@ class RunManager {
     }
     const weiteres = !!(inv && project.data.uebernahme && project.data.uebernahme.importId !== inv.id);
     const cleanText = String(text || '').trim() || (inv
-      ? (weiteres ? 'Hier ist weiteres Material zu meiner Arbeit. Bitte ergänze den Stand.' : 'Übernimm bitte meine bisherige Arbeit, damit ich direkt weitermachen kann.')
+      ? (weiteres ? 'Hier ist neues Material zu meiner Facharbeit. Sortiere es bitte ein und aktualisiere meinen Stand.' : 'Sortiere bitte alles ein, was ich schon gemacht habe, und bring meinen Arbeitsstand auf den neuesten Stand.')
       : '');
     if (!cleanText && !(attachments && attachments.length)) throw Object.assign(new Error('Die Nachricht ist leer.'), { status: 400 });
 
@@ -145,7 +149,7 @@ class RunManager {
         msg.mode = 'import';
       }
       run.message = msg;
-      if (chat.titleAuto && !earlier.some((m) => m.role === 'user')) chat.title = inv ? (weiteres ? 'Weiteres Material übernommen' : 'Übernahme der bisherigen Arbeit') : autoTitle(cleanText, atts);
+      if (chat.titleAuto && !earlier.some((m) => m.role === 'user')) chat.title = inv ? (weiteres ? 'Neues Material einsortiert' : 'Bisherige Arbeit einsortiert') : autoTitle(cleanText, atts);
       chat.messages.push(userMsg, msg);
       chat.updatedAt = nowIso();
       await project.saveChat(chat);
@@ -198,7 +202,7 @@ class RunManager {
         }
         if (providerId === 'claude' && !sessionId) { sessionId = newId(); resume = false; }
         run.handle = this.providers.run(providerId, {
-          cwd: project.workspace, prompt: finalPrompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly: !!inv, model,
+          cwd: project.workspace, prompt: finalPrompt, sessionId, resume, rulesText, rulesFile, onEvent, model, effort,
         });
         if (run.stopRequested) run.handle.cancel();
         return run.handle.done;
@@ -220,10 +224,24 @@ class RunManager {
       // Dateiänderungen erfassen und vorherige Fassungen sichern.
       let changes = [];
       try { changes = await ws.diffAndBackup(project.workspace, before); } catch (err) { changes = []; msg.activity.push({ kind: 'info', label: `Dateiabgleich fehlgeschlagen: ${err.message}` }); }
-      // Bei der Übernahme darf nichts verändert werden: geänderte oder gelöschte Dateien zurückholen.
-      if (inv) changes = await ws.restoreChanges(project.workspace, changes);
+      // Originale (mitgebrachte Dateien, Anhänge) bleiben unverändert: Änderungen zurückholen.
+      changes = await ws.restoreChanges(project.workspace, changes);
 
-      const parsed = ctx.parseUpdate(res.text || msg.text);
+      // Einsortieren: Der Assistent nennt Quelle und Ziel, die App kopiert bzw. wandelt wortgetreu um.
+      const sp = sortieren.parsePlan(res.text || msg.text);
+      let einsortiert = [];
+      if (sp.plan.length && !res.canceled) {
+        einsortiert = await sortieren.applyPlan(project, sp.plan);
+        for (const r of einsortiert) {
+          if (r.fehler) continue;
+          const known = changes.find((c) => c.path === r.nach);
+          if (known) Object.assign(known, { aktion: r.ersetzt ? 'geaendert' : 'neu', version: r.version || known.version });
+          else changes.push({ path: r.nach, aktion: r.ersetzt ? 'geaendert' : 'neu', kind: kindOf(r.nach), version: r.version || undefined });
+        }
+      }
+      if (sp.invalid) msg.activity.push({ kind: 'info', label: 'Einsortier-Plan war nicht lesbar und wurde ignoriert' });
+
+      const parsed = ctx.parseUpdate(sp.text);
       const filesAfter = await ws.listFiles(project.workspace);
       let applied = null;
       if (!res.canceled && parsed.update) applied = await ctx.applyUpdate(project, parsed.update, filesAfter, { nurLeereFelder: !!inv });
@@ -235,7 +253,9 @@ class RunManager {
         finalText = ir.text;
         if (ir.invalid) msg.activity.push({ kind: 'info', label: 'Übernahme-Block war nicht lesbar' });
         if (ir.result && !res.canceled && !res.error) await importer.saveSummary(project, inv, ir.result);
-        msg.importErgebnis = importer.displayResult(inv, !res.canceled && !res.error ? ir.result : null);
+        msg.importErgebnis = importer.displayResult(inv, !res.canceled && !res.error ? ir.result : null, einsortiert);
+      } else if (einsortiert.length) {
+        msg.einsortiert = einsortiert;
       }
 
       msg.text = finalText;

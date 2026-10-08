@@ -18,7 +18,8 @@ const { kindLabel } = require('./extract');
 
 const PKG = require('../package.json');
 const PUBLIC = path.join(__dirname, '..', 'public');
-const args = process.argv.slice(2);
+const IS_MAIN = require.main === module;
+const args = IS_MAIN ? process.argv.slice(2) : [];
 const argValue = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 if (argValue('--data-dir')) process.env.MANGO_DATA_DIR = argValue('--data-dir');
 
@@ -513,7 +514,10 @@ async function listen(server, start) {
   throw new Error('Kein freier Port gefunden.');
 }
 
-async function main() {
+// Startet den Server. Wird direkt (node server/index.js) oder von der Desktop-App aufgerufen.
+// host: optionale Betriebssystem-Funktionen der Desktop-App (Ordnerdialog, Dateien öffnen).
+async function start({ port, open = false, host = null, log = console.log } = {}) {
+  if (host) system.setHost(host);
   await app.load();
   const last = app.data.projects.find((p) => p.id === app.data.lastProjectId) || app.data.projects[0];
   if (last) {
@@ -526,32 +530,33 @@ async function main() {
   }
   const portRef = { port: 0 };
   const server = createServer(portRef);
-  portRef.port = await listen(server, Number(argValue('--port') || process.env.PORT || 4317));
+  portRef.port = await listen(server, Number(port || process.env.PORT || 4317));
   const url = `http://127.0.0.1:${portRef.port}/`;
-  console.log(`Mango Facharbeit läuft: ${url}`);
-  console.log(`App-Daten: ${app.dir}`);
-  if (project) console.log(`Arbeitsraum: ${project.workspace}`);
+  log(`Mango Facharbeit läuft: ${url}`);
+  log(`App-Daten: ${app.dir}`);
+  if (project) log(`Arbeitsraum: ${project.workspace}`);
   providers.detectAll(app.settings.provider, project ? project.workspace : os.tmpdir())
-    .then(() => console.log('Anbieter:', providers.publicState().map((p) => `${p.name}: ${p.label}`).join(' · ')))
+    .then(() => log(`Anbieter: ${providers.publicState().map((p) => `${p.name}: ${p.label}`).join(' · ')}`))
     .catch((err) => console.error('Anbietererkennung fehlgeschlagen:', err.message));
-  if (!args.includes('--no-open') && !process.env.MANGO_NO_OPEN) system.openAppWindow(url);
+  if (open) system.openAppWindow(url);
   const shutdown = () => {
     for (const id of runs.runningChats()) runs.stop(id);
-    setTimeout(() => process.exit(0), 300);
+    server.close();
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  return { url, port: portRef.port, token: TOKEN, settings: () => app.settings, running: () => runs.runningChats().length > 0, shutdown };
 }
 
-main().catch((err) => {
-  console.error('Start fehlgeschlagen:', err);
-  // Als EXE per Doppelklick gestartet: Fenster offen lassen, damit die Meldung lesbar bleibt.
-  if (process.env.MANGO_EXE && process.stdin.isTTY) {
-    console.log('\nZum Schließen Enter drücken.');
-    process.stdin.resume();
-    process.stdin.once('data', () => process.exit(1));
-    return;
-  }
-  process.exit(1);
-});
+if (IS_MAIN) {
+  start({ port: argValue('--port'), open: !args.includes('--no-open') && !process.env.MANGO_NO_OPEN })
+    .then(({ shutdown }) => {
+      const stop = () => { shutdown(); setTimeout(() => process.exit(0), 300); };
+      process.on('SIGINT', stop);
+      process.on('SIGTERM', stop);
+    })
+    .catch((err) => {
+      console.error('Start fehlgeschlagen:', err);
+      process.exit(1);
+    });
+}
 
+module.exports = { start };

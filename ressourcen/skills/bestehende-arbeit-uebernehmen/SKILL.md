@@ -1,72 +1,95 @@
 ---
 name: bestehende-arbeit-uebernehmen
-description: Eine außerhalb der App begonnene Facharbeit übernehmen. Mitgebrachte Entwürfe, Notizen, Quellen und Materialien lesen, den Stand gegen die Schulvorgaben abgleichen, Arbeitsstand und Projektangaben vorbereiten und eine dauerhafte Zusammenfassung liefern – ohne Dateien zu verändern.
+description: Mitgebrachtes Material zur Facharbeit einsortieren (Drop-in). Dateien in die passenden Arbeitsordner einordnen lassen, vorhandene Arbeitsdateien ergänzen, Projektangaben und Arbeitsstand aktualisieren und eine dauerhafte Zusammenfassung liefern – Originale bleiben unverändert.
 ---
 
-<!-- mango-facharbeit:verwaltet – erstellt für die Übernahme bestehender Arbeiten -->
+<!-- mango-facharbeit:verwaltet – erstellt für das Einsortieren mitgebrachter Arbeit -->
 
-# Bestehende Arbeit übernehmen
+# Material einsortieren (Drop-in)
 
-Nutze diesen Skill, wenn die App eine Nachricht mit einem Block `<uebernahme …>` schickt oder die Person sagt, dass sie Material aus einer bereits begonnenen Facharbeit mitbringt. Ziel: Die Person kann direkt weiterarbeiten, ohne das Projekt neu erklären zu müssen.
+Nutze diesen Skill, wenn die App einen Block `<einsortieren …>` schickt oder die Person Dateien aus ihrer bisherigen Arbeit mitbringt. Ziel: Danach liegt alles ordentlich im Arbeitsraum, der Arbeitsstand stimmt, und die Person kann sofort weitermachen.
 
 ## Grundregeln
 
-- **Nur lesen.** Keine Datei ändern, umschreiben, verschieben, löschen oder neu anlegen. Die App speichert dein Ergebnis selbst und stellt veränderte Dateien wieder her.
-- **Originale bleiben maßgeblich.** Fasse zusammen, was da ist. Verbessere oder ergänze keine Inhalte ungefragt.
-- **Nichts erfinden.** Was du nicht gelesen hast oder nicht lesen konntest, ist „unsicher“ oder „nicht lesbar“, nicht „vorhanden“.
-- **Erst prüfen, dann erledigt.** Eine Aufgabe ist nur `erledigt`, wenn der Inhalt vorhanden ist **und** du ihn gegen `00_vorgaben/anforderungen.md` geprüft hast (z. B. Exposé mit mindestens 400 Wörtern und allen Pflichtteilen). Vorhandene, aber ungeprüfte oder unvollständige Inhalte sind `in_arbeit`. Aufgaben außerhalb der App (Themenabgabe, Konsultationen, Unterschrift, Abgabe) schlägst du höchstens vor.
-- **Bei unklaren Entwurfsständen nachfragen.** Gibt es mehrere Fassungen desselben Textes und ist nicht eindeutig, welche aktuell ist, wähle keine aus. Frag gezielt, z. B. „Ist `Facharbeit_v3.docx` (05.10.) oder `Facharbeit final.pdf` (02.10.) deine aktuelle Fassung?“
-- **Sparsam fragen.** Höchstens drei Fragen, nur zu wichtigen fehlenden oder widersprüchlichen Angaben (z. B. Fach, Fragestellung, aktuelle Fassung). Was du aus den Dateien sicher erkennst, fragst du nicht ab.
+- **Originale nie ändern.** `uebernommen/` ist schreibgeschützt. Arbeitskopien entstehen in den Ordnern `01_` bis `08_`.
+- **Einsortieren macht die App.** Du nennst im Block `einsortieren` nur Quelle und Ziel. Die App kopiert die Datei oder wandelt Word/Text wortgetreu in Markdown um. Schreib Inhalte dafür nicht selbst ab: Das kostet viel und verändert womöglich den Text der Person.
+- **Sparsam lesen.** Inventar zuerst, dann gezielt Textauszüge. Identische Dateien nur einmal. Bilder nur ansehen, wenn sie für den Stand wichtig sind (z. B. Mindmap).
+- **Nichts erfinden.** Was du nicht lesen konntest, ist „unsicher“, nicht „vorhanden“.
+- **Erst prüfen, dann erledigt.** `erledigt` nur, wenn der Inhalt vorhanden ist und du ihn gegen `00_vorgaben/anforderungen.md` geprüft hast. Vorhandenes, aber Unvollständiges ist `in_arbeit`. Aufgaben außerhalb der App (Themenabgabe, Konsultationen, Unterschrift, Abgabe) höchstens vorschlagen.
+- **Eigenanteil schützen.** Texte der Person nicht umformulieren oder „verbessern“. Ergänzen heißt: fehlende Einträge anfügen (z. B. Quellen, Termine), nicht umschreiben.
+- **Sparsam fragen.** Höchstens drei Fragen, nur zu Wichtigem (z. B. aktuelle Fassung, Fach, Fragestellung).
+
+## Wohin gehört was?
+
+| Inhalt | Ordner |
+|---|---|
+| Themenideen, Notizen, Mindmap | `01_themenfindung_und_mindmap/` |
+| Exposé, Zeitplan | `02_expose_und_zeitplan/` |
+| Literaturliste, Exzerpte, Quellen-PDFs | `03_literatur_und_quellen/` |
+| Fragebogen, Interviews, Messdaten, Auswertung | `04_forschung_und_eigenanteil/` |
+| Gliederung, Kapitelentwürfe, Gesamtentwurf | `05_facharbeit_entwurf/` |
+| Lerntagebuch, Konsultationsprotokolle | `06_lerntagebuch_und_konsultationen/` |
+| KI-Protokolle, Prompt-Nachweise | `07_ki_prompts_anhang/` |
+| Präsentation, Handout, Verteidigung | `08_praesentation_verteidigung/` |
+
+Schulvorgaben, die schon in `00_vorgaben/` liegen (siehe Inventar „bereits vorhanden“), nicht einsortieren.
+
+**Dateinamen:** kurz, klein, ohne Leerzeichen, z. B. `expose.md`, `gliederung.md`, `mindmap.png`, `lerntagebuch.docx`, `umfrage_ergebnisse.xlsx`. Vorlagen der App (`*_vorlage.md`, `README.md`) bleiben bestehen.
+
+**Format:**
+- Word-Entwürfe, an denen die Person in Word weiterschreibt: als `.docx` kopieren.
+- Notizen, Exposé oder Gliederung aus Word oder Text: als `.md` umwandeln (`nach` endet auf `.md`). So kannst du später gezielt damit arbeiten.
+- Bilder, PDFs, Tabellen, Präsentationen: im Originalformat kopieren.
+
+**Neuere Fassung einer schon einsortierten Datei:** mit `"ersetzen": true` auf dasselbe Ziel. Die App sichert die bisherige Fassung. Ohne `ersetzen` legt sie `_v2`, `_v3` an.
 
 ## Ablauf
 
-1. Inventar der App lesen (`.facharbeit/import/<id>/inventar.md`): Dateitypen, Daten, Umfang, Lesbarkeit, Duplikate, mögliche Entwurfsstände, bereits vorhandene Schulvorgaben.
-2. Dateien lesen. Word, PDF, PowerPoint und Excel über die angegebenen Textauszüge. Reihenfolge bei vielen Dateien: Entwürfe der Facharbeit, Exposé, Lerntagebuch, Gliederung, Literaturliste, Eigenanteil (Fragebögen, Daten, Transkripte), Notizen. Schulvorgaben, die schon in `00_vorgaben/` liegen, nicht erneut auswerten.
-3. Stand erfassen:
-   - Thema, Arbeitstitel, Fragestellung oder These, Fach und Bezugsfach, Fachrichtung, Lehrkraft, Klasse, Name (nur was eindeutig in den Dateien steht)
-   - Gliederung und welche Kapitel als Text vorliegen, mit ungefährem Umfang (Wörter, grobe Seitenzahl bei ca. 350–420 Wörtern pro Seite)
-   - Quellen: Anzahl, Art (Fachbuch, Zeitschrift, Internet), ob vollständig angegeben
-   - Eigenanteil: Methode, Stand der Durchführung, vorhandene Daten oder Ergebnisse
-   - Arbeitsprozess: Mindmap, Lerntagebuch, Zeitplan, Konsultationen, KI-Kennzeichnung
-4. Mit den Vorgaben abgleichen: Was ist erfüllt, was teilweise, was fehlt? Fristen aus dem Projektkontext beachten.
-5. Antwort schreiben (kurz, siehe unten) und die zwei Blöcke anhängen.
+1. Inventar lesen: `.facharbeit/import/<id>/inventar.md`
+2. Wichtige Dateien lesen (Textauszug): Entwürfe, Exposé, Lerntagebuch, Gliederung, Literatur, Eigenanteil
+3. Plan für `einsortieren` aufstellen
+4. Arbeitsdateien bei Bedarf gezielt ergänzen (Edit), z. B. neue Quellen in die Literaturliste
+5. Stand mit den Vorgaben abgleichen, Antwort schreiben, drei Blöcke anhängen
 
 ## Antwort
 
-Zwei bis vier Sätze Einschätzung in einfacher Sprache, danach höchstens drei gezielte Fragen. Keine langen Listen im Text – die stehen in den Blöcken und zeigt die App als Übersicht an.
+Zwei bis vier Sätze in einfacher Sprache: Was ist da, was fehlt, was ist der nächste Schritt. Danach höchstens drei Fragen. Keine langen Listen im Text, denn die Übersicht zeigt die App. Keine Ankündigungen von Zwischenschritten und kein Hinweis auf die Blöcke.
 
-## Block 1: Arbeitsstand
+## Block 1: Einsortieren
 
-Wie in den Arbeitsregeln beschrieben:
+```einsortieren
+[
+ {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Expose_v2.docx","nach":"02_expose_und_zeitplan/expose.md"},
+ {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Mindmap.png","nach":"01_themenfindung_und_mindmap/mindmap.png"},
+ {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Facharbeit.docx","nach":"05_facharbeit_entwurf/facharbeit_entwurf.docx"}
+]
+```
+
+## Block 2: Arbeitsstand
 
 ```arbeitsstand
 {"aufgaben":[
-  {"id":"expose","status":"in_arbeit","notiz":"Exposé vorhanden (ca. 350 Wörter), Zeitplan fehlt","nachweis":"uebernommen/2026-10-06_1517/Expose.docx"},
-  {"id":"mindmap","status":"erledigt","notiz":"Geprüft: drei Themenbereiche abgeleitet","nachweis":"uebernommen/2026-10-06_1517/Mindmap.png"}
+  {"id":"expose","status":"in_arbeit","notiz":"Exposé vorhanden (ca. 350 Wörter), Zeitplan fehlt","nachweis":"02_expose_und_zeitplan/expose.md"},
+  {"id":"mindmap","status":"erledigt","notiz":"Geprüft: drei Themenbereiche","nachweis":"01_themenfindung_und_mindmap/mindmap.png"}
  ],
- "projekt":{"titel":"…","fach":"…","bezugsfach":"…","forschungsfrage":"…","methode":"…"},
- "merken":["Aktuelle Fassung laut Dateidatum: uebernommen/…/Facharbeit_v3.docx (noch zu bestätigen)"]}
+ "projekt":{"titel":"…","fach":"…","forschungsfrage":"…"},
+ "merken":["Aktuelle Exposé-Fassung: 02_expose_und_zeitplan/expose.md (aus Expose_v2.docx)"]}
 ```
 
-- `projekt`: alle Angaben, die eindeutig in den eigenen Dateien der Person stehen, z. B. Arbeitstitel oder festgelegtes Thema als `titel`, Name und Klasse vom Deckblatt des eigenen Lerntagebuchs oder Entwurfs, Fach, Bezugsfach, Lehrkraft, Fragestellung, Methode. Nicht eintragen: Platzhalter („Name:“, „…“), Musternamen und Beispieldaten aus Vorlagen der Schule (z. B. „Max Mustermann“) und alles, was sich widerspricht – das gehört unter `unsicher` bzw. in eine Frage. Die App trägt die Angaben nur in leere Felder ein und zeigt Widersprüche zu vorhandenen Angaben zur Bestätigung an.
-- `merken`: wenige, wichtige Erkenntnisse für spätere Chats (ein Satz je Eintrag).
+- `nachweis`: die einsortierte Datei (Ziel aus Block 1).
+- `projekt`: was eindeutig in den eigenen Dateien steht: Arbeitstitel oder Thema als `titel`, Name und Klasse vom Deckblatt des eigenen Lerntagebuchs oder Entwurfs, Fach, Bezugsfach, Lehrkraft, Fragestellung, Methode. Nicht übernehmen: Platzhalter („Name:“, „…“), Musternamen und Beispieldaten aus Vorlagen der Schule, Widersprüchliches (das gehört zu `unsicher` oder in eine Frage). Die App füllt nur leere Felder und fragt bei Abweichungen selbst nach.
 
-## Block 2: Übernahme
+## Block 3: Übernahme
 
 ```uebernahme
-{"zusammenfassung":"Markdown, 8–20 Zeilen: Thema, Fragestellung, Fächer, Gliederung, vorhandene Texte mit Umfang, Quellenlage, Eigenanteil, Arbeitsprozess, wichtigste Lücken. Mit Dateipfaden.",
- "vorhanden":["Exposé (ca. 350 Wörter) – uebernommen/…/Expose.docx","…"],
- "fehlt":["Zeitplan nach Vorgabe","Mindestens zwei Standardwerke (Empfehlung)","…"],
- "naechsterSchritt":"Ein konkreter, sofort machbarer Schritt, z. B. „Exposé um den Zeitplan ergänzen (fehlt für die 1. Einzelkonsultation).“",
- "unsicher":["Unklar, ob die Gliederung mit der Lehrkraft abgestimmt ist","…"],
+{"zusammenfassung":"Markdown, 8–15 Zeilen: Thema, Fragestellung, Fächer, Gliederung, vorhandene Texte mit Umfang, Quellenlage, Eigenanteil, Arbeitsprozess, wichtigste Lücken – mit den neuen Dateipfaden.",
+ "vorhanden":["Exposé (ca. 350 Wörter) – 02_expose_und_zeitplan/expose.md","…"],
+ "fehlt":["Zeitplan nach Vorgabe","…"],
+ "naechsterSchritt":"Ein konkreter, sofort machbarer Schritt.",
+ "unsicher":["Unklar, ob die Gliederung mit der Lehrkraft abgestimmt ist"],
  "versionen":[{"dateien":["uebernommen/…/Facharbeit_v2.docx","uebernommen/…/Facharbeit final.pdf"],"frage":"Welche Fassung ist aktuell?"}]}
 ```
 
-- `vorhanden` und `fehlt`: je höchstens zehn kurze Punkte, wichtigste zuerst, mit Bezug zu den Vorgaben.
-- `unsicher`: Einschätzungen, die du nicht sicher belegen kannst, und Dateien, die du nicht lesen konntest.
-- `versionen`: nur Gruppen, bei denen die aktuelle Fassung wirklich unklar ist.
-- Die `zusammenfassung` wird dauerhaft gespeichert und in späteren Chats mitgegeben. Sie muss ohne die Originaldateien verständlich sein.
-
-## Später nachgereichtes Material
-
-Bringt die Person später weitere Dateien mit (neue Übernahme), gleiche sie mit der bestehenden Zusammenfassung im Projektkontext ab und liefere eine aktualisierte, vollständige `zusammenfassung`.
+- `vorhanden` und `fehlt`: je höchstens zehn kurze Punkte, wichtigste zuerst.
+- `versionen`: nur, wenn die aktuelle Fassung wirklich unklar ist. Wählt die Person später eine Fassung, sortiere genau diese im nächsten Schritt mit einem `einsortieren`-Block ein.
+- Die `zusammenfassung` wird dauerhaft gespeichert und in späteren Chats mitgegeben. Sie muss ohne die Originale verständlich sein.

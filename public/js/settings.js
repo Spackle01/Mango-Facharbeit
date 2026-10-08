@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { h, iconEl, btn, toast, dialog, copyText } from './ui.js';
 import { S, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp } from './app.js';
 import { showOnboarding, chooseFolder } from './onboarding.js';
-import { openModelDialog, selectedModel, selectedModelLabel } from './modelle.js';
+import { openModelDialog, selectedModel, selectedModelLabel, gruendlichkeitEl } from './modelle.js';
 import { modelLabel } from './modelname.js';
 
 export function openSettings(focusSection) {
@@ -48,6 +48,7 @@ export function openSettings(focusSection) {
       prov.append(card);
     }
     body.append(prov);
+    body.append(h('section', { class: 'settings-section' }, h('h3', {}, 'Gründlichkeit des Assistenten'), gruendlichkeitEl()));
 
     // Facharbeit
     const p = S.state.project;

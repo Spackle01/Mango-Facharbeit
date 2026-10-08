@@ -42,6 +42,7 @@ async function detect() {
     conversation: h.includes('--conversation'),
     streamJson: !h || h.includes('stream-json') || h.includes('--output-format'),
     model: h.includes('--model'),
+    effort: h.includes('--effort'),
   };
   const models = list && !list.error && list.code === 0 ? parseAgyModels(list.stdout) : [];
   const version = (/(\d+\.\d+(?:\.\d+)?)/.exec(`${ver.stdout} ${ver.stderr}`) || [])[1] || '';
@@ -70,10 +71,11 @@ async function verify(info, cwd) {
   };
 }
 
-function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '' }) {
+function run(info, { cwd, prompt, sessionId, onEvent, model: modelWahl = '', effort = '' }) {
   const caps = info.caps || {};
   const args = ['--output-format', 'stream-json'];
   if (modelWahl && caps.model) args.push('--model', modelWahl);
+  if (effort && caps.effort) args.push('--effort', effort);
   if (caps.printTimeout) args.push('--print-timeout', '30m');
   if (sessionId) args.push('--conversation', sessionId);
   args.push('-p', prompt);

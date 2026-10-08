@@ -25,6 +25,7 @@ const CLAUDE_MODELS = [
   { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', gruppe: 'version' },
   { id: 'claude-sonnet-5', name: 'Sonnet 5', gruppe: 'version' },
   { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', gruppe: 'version' },
+  { id: 'claude-haiku-5-5', name: 'Haiku 5.5', gruppe: 'version' },
   { id: 'claude-haiku-4-5', name: 'Haiku 4.5', gruppe: 'version' },
 ];
 
@@ -47,4 +48,7 @@ function parseAgyModels(text) {
   return out;
 }
 
-module.exports = { MODEL_ID_RE, validModelId, CLAUDE_MODELS, parseAgyModels };
+// Gründlichkeit → --effort der CLIs. „Ausgewogen“ ist sparsam genug für den Alltag.
+const GRUENDLICHKEIT = { sparsam: 'low', ausgewogen: 'medium', gruendlich: 'high' };
+
+module.exports = { MODEL_ID_RE, validModelId, CLAUDE_MODELS, parseAgyModels, GRUENDLICHKEIT };

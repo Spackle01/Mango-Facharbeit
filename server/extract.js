@@ -44,40 +44,75 @@ function decodeXml(s) {
     .replace(/&amp;/g, '&');
 }
 
+// Text eines Absatzes mit Fett/Kursiv als Markdown. Gleich formatierte Läufe werden zusammengefasst.
+function paragraphMarkdown(p, { plain = false } = {}) {
+  const segs = [];
+  const runRe = /<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g;
+  let r;
+  while ((r = runRe.exec(p))) {
+    const run = r[1];
+    const rPr = (/<w:rPr>([\s\S]*?)<\/w:rPr>/.exec(run) || [])[1] || '';
+    const on = (tag) => new RegExp(`<w:${tag}(?:\\s+w:val="(?:1|true|on)")?\\s*/>`).test(rPr);
+    let text = '';
+    const re = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\/>|<w:br(?:\s[^>]*)?\/>|<w:noBreakHyphen\/>/g;
+    let m;
+    while ((m = re.exec(run))) {
+      if (m[1] !== undefined) text += m[1];
+      else if (m[0].startsWith('<w:tab')) text += '\t';
+      else if (m[0].startsWith('<w:br')) text += '\n';
+      else text += '-';
+    }
+    if (!text) continue;
+    const seg = { text: decodeXml(text), b: !plain && on('b'), i: !plain && on('i') };
+    const last = segs[segs.length - 1];
+    if (last && last.b === seg.b && last.i === seg.i) last.text += seg.text;
+    else segs.push(seg);
+  }
+  return segs.map((sg) => {
+    if (!(sg.b || sg.i) || !sg.text.trim()) return sg.text;
+    const mark = sg.b && sg.i ? '***' : sg.b ? '**' : '*';
+    const lead = /^\s*/.exec(sg.text)[0];
+    const trail = /\s*$/.exec(sg.text)[0];
+    return `${lead}${mark}${sg.text.trim()}${mark}${trail}`;
+  }).join('');
+}
+
+// Word-Dokument als Markdown: Überschriften, Listen, Tabellen, Fett/Kursiv. Wortgetreu, ohne Umformulierung.
 function docxToText(buffer) {
   const zip = readZip(buffer);
   const xml = zip.read('word/document.xml');
   if (!xml) throw new Error('word/document.xml fehlt');
   const body = xml.toString('utf8');
   const out = [];
-  // Absätze einzeln verarbeiten; Tabellenzellen mit | trennen.
+  // Absätze einzeln verarbeiten; Tabellen als Markdown-Tabelle.
   const blocks = body.split(/(<w:tbl>|<\/w:tbl>|<\/w:tc>|<\/w:tr>)/);
   let inTable = false;
+  let rows = [];
   let row = [];
   let cell = [];
+  const flushTable = () => {
+    if (!rows.length) return;
+    const width = Math.max(...rows.map((x) => x.length));
+    const fmt = (x) => `| ${Array.from({ length: width }, (_, k) => (x[k] || '').replace(/\|/g, '\\|')).join(' | ')} |`;
+    out.push('', fmt(rows[0]), `|${' --- |'.repeat(width)}`, ...rows.slice(1).map(fmt), '');
+    rows = [];
+  };
   for (const part of blocks) {
-    if (part === '<w:tbl>') { inTable = true; continue; }
-    if (part === '</w:tbl>') { inTable = false; continue; }
+    if (part === '<w:tbl>') { inTable = true; rows = []; continue; }
+    if (part === '</w:tbl>') { inTable = false; flushTable(); continue; }
     if (part === '</w:tc>') { row.push(cell.join(' ').trim()); cell = []; continue; }
-    if (part === '</w:tr>') { out.push(`| ${row.join(' | ')} |`); row = []; continue; }
+    if (part === '</w:tr>') { rows.push(row); row = []; continue; }
     const paras = part.split(/<\/w:p>/);
     for (const p of paras) {
       const style = /<w:pStyle w:val="([^"]+)"/.exec(p);
-      // Nur echte Textknoten übernehmen (keine Positionsangaben von Grafiken o. Ä.).
-      let text = '';
-      const re = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\/>|<w:br(?:\s[^>]*)?\/>|<w:noBreakHyphen\/>/g;
-      let m;
-      while ((m = re.exec(p))) {
-        if (m[1] !== undefined) text += m[1];
-        else if (m[0].startsWith('<w:tab')) text += '\t';
-        else if (m[0].startsWith('<w:br')) text += '\n';
-        else text += '-';
-      }
-      text = decodeXml(text);
-      if (inTable) { if (text.trim()) cell.push(text.trim()); continue; }
-      if (!text.trim()) { if (/<w:p[ >]/.test(p)) out.push(''); continue; }
       const level = style && /(?:heading|berschrift)\s*(\d)/i.exec(style[1]);
-      if (level) out.push(`${'#'.repeat(Math.min(6, +level[1]))} ${text.trim()}`);
+      const title = style && /^(title|titel)$/i.test(style[1]);
+      // Nur echte Textknoten übernehmen (keine Positionsangaben von Grafiken o. Ä.).
+      const text = paragraphMarkdown(p, { plain: !!(level || title) });
+      if (inTable) { if (text.trim()) cell.push(text.trim().replace(/\n/g, ' ')); continue; }
+      if (!text.trim()) { if (/<w:p[ >]/.test(p)) out.push(''); continue; }
+      if (title) out.push(`# ${text.trim()}`);
+      else if (level) out.push(`${'#'.repeat(Math.min(6, +level[1]))} ${text.trim()}`);
       else if (/<w:numPr>/.test(p)) out.push(`- ${text.trim()}`);
       else out.push(text);
     }

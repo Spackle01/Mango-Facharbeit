@@ -182,7 +182,9 @@ async function snapshot(ws) {
   let total = 0;
   for (const f of files) {
     const entry = { size: f.size, mtime: f.mtime, content: null };
-    if (f.size <= SNAP_MAX_FILE && total + f.size <= SNAP_MAX_TOTAL) {
+    // Große mitgebrachte Originale sind schreibgeschützt; sie nicht jedes Mal in den Speicher laden.
+    const original = f.path.startsWith('uebernommen/') && f.size > 512 * 1024;
+    if (!original && f.size <= SNAP_MAX_FILE && total + f.size <= SNAP_MAX_TOTAL) {
       try {
         entry.content = await fsp.readFile(path.join(ws, ...f.path.split('/')));
         total += f.size;
@@ -237,12 +239,13 @@ async function diffAndBackup(ws, before) {
   return changes;
 }
 
-// Stellt geänderte oder gelöschte Dateien aus der gesicherten Fassung wieder her
-// (für Läufe, die nur lesen dürfen). Neue Dateien bleiben bestehen und werden gemeldet.
-async function restoreChanges(ws, changes) {
+// Stellt geänderte oder gelöschte Dateien aus der gesicherten Fassung wieder her.
+// Standard: nur Originale (mitgebrachte Dateien und Chat-Anhänge) – sie bleiben immer unverändert.
+const ORIGINALE = /^(uebernommen|anhaenge)\//;
+async function restoreChanges(ws, changes, schuetzen = (p) => ORIGINALE.test(p)) {
   const out = [];
   for (const c of changes) {
-    if ((c.aktion === 'geaendert' || c.aktion === 'geloescht') && c.version) {
+    if ((c.aktion === 'geaendert' || c.aktion === 'geloescht') && c.version && schuetzen(c.path)) {
       const src = resolveInside(ws, c.version);
       const dest = resolveInside(ws, c.path);
       if (src && dest) {
@@ -366,6 +369,6 @@ async function finalizeAttachment(ws, stagedId) {
 
 module.exports = {
   MARKER, internalDir, suggestWorkspacePath, setupWorkspace, syncManagedFiles, isWorkspace,
-  listFiles, snapshot, diffAndBackup, restoreChanges, listVersions, restoreVersionAsCopy, stageUpload,
+  listFiles, snapshot, diffAndBackup, restoreChanges, saveVersion, listVersions, restoreVersionAsCopy, stageUpload,
   discardStaged, cleanupStaging, ensureExtract, finalizeAttachment, defaultWorkspaceParent, RES, ROOT,
 };

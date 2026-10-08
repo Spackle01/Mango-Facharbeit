@@ -7,7 +7,6 @@ const { CLAUDE_MODELS } = require('./models');
 const ID = 'claude';
 const NAME = 'Claude Code';
 const ALLOWED_TOOLS = 'Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,TodoWrite,Skill';
-const READ_ONLY_TOOLS = 'Read,Glob,Grep,TodoWrite,Skill';
 
 function installHint() {
   return IS_WIN
@@ -40,6 +39,7 @@ async function detect() {
     allowedTools: /--allowed-?tools|--allowedTools/i.test(h),
     disallowedTools: /--disallowed-?tools|--disallowedTools/i.test(h),
     model: h.includes('--model'),
+    effort: h.includes('--effort'),
     auth: /\bauth\b/.test(h),
   };
   const base = { id: ID, name: NAME, installed: true, bin, version, caps, models: CLAUDE_MODELS };
@@ -56,15 +56,14 @@ async function detect() {
 }
 
 // Startet einen Durchlauf. Gibt { cancel, done: Promise } zurück.
-function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEvent, readOnly = false, model: modelWahl = '' }) {
+function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEvent, model: modelWahl = '', effort = '' }) {
   const caps = info.caps || {};
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (modelWahl && caps.model !== false) args.push('--model', modelWahl);
+  if (effort && caps.effort) args.push('--effort', effort);
   if (caps.partial) args.push('--include-partial-messages');
   if (caps.permissionMode) args.push('--permission-mode', 'acceptEdits');
-  if (caps.allowedTools !== false) args.push('--allowedTools', readOnly ? READ_ONLY_TOOLS : ALLOWED_TOOLS);
-  // Nur lesen (z. B. bei der Übernahme): Schreibwerkzeuge ausdrücklich sperren.
-  if (readOnly && caps.disallowedTools) args.push('--disallowedTools', 'Write,Edit,MultiEdit,NotebookEdit,Bash');
+  if (caps.allowedTools !== false) args.push('--allowedTools', ALLOWED_TOOLS);
   if (sessionId) {
     if (resume) args.push('--resume', sessionId);
     else if (caps.sessionId) args.push('--session-id', sessionId);

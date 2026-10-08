@@ -9,7 +9,7 @@ import { renderMarkdown, stripUpdateBlock } from './markdown.js';
 import { openPanel, closePanel, refreshPanel, pickWorkspaceFiles, currentPanel } from './panels.js';
 import { showOnboarding, showGreeting, showWorkspaceMissing } from './onboarding.js';
 import { openSettings } from './settings.js';
-import { openImportDialog, entriesFromDrop } from './importer.js';
+import { openImportDialog, entriesFromDrop, dropIn, itemsFromInput } from './importer.js';
 import { modelMenuSection, openModelDialog, providerModels, selectedModel, selectedModelLabel } from './modelle.js';
 import { modelLabel } from './modelname.js';
 
@@ -40,6 +40,14 @@ export function applyTheme(pref) {
   try { localStorage.setItem('mango.theme', pref); } catch { /* kein Speicher */ }
   const dark = pref === 'dark' || (pref === 'system' && media.matches);
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  // Fensterknöpfe der Desktop-App und Browser-Titelleiste an die App-Farben anpassen.
+  const css = getComputedStyle(document.documentElement);
+  const bg = css.getPropertyValue('--bg').trim();
+  const fg = css.getPropertyValue('--text-2').trim();
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; document.head.append(meta); }
+  meta.content = bg;
+  if (window.mangoDesktop) window.mangoDesktop.setTitleBarColors(bg, fg);
 }
 media.addEventListener('change', () => { if (S.state) applyTheme(S.state.settings.theme); });
 
@@ -186,13 +194,14 @@ function toggleSidebar(force) {
 function buildSidebar() {
   const sb = S.els.sidebar;
   sb.innerHTML = '';
-  const logo = h('span', { html: `<svg class="icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="7" fill="currentColor"/><path d="M7.6 18c-2-2.3-2-6.8.7-9.6 2.8-2.8 7.3-3.4 9.6-1.5-.4 3.1-1.6 6.8-4.2 9.1-2.1 2-4.5 2.9-6.1 2Z" fill="var(--bg-sidebar)"/></svg>` }).firstChild;
+  const logo = h('img', { class: 'brand-logo', src: 'logo.png', alt: '', width: '24', height: '24', draggable: 'false' });
   sb.append(
     h('div', { class: 'sb-head' },
       h('div', { class: 'brand' }, logo, h('span', {}, 'Mango'), h('small', {}, 'Facharbeit')),
       btn('', { iconName: 'panel', cls: 'btn btn-icon sb-toggle-desktop', title: 'Seitenleiste einklappen', onClick: () => toggleSidebar(false) }),
       btn('', { iconName: 'x', cls: 'btn btn-icon sb-toggle-mobile', title: 'Seitenleiste schließen', onClick: () => toggleSidebar(false) })),
     btn('Neuer Chat', { iconName: 'plus', cls: 'btn new-chat', onClick: newChat }),
+    btn('Dateien einsortieren', { iconName: 'upload', cls: 'btn new-chat dropin-btn', title: 'Dateien oder Ordner aus deiner bisherigen Arbeit hinzufügen – du kannst sie auch einfach ins Fenster ziehen', onClick: () => { toggleSidebarMobileClose(); openImportDialog([], (inv) => startImportChat(inv)); } }),
     h('div', { class: 'sb-label', id: 'chats-label' }, 'Chats'),
     h('nav', { class: 'chat-list', 'aria-labelledby': 'chats-label' }),
     h('div', { class: 'sb-foot' }));
@@ -309,7 +318,7 @@ export function renderTopbar() {
   };
   tb.append(h('div', { class: 'actions' },
     mk('stand', 'Arbeitsstand', 'checks', { text: `${done}/${total}`, aria: `${done} von ${total} erledigt` }),
-    mk('dateien', 'Arbeitsraum', 'folder'),
+    mk('dateien', 'Dateien', 'folder'),
     mk('projekt', 'Projekt', 'book')));
 }
 
@@ -425,7 +434,26 @@ function renderEmpty() {
     grid.append(b);
   }
   wrap.append(grid);
+  wrap.append(dropInCard());
   return wrap;
+}
+
+// Startseite: Drop-in für alles, was schon da ist.
+function dropInCard() {
+  const fileIn = h('input', { type: 'file', multiple: true, hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
+  const dirIn = h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
+  const take = (input) => { const items = itemsFromInput(input.files); input.value = ''; if (items.length) dropIn(items, (inv) => startImportChat(inv)); };
+  fileIn.addEventListener('change', () => take(fileIn));
+  dirIn.addEventListener('change', () => take(dirIn));
+  return h('section', { class: 'dropin-card', 'aria-label': 'Dateien einsortieren' },
+    h('span', { class: 'dc-icon' }, iconEl('upload', 20)),
+    h('div', { class: 'dc-text' },
+      h('b', {}, 'Schon etwas gemacht?'),
+      h('span', {}, 'Zieh Entwürfe, Notizen, Quellen oder ganze Ordner einfach ins Fenster. Mango sortiert alles ein und aktualisiert deinen Arbeitsstand.')),
+    h('div', { class: 'dc-btns' },
+      btn('Dateien wählen', { cls: 'btn btn-sm btn-soft', onClick: () => fileIn.click() }),
+      btn('Ordner wählen', { cls: 'btn btn-sm btn-soft', onClick: () => dirIn.click() })),
+    fileIn, dirIn);
 }
 
 export function renderThread() {
@@ -458,7 +486,7 @@ function renderUserMessage(m) {
   const el = h('div', { class: 'msg user', 'data-id': m.id });
   if (m.import) {
     const i = m.import;
-    const parts = [`${i.anzahl} ${i.anzahl === 1 ? 'Datei' : 'Dateien'} übernommen`];
+    const parts = [`${i.anzahl} ${i.anzahl === 1 ? 'Datei' : 'Dateien'} zum Einsortieren`];
     if (i.ordnerAnzahl) parts.push(`${i.ordnerAnzahl} Ordner`);
     if (i.unlesbar) parts.push(`${i.unlesbar} nicht lesbar`);
     if (i.nichtUebernommen) parts.push(`${i.nichtUebernommen} nicht übernommen`);
@@ -563,17 +591,40 @@ function versionChoiceEl(v, isLast) {
   return row;
 }
 
+// Liste „Original → Ziel“ der von der App einsortierten Dateien.
+function einsortiertEl(list) {
+  const ok = list.filter((x) => !x.fehler);
+  const bad = list.filter((x) => x.fehler);
+  const sec = h('section', { class: 'ic-sec sorted' }, h('h4', {}, ok.length ? `Einsortiert (${ok.length})` : 'Nichts einsortiert'));
+  if (ok.length) {
+    sec.append(h('ul', { class: 'sorted-list' }, ok.map((x) => h('li', {},
+      h('span', { class: 'from', title: x.von }, shortName(x.von)),
+      h('span', { class: 'arrow', 'aria-hidden': 'true' }, '→'),
+      h('button', { type: 'button', class: 'file-ref', 'data-path': x.nach }, x.nach),
+      x.aktion === 'umgewandelt' ? h('span', { class: 'tag' }, 'als Text zum Weiterarbeiten') : null,
+      x.ersetzt ? h('span', { class: 'tag' }, 'ersetzt, alte Fassung gesichert') : null))));
+  }
+  if (bad.length) {
+    sec.append(h('details', { class: 'ic-details' }, h('summary', {}, iconEl('chevronRight', 14), `Nicht einsortiert (${bad.length})`),
+      h('ul', {}, bad.map((x) => h('li', {}, h('b', {}, shortName(x.von)), ` – ${x.fehler}`)))));
+  }
+  return sec;
+}
+
 function importResultEl(r, isLast) {
-  const head = [`${r.anzahl} ${r.anzahl === 1 ? 'Datei' : 'Dateien'} übernommen`];
+  const ok = (r.einsortiert || []).filter((x) => !x.fehler).length;
+  const head = [`${r.anzahl} ${r.anzahl === 1 ? 'Datei' : 'Dateien'} angekommen`];
+  if (ok) head.push(`${ok} einsortiert`);
   if (r.unlesbar && r.unlesbar.length) head.push(`${r.unlesbar.length} nicht lesbar`);
   if (r.nichtUebernommen && r.nichtUebernommen.length) head.push(`${r.nichtUebernommen.length} nicht übernommen`);
   if (r.duplikate && r.duplikate.length) head.push(`${r.duplikate.length} doppelt`);
   const card = h('div', { class: 'import-card' },
     h('div', { class: 'ic-head' }, iconEl('folderOpen', 17), h('span', {}, head.join(' · '))));
   if (!r.analysiert) {
-    card.append(h('p', { class: 'ic-note' }, 'Die Dateien liegen sicher im Arbeitsraum. Die Analyse durch den Assistenten wurde nicht abgeschlossen.'));
-    if (isLast) card.append(btn('Analyse erneut starten', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: () => startImportChat({ id: r.importId }, { sameChat: true }) }));
+    card.append(h('p', { class: 'ic-note' }, 'Die Dateien liegen sicher im Arbeitsraum. Das Einsortieren durch den Assistenten wurde nicht abgeschlossen.'));
+    if (isLast) card.append(btn('Erneut einsortieren', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: () => startImportChat({ id: r.importId }, { sameChat: true }) }));
   }
+  if (r.einsortiert && r.einsortiert.length) card.append(einsortiertEl(r.einsortiert));
   const grid = h('div', { class: 'ic-grid' });
   const vorhanden = listSection('Das ist bereits vorhanden', r.vorhanden, 'ok');
   const fehlt = listSection('Das fehlt noch', r.fehlt, 'todo');
@@ -638,13 +689,17 @@ function renderAssistantMessage(m, isLast) {
   el.append(content);
   if (running && m.mode === 'import') {
     el.append(h('div', { class: 'import-progress indeterminate', role: 'status' },
-      h('div', { class: 'ip-label' }, 'Deine bisherige Arbeit wird analysiert'), h('div', { class: 'ip-bar' }, h('i'))));
+      h('div', { class: 'ip-label' }, 'Mango liest deine Dateien und sortiert sie ein'), h('div', { class: 'ip-bar' }, h('i'))));
     el.append(liveStepEl(m));
   } else if (running && (!text || m.phase === 'werkzeug')) el.append(liveStepEl(m));
   if (m.importErgebnis) el.append(importResultEl(m.importErgebnis, isLast && m.status !== 'fehler'));
-  if (m.files && m.files.length) {
+  else if (m.einsortiert && m.einsortiert.length) el.append(h('div', { class: 'import-card compact' }, einsortiertEl(m.einsortiert)));
+  // Einsortierte Dateien stehen schon in der Liste „Einsortiert“; hier nur die übrigen Änderungen.
+  const sorted = new Set(((m.importErgebnis && m.importErgebnis.einsortiert) || m.einsortiert || []).map((x) => x.nach));
+  const files = (m.files || []).filter((f) => !sorted.has(f.path));
+  if (files.length) {
     const label = { neu: 'neu', geaendert: 'geändert', geloescht: 'gelöscht', zurueckgesetzt: 'zurückgesetzt' };
-    el.append(h('div', { class: 'chips' }, m.files.map((f) => fileChip({ ...f, kindLabel: kindName(f.kind) }, { badge: label[f.aktion] }))));
+    el.append(h('div', { class: 'chips' }, files.map((f) => fileChip({ ...f, kindLabel: kindName(f.kind) }, { badge: label[f.aktion] }))));
   }
   if (m.updates) el.append(updatesEl(m.updates));
   if (m.status === 'fehler') {
@@ -934,7 +989,7 @@ function buildComposer() {
       { label: 'Datei vom Computer', icon: 'upload', onClick: () => fileInput.click() },
       { label: 'Aus dem Arbeitsraum', icon: 'folder', onClick: async () => { const sel = await pickWorkspaceFiles(); if (sel) addWorkspaceFiles(sel); } },
       'sep',
-      { label: 'Bestehende Arbeit übernehmen …', icon: 'archive', onClick: () => openImportDialog([], (inv) => startImportChat(inv)) },
+      { label: 'In die Facharbeit einsortieren …', icon: 'archive', onClick: () => openImportDialog([], (inv) => startImportChat(inv)) },
     ], { placement: 'top-start' });
   });
   fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
@@ -1129,37 +1184,58 @@ function renderAttachments() {
   }
 }
 
+// Drop-in: Dateien oder Ordner irgendwo ins Fenster ziehen = in die Facharbeit einsortieren.
+// Auf das Eingabefeld gezogen = nur an die nächste Nachricht anhängen.
 function setupDragDrop() {
-  const main = S.els.main;
+  const root = S.els.app;
   let depth = 0;
   let overlay = null;
   const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
-  main.addEventListener('dragenter', (e) => {
+  const composer = () => S.els.composerWrap.querySelector('.composer');
+  const overComposer = (e) => !!(e.target && e.target.closest && e.target.closest('.composer'));
+  const reset = () => {
+    depth = 0;
+    if (overlay) { overlay.remove(); overlay = null; }
+    root.classList.remove('dragging-files');
+    composer().classList.remove('dragging');
+  };
+  root.addEventListener('dragenter', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
     depth += 1;
-    if (!overlay) {
-      overlay = h('div', { class: 'drop-overlay' }, h('div', { class: 'inner' }, iconEl('upload', 20), 'Dateien hier ablegen'));
-      main.append(overlay);
-      S.els.composerWrap.querySelector('.composer').classList.add('dragging');
-    }
+    if (overlay) return;
+    overlay = h('div', { class: 'drop-overlay', 'aria-hidden': 'true' },
+      h('div', { class: 'inner' },
+        iconEl('upload', 26),
+        h('b', { class: 'do-title' }, 'Loslassen zum Einsortieren'),
+        h('span', { class: 'do-sub' }, 'Mango sortiert alles in deine Facharbeit ein und aktualisiert den Arbeitsstand.'),
+        h('span', { class: 'do-alt' }, 'Nur an eine Nachricht anhängen? Auf das Eingabefeld ziehen.')),
+      h('div', { class: 'inner attach' }, iconEl('clip', 22), h('b', { class: 'do-title' }, 'Loslassen zum Anhängen'), h('span', { class: 'do-sub' }, 'Die Datei wird an deine nächste Nachricht angehängt.')));
+    root.append(overlay);
+    root.classList.add('dragging-files');
   });
-  main.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
-  const reset = () => { depth = 0; if (overlay) { overlay.remove(); overlay = null; } S.els.composerWrap.querySelector('.composer').classList.remove('dragging'); };
-  main.addEventListener('dragleave', () => { depth -= 1; if (depth <= 0) reset(); });
-  main.addEventListener('drop', async (e) => {
+  root.addEventListener('dragover', (e) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const c = overComposer(e);
+    if (overlay) overlay.classList.toggle('to-composer', c);
+    composer().classList.toggle('dragging', c);
+  });
+  root.addEventListener('dragleave', () => { depth -= 1; if (depth <= 0) reset(); });
+  root.addEventListener('drop', async (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const toComposer = overComposer(e);
     reset();
     const d = entriesFromDrop(e.dataTransfer); // synchron lesen, bevor das Ereignis endet
     const files = [...e.dataTransfer.files];
-    if (d.hasFolder) {
-      // Ordner bringen meist eine ganze Arbeit mit: als Übernahme anbieten.
-      openImportDialog(await d.collect(), (inv) => startImportChat(inv));
+    if (toComposer && !d.hasFolder) {
+      addFiles(files);
+      S.els.textarea.focus();
       return;
     }
-    addFiles(files);
-    S.els.textarea.focus();
+    dropIn(await d.collect(), (inv) => startImportChat(inv));
   });
 }
 

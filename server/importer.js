@@ -106,6 +106,8 @@ async function addFile(project, id, relPath, readable, { lastModified } = {}) {
     const d = new Date(mtime);
     await fsp.utimes(target, d, d).catch(() => {});
   }
+  // Original schreibschützen: Arbeitskopien entstehen beim Einsortieren in den Ordnern 01_–08_.
+  await fsp.chmod(target, 0o444).catch(() => {});
   st.dateien += 1;
   st.bytes += size;
   await writeJsonAtomic(path.join(metaDir(project, id), 'status.json'), st);
@@ -113,6 +115,15 @@ async function addFile(project, id, relPath, readable, { lastModified } = {}) {
 }
 
 // ---------- Inventar ----------
+
+// Ordnervorschlag je vermuteter Art (der Assistent entscheidet endgültig).
+const ORDNER = {
+  vorgabe: '00_vorgaben/ (meist schon vorhanden)', lerntagebuch: '06_lerntagebuch_und_konsultationen/', expose: '02_expose_und_zeitplan/',
+  zeitplan: '02_expose_und_zeitplan/', mindmap: '01_themenfindung_und_mindmap/', gliederung: '05_facharbeit_entwurf/',
+  einleitung: '05_facharbeit_entwurf/', fazit: '05_facharbeit_entwurf/', entwurf: '05_facharbeit_entwurf/',
+  literatur: '03_literatur_und_quellen/', eigenanteil: '04_forschung_und_eigenanteil/', praesentation: '08_praesentation_verteidigung/',
+  ki: '07_ki_prompts_anhang/', notiz: '01_themenfindung_und_mindmap/',
+};
 
 const CATEGORIES = [
   ['vorgabe', 'Vorgabe oder Aufgabenstellung der Schule', /handreichung|zeitschiene|bewertungsbogen|arbeitsthemen|ki-unterst[üu]tzung|aufgabe[ _-]?(expos|mindmap)/i],
@@ -277,7 +288,7 @@ function inventoryMarkdown(inv) {
   const L = [];
   L.push(`# Inventar der übernommenen Dateien (Übernahme ${inv.id})`);
   L.push('');
-  L.push(`Ordner: \`${inv.ordner}/\` · ${inv.anzahl} Dateien · ${humanSize(inv.bytes)}. Die Dateien sind unveränderte Originale.`);
+  L.push(`Ordner: \`${inv.ordner}/\` · ${inv.anzahl} Dateien · ${humanSize(inv.bytes)}. Die Dateien sind schreibgeschützte, unveränderte Originale.`);
   L.push('');
   L.push('## Hinweise der App');
   L.push('');
@@ -309,38 +320,40 @@ function inventoryMarkdown(inv) {
   L.push('');
   L.push('Spalte „Vermutlich“: Einschätzung der App aus Dateiname bzw. Textanfang (mit ? = nur aus dem Text, unsicher).');
   L.push('');
-  L.push('| Datei | Typ | Vermutlich | Geändert | Umfang | Lesen über |');
-  L.push('|---|---|---|---|---|---|');
+  L.push('| Datei | Typ | Vermutlich | Ordnervorschlag | Geändert | Umfang | Lesen über |');
+  L.push('|---|---|---|---|---|---|---|');
   for (const it of inv.dateien.slice(0, 400)) {
     const lesen = it.lesbar === 'ja' ? `\`${it.extrakt}\`` : it.lesbar === 'direkt' ? 'Datei direkt' : `NICHT LESBAR: ${it.hinweis}`;
     const verm = it.vermutlich ? `${it.vermutlich.label}${it.vermutlich.sicher ? '' : ' ?'}` : '–';
     const umfang = it.woerter != null ? `${it.woerter} Wörter` : humanSize(it.groesse);
-    L.push(`| \`${it.pfad}\` | ${it.artLabel} | ${verm} | ${formatDateDE(new Date(it.geaendert))} | ${umfang} | ${lesen} |`);
+    const ordner = it.vermutlich ? ORDNER[it.vermutlich.id] || '–' : '–';
+    L.push(`| \`${it.pfad}\` | ${it.artLabel} | ${verm} | ${ordner} | ${formatDateDE(new Date(it.geaendert))} | ${umfang} | ${lesen} |`);
   }
-  if (inv.dateien.length > 400) L.push(`| … | weitere ${inv.dateien.length - 400} Dateien | | | | |`);
+  if (inv.dateien.length > 400) L.push(`| … | weitere ${inv.dateien.length - 400} Dateien | | | | | |`);
   L.push('');
   return L.join('\n');
 }
 
 // Auftrag an den Assistenten. Er darf nur lesen; die App speichert die Ergebnisse.
+// Auftrag an den Assistenten: einsortieren, aktualisieren, zusammenfassen.
 function importPrompt(inv, { bisher = null } = {}) {
   const nachtrag = bisher && bisher.zusammenfassung
-    ? `\nEs gibt bereits einen übernommenen Stand (siehe Projektkontext und \`.facharbeit/uebernahme.md\`). Das hier ist weiteres Material. \`zusammenfassung\`, \`vorhanden\`, \`fehlt\` und \`naechsterSchritt\` beschreiben den gesamten Stand (bisher und neu), nicht nur die neuen Dateien.\n`
+    ? `\nEs gibt schon einen übernommenen Stand (Projektkontext, \`.facharbeit/uebernahme.md\`). Das hier ist neues Material: Gleiche es damit ab. \`zusammenfassung\`, \`vorhanden\`, \`fehlt\` und \`naechsterSchritt\` beschreiben danach den gesamten Stand.\n`
     : '';
-  return `<uebernahme id="${inv.id}" ordner="${inv.ordner}/">
-Die Schülerin bzw. der Schüler hat eine bereits begonnene Facharbeit mitgebracht: ${inv.anzahl} Dateien${inv.ordnerListe.length ? ` aus ${inv.ordnerListe.length} Ordnern` : ''}. Die Originale liegen unverändert in \`${inv.ordner}/\`.
-Lies zuerst das Inventar der App: \`.facharbeit/import/${inv.id}/inventar.md\` (Typ, Datum, Umfang, Lesbarkeit, Textauszüge, Duplikate, mögliche Entwurfsstände). Lies außerdem den Skill \`bestehende-arbeit-uebernehmen\` und \`00_vorgaben/anforderungen.md\`.
+  return `<einsortieren id="${inv.id}" ordner="${inv.ordner}/">
+Die Schülerin bzw. der Schüler hat Material zur Facharbeit hineingezogen: ${inv.anzahl} Dateien${inv.ordnerListe.length ? ` aus ${inv.ordnerListe.length} Ordnern` : ''}. Die Originale liegen schreibgeschützt in \`${inv.ordner}/\` und bleiben unverändert.
+Lies zuerst das Inventar der App: \`.facharbeit/import/${inv.id}/inventar.md\` (Art, Datum, Umfang, Lesbarkeit, Textauszug, Duplikate, Entwurfsstände, Ordnervorschlag) und den Skill \`bestehende-arbeit-uebernehmen\`.
 ${nachtrag}
 Auftrag:
-1. Lies die lesbaren Dateien bzw. ihre Textauszüge. Bei vielen Dateien: zuerst Entwürfe, Exposé, Lerntagebuch, Gliederung, Literatur, Eigenanteil. Von identischen Dateien nur eine.
-2. Erkenne Thema, Fragestellung oder These, Fächer, Gliederung, vorhandene Texte mit ungefährem Umfang, Quellen, Eigenanteil und bisherige Ergebnisse.
-3. Übernimm erkennbare Projektangaben (Titel bzw. Thema, Name, Klasse, Fach, Bezugsfach, Lehrkraft, Fragestellung, Methode) in den \`projekt\`-Teil des Arbeitsstand-Blocks – nur aus den eigenen Dateien der Person, keine Platzhalter oder Beispieldaten aus Vorlagen.
-4. Gleiche den Stand mit den Vorgaben ab.
-5. Entwurfsstände: Wähle bei unklaren Versionen keine aus, sondern frage gezielt nach.
-6. Nur lesen: Ändere, verschiebe, überschreibe oder lösche keine Datei und lege keine neuen Dateien an. Die App speichert dein Ergebnis selbst.
-7. Antworte kurz auf Deutsch: zwei bis vier Sätze Einschätzung, danach höchstens drei gezielte Fragen zu wichtigen fehlenden oder widersprüchlichen Angaben.
-8. Hänge ans Ende genau einen \`arbeitsstand\`-Block und genau einen \`uebernahme\`-Block (Formate im Skill).
-</uebernahme>`;
+1. Lies nur, was du brauchst: Textauszüge statt Binärdateien, von identischen Dateien nur eine. Vorgaben gezielt in \`00_vorgaben/anforderungen.md\` nachschlagen.
+2. Einsortieren: Lege im Block \`einsortieren\` für jede brauchbare Datei fest, wohin sie gehört (Ordner 01_ bis 08_, klarer Dateiname). Die App kopiert bzw. wandelt wortgetreu um – schreib die Inhalte dafür nicht selbst ab.
+3. Aktualisieren: Ergänze vorhandene Arbeitsdateien nur, wo es nötig ist (z. B. neue Quellen in \`03_literatur_und_quellen/literaturliste.md\`), ohne Texte der Person umzuformulieren. In \`uebernommen/\` nichts ändern.
+4. Erkenne Thema, Fragestellung, Gliederung, Texte mit Umfang, Quellen, Eigenanteil und Ergebnisse. Übernimm erkennbare Projektangaben (nur aus den eigenen Dateien, keine Platzhalter oder Beispieldaten aus Vorlagen).
+5. Gleiche mit den Vorgaben ab und aktualisiere den Arbeitsstand: erledigt nur, was du geprüft hast; Nachweis ist die einsortierte Datei.
+6. Mehrere Fassungen derselben Datei: nur die eindeutig aktuelle einsortieren; ist das unklar, keine davon einsortieren und fragen.
+7. Antworte kurz auf Deutsch: zwei bis vier Sätze, danach höchstens drei gezielte Fragen.
+8. Hänge ans Ende je genau einen Block \`einsortieren\`, \`arbeitsstand\` und \`uebernahme\` (Formate im Skill).
+</einsortieren>`;
 }
 
 // ---------- Ergebnis-Block des Assistenten ----------
@@ -468,8 +481,9 @@ async function chooseVersion(project, dateien, gewaehlt) {
 }
 
 // Für die Anzeige: deterministische Befunde der App, ergänzt um das Ergebnis des Assistenten.
-function displayResult(inv, result) {
+function displayResult(inv, result, einsortiert = []) {
   return {
+    einsortiert,
     importId: inv.id,
     ordner: inv.ordner,
     anzahl: inv.anzahl,

@@ -1,5 +1,5 @@
-// Übernahme einer bereits begonnenen Facharbeit: Dateien und Ordner auswählen
-// oder hineinziehen, hochladen und von der App prüfen lassen.
+// Drop-in: Dateien und Ordner auswählen oder hineinziehen, hochladen und prüfen lassen.
+// Danach sortiert der Assistent alles in die Facharbeit ein (startImportChat in app.js).
 import { api, TOKEN } from './api.js';
 import { h, iconEl, btn, dialog, toast } from './ui.js';
 
@@ -192,7 +192,7 @@ export async function runImport(items, progress, skippedLarge = []) {
   let done = 0;
   const failed = [];
   for (let i = 0; i < items.length; i++) {
-    progress.set(`Dateien werden übernommen … ${i + 1} von ${items.length}`, done / total);
+    progress.set(`Dateien werden hochgeladen … ${i + 1} von ${items.length}`, done / total);
     try { await uploadOne(imp.id, items[i]); } catch (err) { failed.push({ rel: items[i].rel, error: err.message }); }
     done += items[i].file.size;
   }
@@ -207,20 +207,47 @@ export async function runImport(items, progress, skippedLarge = []) {
   });
   if (!inventar) throw new Error('Die Prüfung der Dateien wurde nicht abgeschlossen.');
   inventar.fehlgeschlagen = failed;
-  progress.set('Der Assistent analysiert deine Arbeit …', null);
+  progress.set('Der Assistent sortiert ein …', null);
   return inventar;
 }
 
-// Dialog für die Übernahme aus Chat oder Arbeitsraum.
+// Direkt nach dem Hineinziehen: ohne Rückfrage hochladen und prüfen, Fortschritt unten rechts.
+let dropInRunning = false;
+export async function dropIn(items, onDone) {
+  const usable = items.filter((x) => !isJunk(x.rel));
+  if (!usable.length) { toast('Keine Dateien zum Einsortieren gefunden.'); return; }
+  if (dropInRunning) { toast('Es wird gerade schon etwas einsortiert. Bitte kurz warten.'); return; }
+  if (usable.length > MAX_FILES) { toast(`Höchstens ${MAX_FILES} Dateien auf einmal.`, { error: true }); return; }
+  const tooBig = usable.filter((x) => x.file.size > MAX_FILE);
+  const ok = usable.filter((x) => x.file.size <= MAX_FILE);
+  if (ok.reduce((s, x) => s + x.file.size, 0) > MAX_TOTAL) { toast('Höchstens 1 GB auf einmal.', { error: true }); return; }
+  dropInRunning = true;
+  const progress = createProgress();
+  const box = h('div', { class: 'dropin-status', role: 'status' },
+    h('div', { class: 'ds-head' }, iconEl('upload', 16), h('b', {}, `${usable.length} ${usable.length === 1 ? 'Datei' : 'Dateien'} einsortieren`)), progress.el);
+  document.body.append(box);
+  try {
+    const inv = await runImport(ok, progress, tooBig);
+    box.remove();
+    onDone(inv);
+  } catch (err) {
+    box.remove();
+    toast(err.message, { error: true });
+  } finally {
+    dropInRunning = false;
+  }
+}
+
+// Dialog zum Auswählen (Seitenleiste, Büroklammer, Bereich „Dateien“).
 export function openImportDialog(initialItems, onDone) {
   const picker = createPicker({ onChange: () => { start.disabled = !picker.valid(); } });
   const progress = createProgress();
   progress.el.hidden = true;
-  const start = btn('Übernehmen', { cls: 'btn btn-primary' });
+  const start = btn('Einsortieren', { cls: 'btn btn-primary' });
   const cancel = btn('Abbrechen', { cls: 'btn' });
   start.disabled = true;
-  const note = h('p', {}, 'Die Originale bleiben unverändert. Der Assistent liest sie und bereitet dein Projekt vor.');
-  const d = dialog({ title: 'Bestehende Arbeit übernehmen', body: h('div', {}, note, picker.el, progress.el), footer: [cancel, start] });
+  const note = h('p', {}, 'Alles, was du schon für deine Facharbeit gemacht hast: Entwürfe, Notizen, Quellen, Bilder. Mango sortiert es in die passenden Ordner ein und aktualisiert deinen Arbeitsstand. Die Originale bleiben unverändert.');
+  const d = dialog({ title: 'Dateien einsortieren', body: h('div', {}, note, picker.el, progress.el), footer: [cancel, start] });
   if (initialItems && initialItems.length) picker.add(initialItems);
   cancel.addEventListener('click', () => d.close());
   start.addEventListener('click', async () => {

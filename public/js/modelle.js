@@ -1,5 +1,6 @@
 // Modellauswahl je Anbieter: Menüeinträge für das Eingabefeld und ein Dialog mit allen Modellen.
-import { h, iconEl, btn, dialog, closePopover } from './ui.js';
+import { api } from './api.js';
+import { h, iconEl, btn, dialog, closePopover, toast, announce } from './ui.js';
 import { S, chooseModel } from './app.js';
 import { modelLabel } from './modelname.js';
 
@@ -14,6 +15,34 @@ export function selectedModel(pid) {
 
 export function selectedModelLabel(pid) {
   return modelLabel(selectedModel(pid), providerModels(pid));
+}
+
+const STUFEN = [
+  ['sparsam', 'Sparsam', 'Schnelle, kurze Antworten. Verbraucht am wenigsten.'],
+  ['ausgewogen', 'Ausgewogen', 'Für die meisten Aufgaben die beste Wahl.'],
+  ['gruendlich', 'Gründlich', 'Denkt länger nach, z. B. beim Prüfen der Arbeit. Verbraucht mehr.'],
+];
+
+// Gründlichkeit (gilt für beide Anbieter): Auswahl als Segmentknopf mit kurzer Erklärung.
+export function gruendlichkeitEl({ onChange } = {}) {
+  const current = S.state.settings.gruendlichkeit || 'ausgewogen';
+  const info = h('div', { class: 'mg-note' }, (STUFEN.find((x) => x[0] === current) || STUFEN[1])[2]);
+  const seg = h('div', { class: 'segmented', role: 'radiogroup', 'aria-label': 'Gründlichkeit' });
+  for (const [val, label, text] of STUFEN) {
+    const b = h('button', { type: 'button', role: 'radio', 'aria-checked': val === current ? 'true' : 'false' }, label);
+    b.addEventListener('click', async () => {
+      try {
+        const r = await api.put('/api/settings', { gruendlichkeit: val });
+        S.state.settings = r.settings;
+        for (const x of seg.children) x.setAttribute('aria-checked', x === b ? 'true' : 'false');
+        info.textContent = text;
+        announce(`Gründlichkeit: ${label}`);
+        if (onChange) onChange(val);
+      } catch (err) { toast(err.message, { error: true }); }
+    });
+    seg.append(b);
+  }
+  return h('div', { class: 'gruendlichkeit' }, seg, info);
 }
 
 function standardInfo(pid) {
@@ -69,6 +98,7 @@ export function openModelDialog(pid, { onClose } = {}) {
       h('div', { class: 'model-list', role: 'radiogroup', 'aria-label': title }, list.map(row)));
   };
 
+  body.append(h('section', { class: 'model-group' }, h('h3', {}, 'Gründlichkeit'), gruendlichkeitEl()));
   body.append(group('Voreinstellung', [{ id: '', name: 'Standard', info: standardInfo(pid) }]));
   if (pid === 'claude') {
     body.append(
