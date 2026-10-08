@@ -1,0 +1,89 @@
+{
+  "name": "mango-facharbeit",
+  "version": "0.2.3-beta",
+  "description": "Agent-first-App, die Schülerinnen und Schüler durch ihre Facharbeit begleitet – mit Claude Code CLI oder Antigravity CLI.",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": {
+    "name": "Mango Facharbeit"
+  },
+  "main": "electron/main.js",
+  "bin": {
+    "mango-facharbeit": "server/index.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js --no-open",
+    "desktop": "electron .",
+    "test": "node --test test/unit.test.js test/api.test.js test/anbieter.test.js",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:dir": "electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "de.mango.facharbeit",
+    "productName": "Mango Facharbeit",
+    "copyright": "Mango Facharbeit",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "package.json",
+      "electron/**/*",
+      "server/**/*",
+      "public/**/*",
+      "ressourcen/**/*"
+    ],
+    "asar": false,
+    "electronLanguages": [
+      "de",
+      "en-US"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "Mango-Facharbeit-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Mango Facharbeit",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "uninstallDisplayName": "Mango Facharbeit"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "icon": "electron/icon.png",
+      "category": "Education"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "electron/icon.png",
+      "category": "public.app-category.education"
+    }
+  }
+}
