@@ -82,6 +82,7 @@ export function openSettings(focusSection) {
 
 function hintEl(hint) {
   const box = h('div', { class: 'hint-box' }, h('div', {}, hint.text));
+  if (hint.link) box.append(h('a', { class: 'link-btn', href: hint.link, target: '_blank', rel: 'noopener noreferrer' }, 'Installationsanleitung öffnen'));
   if (hint.befehl) box.append(h('div', { class: 'cmd-row' }, h('code', { class: 'cmd' }, hint.befehl), btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(hint.befehl) })));
   return box;
 }

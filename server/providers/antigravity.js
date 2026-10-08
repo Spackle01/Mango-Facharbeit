@@ -9,11 +9,12 @@ const { parseAgyModels } = require('./models');
 
 const ID = 'antigravity';
 const NAME = 'Antigravity';
+const INSTALL_LINK = 'https://antigravity.google/docs/getting-started?tab=cli';
 
 function installHint() {
   return IS_WIN
-    ? { text: 'Die Antigravity CLI (agy) ist nicht installiert. Installiere sie in der PowerShell und prüfe danach erneut.', befehl: 'irm https://antigravity.google/cli/install.ps1 | iex' }
-    : { text: 'Die Antigravity CLI (agy) ist nicht installiert. Installiere sie im Terminal und prüfe danach erneut.', befehl: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' };
+    ? { text: 'Die Antigravity CLI (agy) ist nicht installiert. Installiere sie in der PowerShell und prüfe danach erneut.', befehl: 'irm https://antigravity.google/cli/install.ps1 | iex', link: INSTALL_LINK }
+    : { text: 'Die Antigravity CLI (agy) ist nicht installiert. Installiere sie im Terminal und prüfe danach erneut.', befehl: 'curl -fsSL https://antigravity.google/cli/install.sh | bash', link: INSTALL_LINK };
 }
 
 function loginHint() {

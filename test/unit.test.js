@@ -187,6 +187,49 @@ test('Modelle: IDs, Liste von agy, Fehlererkennung, Anzeigenamen', async () => {
   assert.strictEqual(modelLabel('claude-gibtsnicht-9'), 'claude-gibtsnicht-9', 'Unbekanntes bleibt wie eingegeben');
 });
 
+test('Bestes Gemini-Modell: Pro vor Flash, neueste Version, höchste Denkstufe', () => {
+  const { bestGeminiModel } = require('../server/providers/models');
+  const ids = (...l) => l.map((id) => ({ id }));
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.7-flash-high', 'gemini-3.1-pro-high')), 'gemini-3.1-pro-high');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.1-pro-low', 'gemini-3.1-pro-high', 'gemini-3.1-pro-medium')), 'gemini-3.1-pro-high');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3-pro-high', 'gemini-3.1-pro-high', 'gemini-2.5-pro')), 'gemini-3.1-pro-high');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.8-flash-lite', 'gemini-3.8-flash-medium', 'gemini-3.7-flash-high')), 'gemini-3.8-flash-medium', 'ohne Pro: neuestes Flash');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.1-pro-preview-high', 'gemini-3.1-pro-high')), 'gemini-3.1-pro-high', 'stabil vor Vorschau');
+  assert.strictEqual(bestGeminiModel(ids('claude-sonnet-4-6', 'gpt-oss-120b')), '', 'kein Gemini: Voreinstellung der CLI');
+  assert.strictEqual(bestGeminiModel([]), '');
+  assert.strictEqual(bestGeminiModel(undefined), '');
+});
+
+test('Einstellungen: automatische Wahl überschreibt keine eigene Wahl', async () => {
+  const { AppStore } = require('../server/store');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-settings-'));
+  const prev = process.env.MANGO_DATA_DIR;
+  process.env.MANGO_DATA_DIR = dir;
+  try {
+    let st = new AppStore();
+    await st.load();
+    assert.strictEqual(st.settings.provider, 'claude');
+    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '' });
+    assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt);
+    await st.updateSettings({ provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } }, { auto: true });
+    assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt, 'automatisch heißt nicht gewählt');
+    await st.updateSettings({ modelle: { antigravity: '' } });
+    assert.strictEqual(st.settings.modellGewaehlt.antigravity, true);
+    await st.updateSettings({ provider: 'claude' });
+    assert.strictEqual(st.settings.anbieterGewaehlt, true);
+
+    // Einstellungen aus 0.2.0: Antigravity war damals eine eigene Wahl.
+    fs.writeFileSync(path.join(dir, 'app.json'), JSON.stringify({ version: 1, settings: { provider: 'antigravity', modelle: { claude: 'sonnet', antigravity: 'gemini-x-1' }, version: 2 }, projects: [] }));
+    st = new AppStore();
+    await st.load();
+    assert.strictEqual(st.settings.anbieterGewaehlt, true);
+    assert.strictEqual(st.settings.modellGewaehlt.antigravity, true);
+    assert.strictEqual(st.settings.version, 3);
+  } finally {
+    if (prev === undefined) delete process.env.MANGO_DATA_DIR; else process.env.MANGO_DATA_DIR = prev;
+  }
+});
+
 test('Übernahme: Entwurfsstände, Systemdateien und Pfade', () => {
   const importer = require('../server/importer');
   const key = importer.familyKey;

@@ -42,6 +42,7 @@ class AppStore {
   async load() {
     await ensureDir(this.dir);
     this.data = await readJson(this.file, null);
+    const bestand = !!this.data;
     if (!this.data) this.data = { version: 1, settings: {}, projects: [], lastProjectId: null };
     this.data.settings = { theme: 'system', provider: 'claude', ...this.data.settings };
     // Neue Installationen: sparsame Voreinstellung (Sonnet, ausgewogen). Ältere Einstellungen ohne
@@ -51,7 +52,13 @@ class AppStore {
     s.modelle = { claude: neu ? 'sonnet' : '', antigravity: '', ...(s.modelle || {}) };
     if (neu && !s.modelle.claude) s.modelle.claude = 'sonnet';
     if (!GRUENDLICHKEIT[s.gruendlichkeit]) s.gruendlichkeit = 'ausgewogen';
-    s.version = 2;
+    // Ab Version 3 wählt die App Anbieter und Modell selbst, solange die Person nichts festgelegt hat.
+    // Was ältere Fassungen gespeichert haben, gilt als eigene Wahl.
+    if (bestand && (s.version || 0) < 3) {
+      if (s.provider === 'antigravity') s.anbieterGewaehlt = true;
+      if (s.modelle.antigravity) s.modellGewaehlt = { ...(s.modellGewaehlt || {}), antigravity: true };
+    }
+    s.version = 3;
     this.data.projects = Array.isArray(this.data.projects) ? this.data.projects : [];
     return this.data;
   }
@@ -64,9 +71,13 @@ class AppStore {
     return this.data.settings;
   }
 
-  async updateSettings(patch) {
+  // auto: Änderung durch die App (automatische Anbieter- und Modellwahl), nicht durch die Person.
+  async updateSettings(patch, { auto = false } = {}) {
     if (patch.theme && ['light', 'dark', 'system'].includes(patch.theme)) this.data.settings.theme = patch.theme;
-    if (patch.provider && ['claude', 'antigravity'].includes(patch.provider)) this.data.settings.provider = patch.provider;
+    if (patch.provider && ['claude', 'antigravity'].includes(patch.provider)) {
+      this.data.settings.provider = patch.provider;
+      if (!auto) this.data.settings.anbieterGewaehlt = true;
+    }
     if (patch.gruendlichkeit && GRUENDLICHKEIT[patch.gruendlichkeit]) this.data.settings.gruendlichkeit = patch.gruendlichkeit;
     if (patch.modelle && typeof patch.modelle === 'object') {
       for (const [anbieter, wert] of Object.entries(patch.modelle)) {
@@ -74,6 +85,8 @@ class AppStore {
         const id = wert.trim();
         if (!validModelId(id)) throw Object.assign(new Error('Diese Modell-ID ist ungültig. Erlaubt sind Buchstaben, Ziffern und . - _ : [ ]'), { status: 400 });
         this.data.settings.modelle[anbieter] = id;
+        // Selbst gewählte Modelle überschreibt die automatische Auswahl nie.
+        if (!auto) this.data.settings.modellGewaehlt = { ...(this.data.settings.modellGewaehlt || {}), [anbieter]: true };
       }
     }
     await this.save();

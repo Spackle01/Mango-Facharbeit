@@ -6,12 +6,13 @@ const { CLAUDE_MODELS } = require('./models');
 
 const ID = 'claude';
 const NAME = 'Claude Code';
+const INSTALL_LINK = 'https://code.claude.com/docs/en/setup';
 const ALLOWED_TOOLS = 'Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,TodoWrite,Skill';
 
 function installHint() {
   return IS_WIN
-    ? { text: 'Claude Code ist nicht installiert. Installiere es in der PowerShell und starte danach die Prüfung neu.', befehl: 'irm https://claude.ai/install.ps1 | iex' }
-    : { text: 'Claude Code ist nicht installiert. Installiere es im Terminal und starte danach die Prüfung neu.', befehl: 'curl -fsSL https://claude.ai/install.sh | bash' };
+    ? { text: 'Claude Code ist nicht installiert. Installiere es in der PowerShell und starte danach die Prüfung neu.', befehl: 'irm https://claude.ai/install.ps1 | iex', link: INSTALL_LINK }
+    : { text: 'Claude Code ist nicht installiert. Installiere es im Terminal und starte danach die Prüfung neu.', befehl: 'curl -fsSL https://claude.ai/install.sh | bash', link: INSTALL_LINK };
 }
 
 function loginHint() {

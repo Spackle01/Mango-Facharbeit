@@ -875,6 +875,7 @@ async function send() {
   if (isStreaming() || (!text && !ready.length)) return;
   if (S.pending.some((p) => p.status === 'uploading')) { toast('Bitte warte, bis alle Dateien hochgeladen sind.'); return; }
   const prov = activeProvider();
+  if (S.state.pruefung || (prov && prov.status === 'pruefe')) { toast('Einen Moment bitte: Die KI-Anbieter werden noch geprüft.'); return; }
   if (prov && !prov.usable) {
     const banner = S.els.composerWrap.querySelector('.provider-banner');
     if (banner) {
@@ -1038,6 +1039,11 @@ export function updateComposer() {
 function renderProviderBanner() {
   const slot = S.els.composerWrap.querySelector('.banner-slot');
   slot.innerHTML = '';
+  if (S.state.pruefung) return; // Die App sucht noch und wählt danach selbst aus.
+  if (S.state.providers.length && S.state.providers.every((p) => p.status === 'nicht_installiert')) {
+    slot.append(setupCard());
+    return;
+  }
   const prov = activeProvider();
   if (!prov || ['bereit', 'verbunden'].includes(prov.status)) return;
   if (prov.status === 'pruefe') return;
@@ -1055,12 +1061,59 @@ function renderProviderBanner() {
   slot.append(banner);
 }
 
+// Kein Anbieter installiert: beide Wege mit offizieller Anleitung und Installationsbefehl.
+const SETUP_INFO = {
+  claude: 'Von Anthropic. Du brauchst ein Claude-Konto mit Abo (z. B. Pro oder Max).',
+  antigravity: 'Von Google. Du meldest dich mit deinem Google-Konto an.',
+};
+
+function setupCard() {
+  const wo = S.state.platform === 'win32' ? 'In der PowerShell ausführen:' : 'Im Terminal ausführen:';
+  const option = (p) => {
+    const hint = p.hint || {};
+    return h('div', { class: 'setup-option' },
+      h('div', { class: 'so-head' }, h('b', {}, p.name),
+        hint.link ? h('a', { class: 'link-btn', href: hint.link, target: '_blank', rel: 'noopener noreferrer' }, 'Anleitung öffnen', iconEl('external', 14)) : null),
+      h('p', { class: 'so-info' }, SETUP_INFO[p.id] || ''),
+      hint.befehl ? h('div', { class: 'so-cmd' }, h('span', { class: 'so-label' }, wo),
+        h('div', { class: 'cmd-row' }, h('code', { class: 'cmd' }, hint.befehl),
+          btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(hint.befehl) }))) : null);
+  };
+  return h('div', { class: 'provider-banner setup', role: 'status' },
+    h('div', { class: 'setup-head' }, h('b', {}, 'Bitte installiere Claude Code oder Antigravity.'),
+      h('span', {}, 'Damit Mango antworten kann, brauchst du einen der beiden KI-Anbieter. Einer reicht. Danach einmal anmelden und hier auf „Erneut prüfen“ klicken.')),
+    h('div', { class: 'setup-options' }, S.state.providers.map(option)),
+    h('div', { class: 'setup-foot' }, btn('Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: checkAllProviders })));
+}
+
+export async function checkAllProviders() {
+  for (const p of S.state.providers) p.status = 'pruefe';
+  S.state.pruefung = true;
+  updateComposer();
+  try {
+    const r = await api.post('/api/providers/pruefen');
+    Object.assign(S.state, { settings: r.settings, providers: r.providers, pruefung: r.pruefung });
+    const prov = activeProvider();
+    if (prov && prov.status !== 'nicht_installiert') toast(`${prov.name}: ${prov.label}`, { error: !prov.usable });
+    else toast('Noch kein KI-Anbieter gefunden.', { error: true });
+  } catch (err) {
+    S.state.pruefung = false;
+    toast(err.message, { error: true });
+  }
+  updateComposer();
+}
+
+// Solange die App Anbieter sucht oder prüft: Zustand nachladen. Die automatische Auswahl
+// (Anbieter und Modell) kommt dabei mit den Einstellungen zurück.
 let pollTimer = null;
 function pollProvidersIfNeeded() {
-  if (pollTimer || !S.state.providers.some((p) => p.status === 'pruefe')) return;
+  if (pollTimer || !(S.state.pruefung || S.state.providers.some((p) => p.status === 'pruefe'))) return;
   pollTimer = setTimeout(async () => {
     pollTimer = null;
-    try { S.state.providers = await api.get('/api/providers'); } catch { /* erneut */ }
+    try {
+      const r = await api.get('/api/settings');
+      Object.assign(S.state, { settings: r.settings, providers: r.providers, pruefung: r.pruefung });
+    } catch { /* erneut */ }
     updateComposer();
   }, 1500);
 }
@@ -1070,7 +1123,9 @@ export async function checkProvider(id) {
   if (p) p.status = 'pruefe';
   updateComposer();
   try {
-    S.state.providers = await api.post(`/api/providers/${id}/check`);
+    await api.post(`/api/providers/${id}/check`);
+    const r = await api.get('/api/settings'); // Prüfung kann Anbieter und Modell automatisch wählen
+    Object.assign(S.state, { settings: r.settings, providers: r.providers, pruefung: r.pruefung });
     const np = S.state.providers.find((x) => x.id === id);
     toast(`${np.name}: ${np.label}`, { error: !np.usable });
   } catch (err) {

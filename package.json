@@ -18,7 +18,7 @@
     "start": "node server/index.js",
     "dev": "node server/index.js --no-open",
     "desktop": "electron .",
-    "test": "node --test test/unit.test.js test/api.test.js",
+    "test": "node --test test/unit.test.js test/api.test.js test/anbieter.test.js",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
     "dist:dir": "electron-builder --dir --publish never"
   },

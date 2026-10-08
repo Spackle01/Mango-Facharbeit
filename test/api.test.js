@@ -96,12 +96,14 @@ test('Kompletter Ablauf', async (t) => {
   assert.strictEqual(state.projectError, null);
 
   await t.test('Anbieter werden erkannt', async () => {
-    state = await waitFor(async () => { const s = await call('GET', '/api/state'); return s.providers.every((p) => p.status !== 'pruefe') && s; });
+    state = await waitFor(async () => { const s = await call('GET', '/api/state'); return !s.pruefung && s.providers.every((p) => p.status !== 'pruefe') && s; });
     const claude = state.providers.find((p) => p.id === 'claude');
     const agy = state.providers.find((p) => p.id === 'antigravity');
     assert.strictEqual(claude.status, 'bereit');
     assert.strictEqual(claude.label, 'Angemeldet');
     assert.strictEqual(agy.status, 'ungeprueft');
+    assert.strictEqual(state.settings.provider, 'claude', 'Claude hat Vorrang, wenn es bereit ist');
+    assert.deepStrictEqual(state.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high' }, 'neuestes Sonnet und bestes Gemini-Modell');
   });
 
   await t.test('Erster Start: Vorschlag und Einrichtung', async () => {
@@ -224,7 +226,7 @@ test('Kompletter Ablauf', async (t) => {
     const { done, events } = await send(chatId, 'Und jetzt mit Antigravity?');
     assert.strictEqual(done.message.status, 'fertig');
     assert.strictEqual(done.message.provider, 'antigravity');
-    assert.strictEqual(done.message.model, 'gemini-test');
+    assert.strictEqual(done.message.model, 'gemini-3.1-pro-high');
     assert.match(done.message.text, /Hallo von Antigravity/);
     assert.match(done.message.activity[0].label, /Liest 00_vorgaben\/anforderungen\.md/);
     assert.ok(events.some((e) => e.type === 'activity'));
@@ -236,7 +238,7 @@ test('Kompletter Ablauf', async (t) => {
 
   await t.test('Modellauswahl für beide Anbieter', async () => {
     let s = await call('GET', '/api/state');
-    assert.deepStrictEqual(s.settings.modelle, { claude: 'sonnet', antigravity: '' }, 'sparsame Voreinstellung');
+    assert.deepStrictEqual(s.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high' }, 'sparsame Voreinstellung');
     assert.strictEqual(s.settings.gruendlichkeit, 'ausgewogen');
     const first = JSON.parse(fs.readFileSync(LOG, 'utf8').trim().split('\n')[0]);
     assert.strictEqual(first.args[first.args.indexOf('--model') + 1], 'sonnet');
@@ -252,7 +254,7 @@ test('Kompletter Ablauf', async (t) => {
     await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus & calc' } }), (e) => e.status === 400);
     await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus"; rm -rf /' } }), (e) => e.status === 400);
     let r = await call('PUT', '/api/settings', { modelle: { claude: 'opus' }, gruendlichkeit: 'gruendlich' });
-    assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: '' });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: 'gemini-3.1-pro-high' });
     assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich');
     r = await call('PUT', '/api/settings', { gruendlichkeit: 'egal' });
     assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich', 'ungültige Werte werden ignoriert');
@@ -526,6 +528,10 @@ test('Neustart: Arbeitsstand bleibt erhalten, verschobener Arbeitsraum wird erka
   assert.strictEqual(s.project.angaben.lehrkraft, 'Frau Muster');
   assert.strictEqual(s.settings.theme, 'dark');
   assert.strictEqual(s.settings.modelle.claude, 'sonnet', 'Modellwahl bleibt gespeichert');
+  s = await waitFor(async () => { const x = await call('GET', '/api/settings'); return !x.pruefung && x.providers.every((p) => p.status !== 'pruefe') && x; });
+  assert.strictEqual(s.settings.modelle.antigravity, '', 'selbst gewählte Voreinstellung wird nicht automatisch ersetzt');
+  assert.strictEqual(s.settings.provider, 'claude');
+  s = await call('GET', '/api/state');
   assert.strictEqual(s.project.aufgaben.find((a) => a.id === 'expose').status, 'erledigt');
   assert.ok(s.chats.some((c) => c.title === 'Exposé-Planung'));
   assert.match(s.project.uebernahme.zusammenfassung, /Goldener Schnitt/);

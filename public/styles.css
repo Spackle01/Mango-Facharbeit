@@ -412,6 +412,26 @@ kbd, .cmd {
 .provider-banner.danger.attention { box-shadow: 0 0 0 2px var(--danger); }
 .provider-banner .txt { flex: 1 1 260px; color: var(--text); }
 .provider-banner .txt b { font-weight: 600; }
+/* Kein KI-Anbieter installiert: Einrichtungskarte mit beiden Wegen */
+.provider-banner.setup {
+  flex-direction: column; align-items: stretch; gap: 12px; padding: 14px 16px 12px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+.setup-head { display: flex; flex-direction: column; gap: 3px; color: var(--text-2); }
+.setup-head b { color: var(--text); font-size: 14.5px; }
+.setup-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.setup-option {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px;
+  border-radius: var(--radius); background: var(--surface-2);
+}
+.setup-option .so-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.setup-option .so-head .link-btn { display: inline-flex; align-items: center; gap: 4px; }
+.setup-option .so-info { margin: 0; color: var(--text-2); font-size: 13px; }
+.setup-option .so-label { display: block; margin-bottom: 4px; color: var(--text-3); font-size: 12px; }
+.setup-option .cmd-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.setup-option .cmd { padding: 5px 9px; overflow-wrap: anywhere; background: var(--surface); }
+.setup-foot { display: flex; justify-content: flex-end; }
+.hint-box .link-btn { align-self: flex-start; }
 
 .drop-overlay {
   position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; pointer-events: none; padding: 24px;

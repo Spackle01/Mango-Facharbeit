@@ -48,7 +48,32 @@ function parseAgyModels(text) {
   return out;
 }
 
+// Bestes Gemini-Modell aus `agy models`: zuerst die stärkste Klasse (Pro vor Flash vor Lite),
+// darin die neueste Version, dann die höchste Denkstufe im Namen (high vor medium vor low).
+function bestGeminiModel(models) {
+  const rank = (m) => {
+    const g = /^gemini-(\d+(?:\.\d+)?)(?:-(.+))?$/i.exec(m.id);
+    if (!g) return null;
+    const rest = (g[2] || '').toLowerCase();
+    const klasse = /ultra/.test(rest) ? 4 : /pro/.test(rest) ? 3 : /lite/.test(rest) ? 1 : /flash/.test(rest) ? 2 : 2;
+    const stufe = /(^|-)high$/.test(rest) ? 3 : /(^|-)medium$/.test(rest) ? 2 : /(^|-)low$/.test(rest) ? 1 : 2.5;
+    const vorschau = /preview|exp/.test(rest) ? 0 : 1; // bei gleicher Version: stabil vor Vorschau
+    return [klasse, parseFloat(g[1]), vorschau, stufe];
+  };
+  const vergleiche = (a, b) => {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+    return 0;
+  };
+  let best = null;
+  let bestRank = null;
+  for (const m of models || []) {
+    const r = rank(m);
+    if (r && (!bestRank || vergleiche(r, bestRank) > 0)) { best = m; bestRank = r; }
+  }
+  return best ? best.id : '';
+}
+
 // Gründlichkeit → --effort der CLIs. „Ausgewogen“ ist sparsam genug für den Alltag.
 const GRUENDLICHKEIT = { sparsam: 'low', ausgewogen: 'medium', gruendlich: 'high' };
 
-module.exports = { MODEL_ID_RE, validModelId, CLAUDE_MODELS, parseAgyModels, GRUENDLICHKEIT };
+module.exports = { MODEL_ID_RE, validModelId, CLAUDE_MODELS, parseAgyModels, bestGeminiModel, GRUENDLICHKEIT };

@@ -18,8 +18,9 @@ Voraussetzungen:
 
 - [Node.js](https://nodejs.org) ab Version 18 (LTS). Weitere Pakete sind nicht nötig, `npm install` entfällt.
 - Mindestens einer der beiden Anbieter, installiert und einmal angemeldet:
-  - Claude Code: Windows `irm https://claude.ai/install.ps1 | iex`, macOS/Linux `curl -fsSL https://claude.ai/install.sh | bash`, danach `claude auth login`
-  - Antigravity CLI: Windows `irm https://antigravity.google/cli/install.ps1 | iex`, macOS/Linux `curl -fsSL https://antigravity.google/cli/install.sh | bash`, danach einmal `agy` starten und mit dem Google-Konto anmelden
+  - Claude Code ([Anleitung](https://code.claude.com/docs/en/setup)): Windows `irm https://claude.ai/install.ps1 | iex`, macOS/Linux `curl -fsSL https://claude.ai/install.sh | bash`, danach `claude auth login`
+  - Antigravity CLI ([Anleitung](https://antigravity.google/docs/getting-started?tab=cli)): Windows `irm https://antigravity.google/cli/install.ps1 | iex`, macOS/Linux `curl -fsSL https://antigravity.google/cli/install.sh | bash`, danach einmal `agy` starten und mit dem Google-Konto anmelden
+  - Ist keiner installiert, zeigt die App beide Wege mit Anleitung und Befehl zum Kopieren. Nach der Installation genügt „Erneut prüfen“.
 
 Start:
 
@@ -44,6 +45,7 @@ Optionen: `--port 4317`, `--no-open`, `--data-dir <Ordner>`.
   - Die Auswahl gilt ab der nächsten Nachricht, auch in laufenden Chats, und wird als `--model` an die CLI übergeben. Unter jeder Antwort steht, welches Modell geantwortet hat.
   - Ist ein Modell für das Konto nicht verfügbar, erscheint ein Hinweis mit „Modell wählen“.
 - **Gründlichkeit:** Sparsam, Ausgewogen (Voreinstellung) oder Gründlich – im Modell-Dialog und in den Einstellungen. Wird als `--effort low|medium|high` an beide CLIs übergeben und bestimmt, wie lange der Assistent nachdenkt und wie viel er verbraucht.
+- **Automatische Wahl:** Beim Start sucht die App beide Anbieter. Ist Claude Code bereit, nutzt sie Claude Code mit der neuesten Sonnet-Version. Ist nur Antigravity installiert, wechselt sie zu Antigravity und nimmt das beste Gemini-Modell aus `agy models` (Pro vor Flash, neueste Version, höchste Denkstufe). Selbst gewählte Anbieter und Modelle bleiben erhalten, solange der gewählte Anbieter installiert ist.
 - **Anbieter:** unten im Eingabefeld. Punktfarbe: grün = angemeldet/verbunden, grau = wird geprüft bzw. noch nicht geprüft, gelb = Anmeldung oder Ordnerfreigabe nötig, rot = Fehler. Ist etwas einzurichten, steht der konkrete Befehl über dem Eingabefeld.
 - **Darstellung:** Hell, Dunkel oder System (Einstellungen).
 

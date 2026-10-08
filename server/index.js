@@ -7,6 +7,7 @@ const os = require('os');
 const { fsp, path, exists, resolveInside, humanSize } = require('./util');
 const { AppStore, Project } = require('./store');
 const { Providers } = require('./providers');
+const { bestGeminiModel } = require('./providers/models');
 const { RunManager } = require('./runs');
 const ws = require('./workspace');
 const ctx = require('./context');
@@ -32,6 +33,47 @@ const runs = new RunManager({ providers, settings: () => app.settings });
 
 class HttpError extends Error {
   constructor(status, message, extra = {}) { super(message); this.status = status; Object.assign(this, extra); }
+}
+
+const arbeitsordner = () => (project ? project.workspace : os.tmpdir());
+
+// Automatische Wahl nach jeder Erkennung: Claude Code mit der neuesten Sonnet-Version, wenn es
+// bereit ist, sonst Antigravity mit dem besten Gemini-Modell aus „agy models“. Was die Person
+// selbst gewählt hat, bleibt – außer der gewählte Anbieter ist gar nicht installiert.
+async function autoSelect() {
+  const s = app.settings;
+  const st = providers.state;
+  const installiert = (id) => !!(st[id] && st[id].installed);
+  let ziel = s.provider;
+  if (!s.anbieterGewaehlt) {
+    if (installiert('claude') && ['bereit', 'verbunden'].includes(st.claude.status)) ziel = 'claude';
+    else if (installiert('antigravity')) ziel = 'antigravity';
+    else if (installiert('claude')) ziel = 'claude';
+  } else if (!installiert(ziel)) {
+    const anderer = ziel === 'claude' ? 'antigravity' : 'claude';
+    if (installiert(anderer)) ziel = anderer;
+  }
+  const patch = {};
+  if (ziel !== s.provider) patch.provider = ziel;
+  if (installiert('antigravity') && !(s.modellGewaehlt || {}).antigravity) {
+    const best = bestGeminiModel(st.antigravity.models);
+    if (best && best !== s.modelle.antigravity) patch.modelle = { antigravity: best };
+  }
+  if (Object.keys(patch).length) await app.updateSettings(patch, { auto: true });
+  if (ziel === 'antigravity' && installiert('antigravity') && st.antigravity.status === 'ungeprueft') {
+    await providers.verify('antigravity', arbeitsordner());
+  }
+}
+
+// Erkennung beider Anbieter mit anschließender Auswahl. Läuft beim Start und auf Wunsch erneut.
+let pruefung = null;
+function pruefeAnbieter() {
+  if (!pruefung) {
+    pruefung = providers.detectAll(null)
+      .then(autoSelect)
+      .finally(() => { pruefung = null; });
+  }
+  return pruefung;
 }
 
 function requireProject() {
@@ -66,6 +108,7 @@ async function statePayload() {
     chats: project ? project.chatList() : [],
     running: runs.runningChats(),
     providers: providers.publicState(),
+    pruefung: !!pruefung,
     meta: { status: STATUS_INFO, phasen: PHASEN },
     antigravityApp: system.antigravityAppAvailable(),
     dataDir: app.dir,
@@ -250,17 +293,26 @@ route('PUT', /^\/api\/settings$/, async (req) => {
   if (body.provider && body.provider !== before) {
     const s = providers.state[body.provider];
     if (body.provider === 'antigravity' && s.installed && s.status === 'ungeprueft') {
-      providers.verify('antigravity', project ? project.workspace : os.tmpdir()).catch(() => {});
+      providers.verify('antigravity', arbeitsordner()).catch(() => {});
     }
   }
   return { settings: app.settings, providers: providers.publicState() };
 });
 
+route('GET', /^\/api\/settings$/, async () => ({ settings: app.settings, providers: providers.publicState(), pruefung: !!pruefung }));
+
 route('GET', /^\/api\/providers$/, async () => providers.publicState());
 
+// Beide Anbieter neu erkennen (z. B. nach der Installation) und automatisch auswählen.
+route('POST', /^\/api\/providers\/pruefen$/, async () => {
+  await pruefeAnbieter();
+  return { settings: app.settings, providers: providers.publicState(), pruefung: false };
+});
+
 route('POST', /^\/api\/providers\/(claude|antigravity)\/check$/, async (req, url, m) => {
-  if (m[1] === 'antigravity') await providers.verify('antigravity', project ? project.workspace : os.tmpdir());
+  if (m[1] === 'antigravity') await providers.verify('antigravity', arbeitsordner());
   else await providers.detect('claude');
+  await autoSelect();
   return providers.publicState();
 });
 
@@ -535,8 +587,8 @@ async function start({ port, open = false, host = null, log = console.log } = {}
   log(`Mango Facharbeit läuft: ${url}`);
   log(`App-Daten: ${app.dir}`);
   if (project) log(`Arbeitsraum: ${project.workspace}`);
-  providers.detectAll(app.settings.provider, project ? project.workspace : os.tmpdir())
-    .then(() => log(`Anbieter: ${providers.publicState().map((p) => `${p.name}: ${p.label}`).join(' · ')}`))
+  pruefeAnbieter()
+    .then(() => log(`Anbieter: ${providers.publicState().map((p) => `${p.name}: ${p.label}`).join(' · ')} – aktiv: ${app.settings.provider}${app.settings.modelle[app.settings.provider] ? ` (${app.settings.modelle[app.settings.provider]})` : ''}`))
     .catch((err) => console.error('Anbietererkennung fehlgeschlagen:', err.message));
   if (open) system.openAppWindow(url);
   const shutdown = () => {
