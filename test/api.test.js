@@ -412,6 +412,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.files.find((f) => f.path.endsWith('Meine Facharbeit/Notizen.md')).aktion, 'zurueckgesetzt');
     if (process.platform !== 'win32') {
       assert.strictEqual(fs.statSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md')).mode & 0o222, 0, 'Originale sind schreibgeschützt');
+      assert.strictEqual(fs.statSync(path.join(WS, importOrdner, 'Meine Facharbeit/Notizen.md')).mode & 0o222, 0, 'nach dem Zurücksetzen wieder schreibgeschützt');
     }
 
     // Einsortiert: kopiert, umgewandelt, abgelehnt.

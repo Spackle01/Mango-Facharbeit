@@ -250,7 +250,10 @@ async function restoreChanges(ws, changes, schuetzen = (p) => ORIGINALE.test(p))
       const dest = resolveInside(ws, c.path);
       if (src && dest) {
         await ensureDir(path.dirname(dest));
+        await fsp.chmod(dest, 0o644).catch(() => {});
         await fsp.copyFile(src, dest);
+        // Mitgebrachte Originale bleiben schreibgeschützt.
+        if (c.path.startsWith('uebernommen/')) await fsp.chmod(dest, 0o444).catch(() => {});
         out.push({ ...c, aktion: 'zurueckgesetzt' });
         continue;
       }

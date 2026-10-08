@@ -45,6 +45,7 @@ process.stdin.on('end', () => {
     const notes = path.join(process.cwd(), ...o.split('/').filter(Boolean), 'Meine Facharbeit', 'Notizen.md');
     if (fs.existsSync(notes)) {
       out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'u1', name: 'Edit', input: { file_path: notes } }] } });
+      try { fs.chmodSync(notes, 0o644); } catch { /* Schreibschutz gewaltsam aufheben */ }
       fs.appendFileSync(notes, '\nVom Assistenten verändert.');
     }
     const plan = [
