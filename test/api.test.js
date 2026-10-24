@@ -329,6 +329,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.word[0].ok, 2);
     assert.strictEqual(m.word[0].fehler.length, 1);
     assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [] }, 'unauffälliger Text wird nicht überarbeitet');
     // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
     const extract = require('../server/extract');
     const info = await extract.analyse(path.join(WS, ...lt.split('/')));
@@ -347,6 +348,25 @@ test('Kompletter Ablauf', async (t) => {
     const orig = r2.word.find((x) => x.datei.startsWith('00_vorgaben/'));
     assert.strictEqual(orig.ok, 0);
     assert.match(orig.hinweis, /Originale/);
+  });
+
+  await t.test('Sprachprüfung: Floskeln im eingetragenen Text werden einmal überarbeitet', async () => {
+    const chat = await call('POST', '/api/chats');
+    const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
+    const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
+    assert.strictEqual(m.text, 'Eingetragen.', 'Text der Überarbeitung wird nicht angezeigt');
+    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [] });
+    assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen/.test(a.label)));
+    const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
+    assert.strictEqual(w.ok, 2);
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
+    assert.strictEqual(calls.length, 2, 'ein Überarbeitungsdurchlauf');
+    assert.match(calls[0].input, /<schreibregeln>.*wissenschaftlich-schreiben/);
+    assert.ok(calls[1].args.includes('--resume'), 'Überarbeitung in derselben Sitzung');
+    assert.match(calls[1].input, /„In der heutigen Zeit spielt Zeitmanagement eine entscheidende Rolle\.“ – Aufwärm-Einstieg/);
+    const text = require('../server/extract').docxToText(fs.readFileSync(path.join(WS, ...w.datei.split('/'))));
+    assert.match(text, /Ich habe über Windkraft geschrieben\./);
+    assert.ok(!/heutigen Zeit/.test(text));
   });
 
   await t.test('Exporte: Gesprächsverläufe, Word, Gesamtarbeit, Sicherung', async () => {

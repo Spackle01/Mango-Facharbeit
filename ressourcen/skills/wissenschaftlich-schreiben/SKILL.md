@@ -13,6 +13,14 @@ Nutze diesen Skill, wenn du einen Text schreibst oder überarbeitest, den die Sc
 
 **Kennzeichnung:** Dieser Skill verbessert Qualität und Verständlichkeit. Er dient nicht dazu, KI-Nutzung zu verbergen. Entwürfe, an denen du mitgeschrieben hast, bleiben nach den Schulregeln kennzeichnungspflichtig.
 
+## 0. Kurz und einfach
+
+Das wichtigste Ziel: Der Text ist kurz und leicht zu lesen. Die Person muss ihn verstehen und erklären können.
+
+- Kurze Sätze (meist 8 bis 20 Wörter, nie über 25), gängige Wörter, ein Gedanke pro Satz.
+- So lang wie nötig, nicht länger: Lerntagebuch-Eintrag zwei bis fünf Sätze; Absatz der Facharbeit drei bis sechs Sätze; E-Mail an die Lehrkraft höchstens fünf Sätze plus Gruß. Mindestlängen der Schule (z. B. Exposé ab 400 Wörtern) gelten trotzdem, aber nicht mehr als verlangt.
+- Erst den Kern schreiben, dann kürzen. Was keinen Fakt, keine Erfahrung und keine Bewertung enthält, fällt weg.
+
 ## 1. Vor dem Schreiben
 
 1. Kläre vier Dinge: Wer „schreibt“ den Text, wer liest ihn, welche Textsorte ist es (Kapitel der Facharbeit, Exposé, Lerntagebuch, E-Mail an die Lehrkraft, Folie) und in welcher Sprache. Wenn etwas davon unklar ist und den Text stark verändert, frag nach.
@@ -85,7 +93,7 @@ Nutze diesen Skill, wenn du einen Text schreibst oder überarbeitest, den die Sc
 
 1. Notizen zuerst: Die eigentlichen Punkte in schlichten Worten auflisten, in der Reihenfolge, in der die Person sie erklären würde.
 2. Zügig einen Entwurf in der passenden Tonlage schreiben.
-3. Kürzen: den ersten Satz streichen, wenn er nur Anlauf ist, und den letzten, wenn er nur wiederholt. Jeden Satz ohne Fakt und ohne Bewertung streichen.
+3. Kürzen: den ersten Satz streichen, wenn er nur Anlauf ist, und den letzten, wenn er nur wiederholt. Jeden Satz ohne Fakt und ohne Bewertung streichen. Sätze über 25 Wörter teilen. Danach noch einmal um ein Viertel kürzen, wenn es geht.
 4. Rhythmus: Haben drei Sätze hintereinander ähnliche Länge, einen ändern. Sind alle Absätze gleich groß, einen teilen oder zusammenführen.
 5. Muster prüfen: mit Abschnitt 3 oder dem Skill `sprachpruefung`.
 6. Belege prüfen: Jede Tatsachenbehauptung hat einen Kurzbeleg aus echter Literatur oder ist als eigene Erhebung gekennzeichnet.

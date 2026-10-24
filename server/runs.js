@@ -8,6 +8,8 @@ const importer = require('./importer');
 const sortieren = require('./sortieren');
 const word = require('./word');
 const abgabe = require('./abgabe');
+const stil = require('./stil');
+const extract = require('./extract');
 const { kindOf } = require('./extract');
 const { GRUENDLICHKEIT } = require('./providers/models');
 
@@ -50,6 +52,58 @@ function errorHint(kind, providerState, model = '') {
   if (kind === 'limit') return { text: 'Der Anbieter ist gerade überlastet oder dein Nutzungslimit ist erreicht. Warte etwas oder wechsle den Anbieter.' };
   if (kind === 'netz') return { text: 'Keine Verbindung zum Anbieter. Prüfe die Internetverbindung und versuche es erneut.' };
   return null;
+}
+
+// Schreibaufgaben erkennen: dann erinnert die App ausdrücklich an die Schreib-Skills.
+const SCHREIBAUFGABE = /(schreib|formulier|eintrag|trag\b.*\bein|ergänz|überarbeit|umschreib|verbesser|korrigier|kürz|lerntagebuch|expos[eé]|kapitel|einleitung|fazit|schluss|absatz|e-?mail|mail an|text|entwurf|zusammenfass|reflexion)/i;
+
+// Texte, die der Assistent in diesem Durchlauf in Dateien geschrieben hat (nur neuer Text).
+async function geschriebeneTexte(project, { dateien, ergebnisse, changes, before, ausgenommen }) {
+  const out = [];
+  for (const t of stil.textAusWord(dateien)) {
+    const r = (ergebnisse || []).find((x) => x.datei === t.datei);
+    if (r && r.ok) out.push(t);
+  }
+  for (const c of changes) {
+    if (!['neu', 'geaendert'].includes(c.aktion) || !/\.(md|txt)$/i.test(c.path) || !/^(0[1-8]_[^/]+|abgabe)\//.test(c.path)) continue;
+    if (ausgenommen.has(c.path)) continue;
+    const jetzt = await fsp.readFile(path.join(project.workspace, ...c.path.split('/')), 'utf8').catch(() => '');
+    const alt = before.get(c.path);
+    const text = stil.neueZeilen(alt && alt.content ? alt.content.toString('utf8') : '', jetzt);
+    if (text.trim()) out.push({ datei: c.path, text });
+  }
+  return out;
+}
+
+// Gefundene Stellen, die nach der Überarbeitung noch unverändert in der Datei stehen.
+async function nochVorhanden(project, funde) {
+  const offen = [];
+  const norm = (t) => String(t).replace(/[*_]/g, '').replace(/\s+/g, ' ');
+  for (const f of funde) {
+    const buf = await fsp.readFile(path.join(project.workspace, ...f.datei.split('/'))).catch(() => null);
+    if (!buf) continue;
+    let text = '';
+    try { text = /\.docx$/i.test(f.datei) ? extract.docxToText(buf) : buf.toString('utf8'); } catch { continue; }
+    const jetzt = norm(text);
+    for (const st of f.stellen) {
+      if (jetzt.includes(norm(st.satz.replace(/…$/, '')).slice(0, 60))) offen.push({ datei: f.datei, ...st });
+    }
+  }
+  return offen;
+}
+
+// Ergebnisse eines zweiten Word-Durchlaufs je Datei zusammenführen.
+function wordZusammenfuehren(msg, neu) {
+  msg.word = msg.word || [];
+  for (const r of neu) {
+    const alt = msg.word.find((x) => x.datei === r.datei);
+    if (!alt) { msg.word.push(r); continue; }
+    alt.ok += r.ok;
+    alt.gesamt += r.gesamt;
+    alt.fehler = [...(alt.fehler || []), ...(r.fehler || [])];
+    alt.version = alt.version || r.version;
+    if (r.gesperrt) Object.assign(alt, { gesperrt: true, hinweis: r.hinweis });
+  }
 }
 
 // Ergebnis der Word-Änderungen in die Dateiliste übernehmen; gesperrte Dateien für „Erneut eintragen“ merken.
@@ -203,8 +257,9 @@ class RunManager {
       let sessionId = sess.id || null;
       let resume = !!sessionId;
       let history = !sessionId && earlier.length ? ctx.historyTranscript(earlier) : '';
+      const schreibaufgabe = !inv && SCHREIBAUFGABE.test(cleanText);
       const buildPrompt = (unchanged) => ctx.buildPrompt({
-        context: context.text, contextUnchanged: unchanged, attachments: atts, history,
+        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe,
         text: inv ? `${cleanText}\n\n${importer.importPrompt(inv, { bisher: project.data.uebernahme })}` : cleanText || 'Bitte sieh dir die angehängten Dateien an.',
       });
       let prompt = buildPrompt(!!sessionId && sess.contextHash === context.hash);
@@ -220,10 +275,12 @@ class RunManager {
         if (saveTimer) return;
         saveTimer = setTimeout(() => { saveTimer = null; project.saveChat(chat).catch(() => {}); }, 1500);
       };
+      let still = false; // Überarbeitungsdurchlauf: Text nicht anzeigen, nur Arbeitsschritte
       const onEvent = (ev) => {
         if (ev.type === 'init') {
           if (ev.model) msg.model = ev.model;
         } else if (ev.type === 'text') {
+          if (still) return;
           msg.text += ev.delta;
           broadcast({ type: 'text', delta: ev.delta });
           scheduleSave();
@@ -318,6 +375,49 @@ class RunManager {
         merkeWord(msg, wp.dateien, changes);
       }
       if (wp.invalid) msg.activity.push({ kind: 'info', label: 'Word-Änderungen waren nicht lesbar und wurden ignoriert' });
+
+      // Sprachprüfung nach den Schreib-Skills: Was der Assistent in Dateien geschrieben hat, wird
+      // geprüft; gefundene Stellen überarbeitet er einmal selbst (in derselben Sitzung, ohne neue Antwort).
+      if (!inv && !res.canceled && !res.error && !run.stopRequested) {
+        const ausgenommen = new Set(einsortiert.filter((r) => !r.fehler).map((r) => r.nach));
+        const texte = await geschriebeneTexte(project, { dateien: wp.dateien, ergebnisse: msg.word, changes, before, ausgenommen });
+        if (texte.length) {
+          const funde = texte.map((t) => ({ datei: t.datei, stellen: stil.pruefen(t.text) })).filter((f) => f.stellen.length);
+          const gefunden = funde.reduce((n, f) => n + f.stellen.length, 0);
+          msg.stil = { gefunden, offen: [] };
+          if (gefunden) {
+            const info = { kind: 'info', label: `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Überarbeiten` };
+            msg.activity.push(info);
+            broadcast({ type: 'activity', item: info });
+            const extrakte = {};
+            for (const f of funde) {
+              if (!/\.docx$/i.test(f.datei)) continue;
+              const e = await ws.ensureExtract(project.workspace, f.datei).catch(() => null);
+              if (e && e.extrakt) extrakte[f.datei] = e.extrakt;
+            }
+            const before2 = await ws.snapshot(project.workspace);
+            sessionId = res.sessionId || sessionId;
+            resume = true;
+            still = true;
+            const res2 = await launch(stil.korrekturPrompt(funde, extrakte)).catch((err) => ({ error: err.message }));
+            still = false;
+            if (res2.error || res2.canceled) {
+              msg.activity.push({ kind: 'info', label: 'Überarbeitung nach der Sprachprüfung nicht abgeschlossen' });
+            } else {
+              if (res2.sessionId) res.sessionId = res2.sessionId;
+              let ch2 = [];
+              try { ch2 = await ws.restoreChanges(project.workspace, await ws.diffAndBackup(project.workspace, before2)); } catch { ch2 = []; }
+              for (const c of ch2) if (!changes.some((x) => x.path === c.path)) changes.push(c);
+              const wp2 = word.parseBlock(res2.text || '');
+              if (wp2.dateien.length) {
+                wordZusammenfuehren(msg, await abgabe.anwenden(project, wp2.dateien));
+                merkeWord(msg, [...wp.dateien, ...wp2.dateien], changes);
+              }
+            }
+            msg.stil.offen = await nochVorhanden(project, funde);
+          }
+        }
+      }
 
       const parsed = ctx.parseUpdate(wp.text);
       const filesAfter = await ws.listFiles(project.workspace);

@@ -214,7 +214,7 @@ function historyTranscript(messages, maxChars = 24000) {
   return out.join('\n\n');
 }
 
-function buildPrompt({ context, contextUnchanged, attachments = [], history, text }) {
+function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false }) {
   const parts = [];
   parts.push(contextUnchanged ? '<projektkontext>unverändert seit der letzten Nachricht</projektkontext>' : context);
   if (history) {
@@ -222,6 +222,9 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   }
   if (attachments.length) {
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
+  }
+  if (schreibaufgabe) {
+    parts.push('<schreibregeln>Wenn du dafür Text schreibst oder überarbeitest: zuerst den Skill `wissenschaftlich-schreiben` laden, danach mit `sprachpruefung` prüfen. Kurz und einfach. Antwort im Chat: zwei bis fünf Sätze.</schreibregeln>');
   }
   parts.push(`Nachricht der Schülerin bzw. des Schülers:\n${text}`);
   return parts.join('\n\n');

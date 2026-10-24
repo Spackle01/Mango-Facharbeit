@@ -89,10 +89,12 @@ Jede Facharbeit hat einen eigenen Ordner (Vorschlag: `Dokumente/Facharbeit – <
 
 ## Wie der Assistent Bescheid weiß
 
-1. **Regeln** (`ressourcen/regeln.md`): Rolle, Ton, Schulvorgaben, KI-Regeln der Schule, Quellenregeln, Dateiregeln, Arbeitsstand-Protokoll. Claude erhält sie als Systemprompt-Ergänzung, Antigravity als Workspace-Regel (`.agents/rules/`).
+1. **Regeln** (`ressourcen/regeln.md`): „Kurz und einfach“ als oberste Regel (Chat-Antworten meist zwei bis fünf Sätze, Lerntagebuch-Einträge zwei bis fünf Sätze, Sätze höchstens 25 Wörter), die Schreibregeln der Humanize-Skills als Kurzfassung (gelten immer, auch ohne Skill-Aufruf), Rolle, Schulvorgaben, KI-Regeln der Schule, Quellenregeln, Dateiregeln, Arbeitsstand-Protokoll. Claude erhält sie als Systemprompt-Ergänzung, Antigravity als Workspace-Regel (`.agents/rules/`).
 2. **Projektkontext** vor jeder Nachricht: Projektangaben, Fristen, kompletter Arbeitsstand, gemerkte Ergebnisse, zuletzt geänderte Dateien. Unveränderter Kontext wird nicht erneut gesendet. Ein neuer Chat oder ein Anbieterwechsel bekommt den vollständigen Kontext (beim Wechsel zusätzlich den bisherigen Chatverlauf).
 3. **Wissensbasis** `00_vorgaben/anforderungen.md`: alle Vorgaben aus Handreichung, Zeitschiene, KI-Leitfaden, Aufgaben zu Exposé und Mindmap, Lerntagebuch-Vorlage und Bewertungsbögen – mit Quelle und Kennzeichnung **[V] verbindlich / [E] Empfehlung / [B] Beispiel** sowie einer Liste von Widersprüchen, bei denen der Assistent nachfragt.
 4. **Skills** (`ressourcen/skills/`, Herkunft in `ressourcen/skills/HERKUNFT.md`): `wissenschaftlich-schreiben`, `sprachpruefung` (mit `ai_tell_scan.py`), `quellenrecherche`, `abgabe-pruefen`.
+5. **Schreib-Skills sind Pflicht:** Vor jedem Text für eine Datei lädt der Assistent `wissenschaftlich-schreiben` und prüft danach mit `sprachpruefung`. Erkennt die App eine Schreibaufgabe (schreiben, eintragen, überarbeiten, Lerntagebuch, Exposé, Kapitel …), erinnert sie im Prompt zusätzlich daran.
+6. **Automatische Sprachprüfung** (`server/stil.js`): Jeder Text, den der Assistent in eine Datei schreibt (Word-Block oder Markdown, nicht beim wortgetreuen Einsortieren), wird nach den Listen der Skills geprüft: Floskeln („in der heutigen Zeit“, „darüber hinaus“, „spielt eine entscheidende Rolle“), gehäufte Stilwörter, vage Belege ohne Kurzbeleg, Chatbot-Reste, Geviertstriche, englische Anführungszeichen, Sätze über 25 Wörter. Direkte Zitate bleiben unangetastet. Gefundene Stellen überarbeitet der Assistent einmal in derselben Sitzung (ohne zusätzliche Antwort im Chat). Unter der Antwort steht „Sprachprüfung: unauffällig“, „… überarbeitet“ oder welche Stellen noch zu prüfen sind.
 
 ## Arbeitsstand
 

@@ -452,3 +452,43 @@ test('Abgabe-Dateien: Namensteil wie von der Schule empfohlen', () => {
   assert.strictEqual(abgabe.namensteil('Anna Lena Beispiel'), 'Beispiel_Anna_Lena');
   assert.strictEqual(abgabe.namensteil(''), '');
 });
+
+// ---------- Sprachprüfung (Schreib-Skills) ----------
+
+const stil = require('../server/stil');
+
+test('Sprachprüfung: Floskeln, Stilwörter, Geviertstrich, lange Sätze', () => {
+  const grund = (t) => stil.pruefen(t).map((x) => x.grund);
+  assert.deepStrictEqual(grund('In Klasse 11 habe ich eine Projektarbeit geschrieben. Ich habe zu spät angefangen.'), []);
+  assert.deepStrictEqual(grund('In der heutigen Zeit spielt Energie eine entscheidende Rolle.'), ['Aufwärm-Einstieg', 'aufgeblähte Bedeutung']);
+  assert.deepStrictEqual(grund('Das ist gut — sehr gut.'), ['Geviertstrich (—)']);
+  assert.deepStrictEqual(grund('Er sagte "ja" dazu.'), ['englische Anführungszeichen statt „…“']);
+  assert.match(grund(`${'Wort '.repeat(30)}Ende.`)[0], /Satz zu lang \(31 Wörter\)/);
+  // Ein einzelnes Stilwort ist in Ordnung, gehäuft nicht.
+  assert.deepStrictEqual(grund('Die Umfrage ist zudem anonym.'), []);
+  assert.deepStrictEqual(grund('Die Umfrage ist zudem anonym. Das ist maßgeblich.'), ['Stilwort „zudem“', 'Stilwort „maßgeblich“']);
+  // Direkte Zitate, Überschriften und Kennzeichnungen werden nicht bemängelt.
+  assert.deepStrictEqual(grund('Laut Autor ist das „in der heutigen Zeit von zentraler Bedeutung“ (Müller 2020, S. 3).'), []);
+  assert.deepStrictEqual(grund('# Darüber hinaus\n\n[KI-Entwurf, 24.10.2026, Claude – selbst überarbeiten]\n\nIch habe gelernt.'), []);
+  assert.deepStrictEqual(grund('Studien zeigen, dass Pausen helfen (Vgl. Meyer 2021, S. 4).'), []);
+  assert.deepStrictEqual(grund('Studien zeigen, dass Pausen helfen.'), ['vager Beleg ohne Kurzbeleg']);
+});
+
+test('Sprachprüfung: neuer Text aus Word-Block und Textdateien, Rückmeldung an den Assistenten', () => {
+  const t = stil.textAusWord([{ datei: 'abgabe/lt.docx', ops: [{ ersetzen: 3, text: 'A.' }, { ersetzen: 4, alt: '...', text: 'FOS' }, { nach: 5, text: 'B.' }, { zeile: 1, zellen: ['C', 'D'] }] }]);
+  assert.deepStrictEqual(t, [{ datei: 'abgabe/lt.docx', text: 'A.\n\nB.\n\nC. D' }]);
+  assert.strictEqual(stil.neueZeilen('a\nb', 'a\nb\nc\n\nd'), 'c\nd');
+  const p = stil.korrekturPrompt([{ datei: 'abgabe/lt.docx', stellen: [{ satz: 'X.', grund: 'Floskel' }] }], { 'abgabe/lt.docx': '.facharbeit/extrakte/abgabe/lt.docx.txt' });
+  assert.match(p, /^Automatische Sprachprüfung/);
+  assert.match(p, /abgabe\/lt\.docx \(Word: Block `word`, aktuelle Absatznummern in \.facharbeit\/extrakte\/abgabe\/lt\.docx\.txt\):\n- „X\.“ – Floskel/);
+});
+
+test('Regeln: Schreibregeln der Skills und „kurz und einfach“ werden immer mitgeschickt', () => {
+  const regeln = fs.readFileSync(path.join(ROOT, 'ressourcen/regeln.md'), 'utf8');
+  assert.match(regeln, /## Kurz und einfach/);
+  assert.match(regeln, /## Schreibregeln \(aus den Skills `wissenschaftlich-schreiben` und `sprachpruefung`, gelten immer\)/);
+  assert.match(regeln, /\*\*Pflicht:\*\* Bevor du einen Text schreibst/);
+  const p = ctx.buildPrompt({ context: '<projektkontext/>', text: 'Hallo', schreibaufgabe: true });
+  assert.match(p, /<schreibregeln>Wenn du dafür Text schreibst/);
+  assert.ok(!/<schreibregeln>/.test(ctx.buildPrompt({ context: '', text: 'Hallo' })));
+});

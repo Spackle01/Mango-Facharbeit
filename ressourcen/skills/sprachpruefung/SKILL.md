@@ -32,6 +32,8 @@ Beibehalten: <1–3 Dinge, die schon gut funktionieren>
 5. Wirkt der Text durchgehend schablonenhaft, empfiehl eine Neufassung mit dem Skill `wissenschaftlich-schreiben`. Einzelne Wörter auszutauschen lässt das Gerüst stehen.
 6. Die Prüfung ändert keine Dateien. Soll ein überarbeiteter Text gespeichert werden: in Word-Dateien aus `abgabe/` per Block `word` (die App sichert die vorherige Fassung), in Markdown-Dateien als neue Version (`kapitel_v2.md`).
 
+Die App Mango Facharbeit prüft jeden Text, den du in eine Datei einträgst, zusätzlich automatisch nach diesen Listen (Stilwörter, Floskeln, Geviertstriche, englische Anführungszeichen, Sätze über 25 Wörter) und schickt dir gefundene Stellen zum Überarbeiten. Überarbeite dann nur diese Stellen, kurz und einfach, ohne Kommentar.
+
 ## Sofort auffällige Merkmale
 
 1. Chatbot-Reste: „Gerne!“, „Gute Frage“, „Ich hoffe, das hilft“, „Lass mich wissen, wenn …“, „Stand meines letzten Updates“, „[Dein Name]“.
@@ -45,6 +47,7 @@ Beibehalten: <1–3 Dinge, die schon gut funktionieren>
 9. Anhängsel: „…, was die Bedeutung unterstreicht“, „…, wodurch ein reibungsloser Ablauf gewährleistet wird“.
 10. Durchgehend positiv und allgemein, ohne Zahlen, Belege oder eigene Bewertung.
 11. Alle Absätze gleich lang und gleich gebaut.
+12. Zu lang: Sätze über 25 Wörter, Absätze ohne neuen Inhalt, mehr Text als die Aufgabe verlangt.
 
 ## Vollständige Checkliste
 

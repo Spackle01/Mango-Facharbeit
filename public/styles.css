@@ -910,3 +910,12 @@ button.status-pill:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px
   .choice-card { min-height: 0; }
 }
 .center-state .cmd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 6px 10px; line-height: 1.5; }
+
+/* Sprachprüfung unter der Antwort */
+.stil-note { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); margin-top: 6px; }
+.stil-note.warn { color: var(--warn, #9a6700); }
+.stil-details > summary { list-style: none; cursor: pointer; }
+.stil-details > summary::-webkit-details-marker { display: none; }
+.stil-details ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2); }
+.stil-details li { margin: 3px 0; }
+.stil-details .satz { color: var(--text); }

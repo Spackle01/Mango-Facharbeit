@@ -641,6 +641,19 @@ function wordEl(m, isLast) {
   return h('div', { class: 'import-card compact' }, sec);
 }
 
+// Ergebnis der automatischen Sprachprüfung (Schreib-Skills) für Texte, die in Dateien eingetragen wurden.
+function stilEl(st) {
+  const offen = st.offen || [];
+  const behoben = Math.max(0, st.gefunden - offen.length);
+  let text = 'Sprachprüfung: unauffällig';
+  if (st.gefunden && !offen.length) text = `Sprachprüfung: ${st.gefunden} ${st.gefunden === 1 ? 'Stelle' : 'Stellen'} gefunden und überarbeitet`;
+  else if (offen.length) text = `Sprachprüfung: ${behoben ? `${behoben} überarbeitet, ` : ''}${offen.length} ${offen.length === 1 ? 'Stelle' : 'Stellen'} noch prüfen`;
+  const el = h('div', { class: `stil-note${offen.length ? ' warn' : ''}` }, iconEl(offen.length ? 'alert' : 'check', 14), h('span', {}, text));
+  if (!offen.length) return el;
+  return h('details', { class: 'stil-details' }, h('summary', {}, el),
+    h('ul', {}, offen.map((o) => h('li', {}, h('span', { class: 'satz' }, `„${o.satz}“`), ` – ${o.grund} `, h('button', { type: 'button', class: 'file-ref', 'data-path': o.datei }, shortName(o.datei))))));
+}
+
 function importResultEl(r, isLast) {
   const ok = (r.einsortiert || []).filter((x) => !x.fehler).length;
   const head = [`${r.anzahl} ${r.anzahl === 1 ? 'Datei' : 'Dateien'} angekommen`];
@@ -725,6 +738,7 @@ function renderAssistantMessage(m, isLast) {
   if (m.importErgebnis) el.append(importResultEl(m.importErgebnis, isLast && m.status !== 'fehler'));
   else if (m.einsortiert && m.einsortiert.length) el.append(h('div', { class: 'import-card compact' }, einsortiertEl(m.einsortiert)));
   if (m.word && m.word.length) el.append(wordEl(m, isLast));
+  if (m.stil && !running) el.append(stilEl(m.stil));
   // Einsortierte und in Word eingetragene Dateien stehen schon oben; hier nur die übrigen Änderungen.
   const sorted = new Set(((m.importErgebnis && m.importErgebnis.einsortiert) || m.einsortiert || []).map((x) => x.nach));
   for (const r of m.word || []) if (r.ok) sorted.add(r.datei);
