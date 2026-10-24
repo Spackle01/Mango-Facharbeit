@@ -92,10 +92,11 @@ Dieser Ordner ist der Arbeitsraum einer Facharbeit (Fachoberschule, Klasse 12). 
 
 - Verbindliche Arbeitsregeln: \`.facharbeit/regeln.md\` – bitte zuerst lesen.
 - Projektangaben, Arbeitsstand und gemerkte Ergebnisse: \`FACHARBEIT.md\`
-- Schulvorgaben mit Quellen: \`00_vorgaben/anforderungen.md\`
+- Schulvorgaben mit Quellen: \`00_vorgaben/anforderungen.md\` (Originale der Schule, nur lesen)
+- Abgabe-Dateien (Lerntagebuch, Facharbeit als Word-Datei): \`abgabe/\` – hier wird gearbeitet
 - Skills: \`.agents/skills/\` bzw. \`.claude/skills/\`
 
-Vorhandene Dateien nicht überschreiben; Überarbeitungen als neue Version speichern (\`_v2\`, \`_v3\`).
+Word-Dateien nicht selbst schreiben, sondern Änderungen mit dem Block \`word\` angeben (siehe Regeln). Keine Markdown-Kopien von Abgabe-Dateien anlegen.
 `;
 }
 
@@ -120,8 +121,12 @@ async function syncManagedFiles(ws) {
   await ensureDir(vorgabenDest);
   const anf = await fsp.readFile(path.join(vorgabenSrc, 'anforderungen.md'), 'utf8');
   await writeManaged(path.join(vorgabenDest, 'anforderungen.md'), `<!-- ${MARKER} -->\n${anf}`);
+  // Originale der Schule: schreibgeschützt, Änderungen holt die App zurück.
   for (const f of await fsp.readdir(vorgabenSrc)) {
-    if (f.endsWith('.pdf')) await copyIfMissing(path.join(vorgabenSrc, f), path.join(vorgabenDest, f));
+    if (!/\.(pdf|docx)$/i.test(f)) continue;
+    const dest = path.join(vorgabenDest, f);
+    await copyIfMissing(path.join(vorgabenSrc, f), dest);
+    await fsp.chmod(dest, 0o444).catch(() => {});
   }
 }
 
@@ -129,9 +134,8 @@ async function setupWorkspace(ws) {
   await ensureDir(ws);
   await ensureDir(internalDir(ws));
   await copyTree(path.join(RES, 'vorlagen', 'arbeitsraum'), ws);
-  await copyIfMissing(path.join(RES, 'vorgaben', 'Lerntagebuch-Vorlage.docx'),
-    path.join(ws, '06_lerntagebuch_und_konsultationen', 'Lerntagebuch-Vorlage.docx'));
   await ensureDir(path.join(ws, 'anhaenge'));
+  await ensureDir(path.join(ws, 'abgabe'));
   await syncManagedFiles(ws);
 }
 
@@ -240,20 +244,32 @@ async function diffAndBackup(ws, before) {
 }
 
 // Stellt geänderte oder gelöschte Dateien aus der gesicherten Fassung wieder her.
-// Standard: nur Originale (mitgebrachte Dateien und Chat-Anhänge) – sie bleiben immer unverändert.
-const ORIGINALE = /^(uebernommen|anhaenge)\//;
-async function restoreChanges(ws, changes, schuetzen = (p) => ORIGINALE.test(p)) {
+// Standard: Originale (Vorgaben der Schule, mitgebrachte Dateien, Chat-Anhänge) bleiben immer
+// unverändert. Office-Dateien ändert nur die App (Block ```word): direkt geschriebene Fassungen
+// wären beschädigt und werden ebenfalls zurückgeholt.
+const ORIGINALE = /^(00_vorgaben|uebernommen|anhaenge)\//;
+const OFFICE = /\.(docx|docm|xlsx|xlsm|pptx|odt)$/i;
+const SCHREIBGESCHUETZT = (p) => p.startsWith('uebernommen/') || (p.startsWith('00_vorgaben/') && !/\.md$/i.test(p));
+// Office-Datei, die keine gültige ZIP-Datei mehr ist (z. B. vom Assistenten als Text geschrieben).
+// Gültige Änderungen stammen von der Person selbst (in Word gespeichert) und bleiben.
+async function beschaedigt(ws, rel) {
+  const buf = await fsp.readFile(path.join(ws, ...rel.split('/'))).catch(() => null);
+  if (!buf) return true;
+  try { require('./zip').readZip(buf); return false; } catch { return true; }
+}
+
+async function restoreChanges(ws, changes, schuetzen = async (p) => ORIGINALE.test(p) || (OFFICE.test(p) && beschaedigt(ws, p))) {
   const out = [];
   for (const c of changes) {
-    if ((c.aktion === 'geaendert' || c.aktion === 'geloescht') && c.version && schuetzen(c.path)) {
+    if ((c.aktion === 'geaendert' || c.aktion === 'geloescht') && c.version && await schuetzen(c.path)) {
       const src = resolveInside(ws, c.version);
       const dest = resolveInside(ws, c.path);
       if (src && dest) {
         await ensureDir(path.dirname(dest));
         await fsp.chmod(dest, 0o644).catch(() => {});
         await fsp.copyFile(src, dest);
-        // Mitgebrachte Originale bleiben schreibgeschützt.
-        if (c.path.startsWith('uebernommen/')) await fsp.chmod(dest, 0o444).catch(() => {});
+        // Originale bleiben schreibgeschützt.
+        if (SCHREIBGESCHUETZT(c.path)) await fsp.chmod(dest, 0o444).catch(() => {});
         out.push({ ...c, aktion: 'zurueckgesetzt' });
         continue;
       }
@@ -326,6 +342,8 @@ async function cleanupStaging(ws) {
   await fsp.rm(stagingDir(ws), { recursive: true, force: true }).catch(() => {});
 }
 
+const BEARBEITBAR_DOCX = /^(abgabe|0[1-8]_[^/]+)\/.+\.docx$/i;
+
 function extractPathFor(ws, rel) {
   return path.join(internalDir(ws), 'extrakte', ...`${rel}.txt`.split('/'));
 }
@@ -338,11 +356,22 @@ async function ensureExtract(ws, rel) {
   if (!st) return { lesbar: 'nein', hinweis: 'Datei fehlt', kind: extract.kindOf(rel) };
   const cache = extractPathFor(ws, rel);
   const kind = extract.kindOf(rel);
+  // Bearbeitbare Word-Dateien: Fassung mit Absatznummern für den Block ```word.
+  const nummeriert = BEARBEITBAR_DOCX.test(rel);
   if (['word', 'praesentation', 'tabelle', 'odt', 'pdf'].includes(kind)) {
     const cst = await fsp.stat(cache).catch(() => null);
-    if (cst && cst.mtimeMs >= st.mtimeMs) {
+    const passt = !nummeriert || (await fsp.readFile(cache, 'utf8').catch(() => '')).startsWith('Word-Datei:');
+    if (cst && cst.mtimeMs >= st.mtimeMs && passt) {
       return { lesbar: 'ja', kind, hinweis: '', extrakt: toPosix(path.relative(ws, cache)) };
     }
+  }
+  if (nummeriert) {
+    try {
+      const text = require('./word').nummeriert(await fsp.readFile(abs), { datei: rel });
+      await ensureDir(path.dirname(cache));
+      await fsp.writeFile(cache, text, 'utf8');
+      return { lesbar: 'ja', kind, hinweis: '', extrakt: toPosix(path.relative(ws, cache)) };
+    } catch { /* unten als normaler Textauszug */ }
   }
   const info = await extract.analyse(abs);
   if (info.lesbar === 'ja' && info.text) {

@@ -23,20 +23,23 @@ Nutze diesen Skill, wenn die App einen Block `<einsortieren …>` schickt oder d
 
 | Inhalt | Ordner |
 |---|---|
+| Eigenes, schon ausgefülltes Lerntagebuch (Word) | `abgabe/` – ersetzt die leere Kopie: gleicher Dateiname wie im Projektkontext, `"ersetzen": true` |
+| Eigene Facharbeit als Word-Datei (Gesamtentwurf) | `abgabe/` – ersetzt die leere Facharbeit-Datei, `"ersetzen": true` |
 | Themenideen, Notizen, Mindmap | `01_themenfindung_und_mindmap/` |
 | Exposé, Zeitplan | `02_expose_und_zeitplan/` |
 | Literaturliste, Exzerpte, Quellen-PDFs | `03_literatur_und_quellen/` |
 | Fragebogen, Interviews, Messdaten, Auswertung | `04_forschung_und_eigenanteil/` |
-| Gliederung, Kapitelentwürfe, Gesamtentwurf | `05_facharbeit_entwurf/` |
-| Lerntagebuch, Konsultationsprotokolle | `06_lerntagebuch_und_konsultationen/` |
+| Gliederung, einzelne Kapitelentwürfe, Notizen zum Text | `05_facharbeit_entwurf/` |
+| Konsultationsprotokolle, Notizen zum Lerntagebuch | `06_lerntagebuch_und_konsultationen/` |
 | KI-Protokolle, Prompt-Nachweise | `07_ki_prompts_anhang/` |
 | Präsentation, Handout, Verteidigung | `08_praesentation_verteidigung/` |
 
-Schulvorgaben, die schon in `00_vorgaben/` liegen (siehe Inventar „bereits vorhanden“), nicht einsortieren.
+Schulvorgaben, die schon in `00_vorgaben/` liegen (siehe Inventar „bereits vorhanden“), nicht einsortieren. Eine leere Lerntagebuch-Vorlage ist kein eigenes Lerntagebuch: nicht nach `abgabe/` kopieren.
 
 **Dateinamen:** kurz, klein, ohne Leerzeichen, z. B. `expose.md`, `gliederung.md`, `mindmap.png`, `lerntagebuch.docx`, `umfrage_ergebnisse.xlsx`. Vorlagen der App (`*_vorlage.md`, `README.md`) bleiben bestehen.
 
 **Format:**
+- Abgabe-Dateien (Lerntagebuch, Facharbeit) bleiben Word: `.docx` nach `abgabe/`, nie als Markdown-Kopie.
 - Word-Entwürfe, an denen die Person in Word weiterschreibt: als `.docx` kopieren.
 - Notizen, Exposé oder Gliederung aus Word oder Text: als `.md` umwandeln (`nach` endet auf `.md`). So kannst du später gezielt damit arbeiten.
 - Bilder, PDFs, Tabellen, Präsentationen: im Originalformat kopieren.
@@ -61,7 +64,8 @@ Zwei bis vier Sätze in einfacher Sprache: Was ist da, was fehlt, was ist der n�
 [
  {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Expose_v2.docx","nach":"02_expose_und_zeitplan/expose.md"},
  {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Mindmap.png","nach":"01_themenfindung_und_mindmap/mindmap.png"},
- {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Facharbeit.docx","nach":"05_facharbeit_entwurf/facharbeit_entwurf.docx"}
+ {"von":"uebernommen/2026-10-08_1530/Meine Facharbeit/Facharbeit.docx","nach":"abgabe/Facharbeit_Muster_Max.docx","ersetzen":true},
+ {"von":"uebernommen/2026-10-08_1530/Lerntagebuch_Muster_Max.docx","nach":"abgabe/Lerntagebuch_Muster_Max.docx","ersetzen":true}
 ]
 ```
 

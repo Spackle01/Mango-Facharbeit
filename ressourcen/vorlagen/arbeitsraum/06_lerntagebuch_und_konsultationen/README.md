@@ -12,8 +12,8 @@ Der Arbeitsprozess fließt zu **20 %** in deine Gesamtnote ein!
    - **Inhalt**: Stand der Facharbeit, angepasste Literaturliste, Klärung formaler & inhaltlicher Detailfragen.
    - **Frist**: Spätestens bis 27.11.2026.
 
-## Lerntagebuch-Pflege:
-- Führe das Lerntagebuch digital und trage nach jedem Arbeitsschritt kurz ein: Was wurde gemacht? Welche Probleme gab es? Wie wurden sie gelöst?
+## Lerntagebuch
+- **Dein Lerntagebuch liegt in `abgabe/`** – eine Kopie der Vorlage der Schule, schon unter deinem Namen gespeichert. Das Original bleibt unverändert in `00_vorgaben/`.
+- Führe es digital und trage nach jedem Arbeitsschritt kurz ein: Was wurde gemacht? Welche Probleme gab es? Wie wurden sie gelöst? Du kannst Mango bitten, deine Stichpunkte direkt dort einzutragen.
 
-## Vorlage der Schule
-- `Lerntagebuch-Vorlage.docx` in diesem Ordner ist die offizielle Vorlage. Speichere sie unter neuem Namen (z. B. `Lerntagebuch_Nachname_Vorname.docx`) und führe sie wie von der Schule vorgegeben.
+Dieser Ordner ist für Notizen und Protokolle zu den Konsultationen.

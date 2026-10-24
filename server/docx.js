@@ -129,7 +129,7 @@ function markdownToBody(md, { stripTemplateHints = false } = {}) {
       i++;
       continue;
     }
-    if (stripTemplateHints && /^\s*\*\[[^\]]*\]\*\s*$/.test(line)) { i++; continue; } // Platzhalter der Vorlage
+    if (stripTemplateHints && /^\s*\*\[.*\]\*\s*$/.test(line)) { i++; continue; } // Platzhalter der Vorlage
     if (stripTemplateHints && /^\s*\*\((Regel|Hinweis|Vollständige|Wortlaut|Alphabetisch)[^)]*\)\*\s*$/.test(line)) { i++; continue; }
     paraBuf.push(line.trim());
     i++;

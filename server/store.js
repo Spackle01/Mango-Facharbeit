@@ -138,6 +138,7 @@ class Project {
     p.stand = await readJson(path.join(p.dir, 'arbeitsstand.json'), { aufgaben: {} });
     await p.saveProject();
     await p.saveStand();
+    await require('./abgabe').ensureAbgabe(p);
     await p.loadChats();
     return p;
   }
@@ -151,6 +152,7 @@ class Project {
     p.stand = await readJson(path.join(p.dir, 'arbeitsstand.json'), { aufgaben: {} });
     await ws.setupWorkspace(p.workspace); // fehlende Vorlagen und verwaltete Dateien ergänzen
     await ws.cleanupStaging(p.workspace);
+    await require('./abgabe').ensureAbgabe(p);
     await p.loadChats();
     await p.writeOverview();
     return p;

@@ -13,7 +13,8 @@ Grundlage ist `00_vorgaben/anforderungen.md`. Lies die Datei zuerst. Prüfe nur 
 
 ## 1. Material sammeln
 
-- Entwurfsdateien in `05_facharbeit_entwurf/` (bei mehreren Versionen die neueste, z. B. `_v3` vor `_v2`; frag nach, wenn unklar ist, welche gilt).
+- Die Abgabe-Dateien in `abgabe/` (Facharbeit und Lerntagebuch als Word-Datei): lies die Fassung mit Absatznummern, deren Pfad im Projektkontext steht. Sie gilt vor älteren Entwürfen.
+- Ältere Entwurfsdateien in `05_facharbeit_entwurf/` nur, wenn die Facharbeit dort noch als Markdown liegt (bei mehreren Versionen die neueste, z. B. `_v3` vor `_v2`; frag nach, wenn unklar ist, welche gilt).
 - Exposé in `02_expose_und_zeitplan/`, Literaturliste in `03_literatur_und_quellen/`, Eigenanteil in `04_forschung_und_eigenanteil/`, KI-Nachweise in `07_ki_prompts_anhang/`.
 - Liegt die Arbeit als Word- oder PDF-Datei vor, nutze den Textauszug unter `.facharbeit/extrakte/`.
 - Fehlt ein Teil, ist das ein Befund („fehlt“), kein Grund abzubrechen.
@@ -81,7 +82,7 @@ Wichtigste drei Schritte bis zur Abgabe:
 1. …
 ```
 
-Biete an, den Bericht als Datei zu speichern (z. B. `05_facharbeit_entwurf/pruefbericht_2026-11-20.md`).
+Biete an, den Bericht als Datei zu speichern (z. B. `05_facharbeit_entwurf/pruefbericht_2026-11-20.md`). Korrekturen in der Facharbeit trägst du nur auf Wunsch ein (Block `word`, Absatznummern aus der Fassung).
 
 ## 4. Arbeitsstand
 

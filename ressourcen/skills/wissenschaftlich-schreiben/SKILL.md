@@ -90,7 +90,8 @@ Nutze diesen Skill, wenn du einen Text schreibst oder überarbeitest, den die Sc
 5. Muster prüfen: mit Abschnitt 3 oder dem Skill `sprachpruefung`.
 6. Belege prüfen: Jede Tatsachenbehauptung hat einen Kurzbeleg aus echter Literatur oder ist als eigene Erhebung gekennzeichnet.
 7. Vorlesetest: Würde die Person das so sagen und in der Verteidigung erklären können? Klingt eine Zeile wie eine Pressemitteilung, neu schreiben.
-8. Kennzeichnung: KI-Entwurf in der Datei oben vermerken (Datum, Anbieter) und an die Kennzeichnungspflicht erinnern.
+8. Speichern: Text für die Facharbeit oder das Lerntagebuch direkt in die Datei in `abgabe/` eintragen (Block `word`, siehe Regeln), nicht als zusätzliche Markdown-Datei.
+9. Kennzeichnung: KI-Entwurf vermerken (Datum, Anbieter; in Word-Dateien als eigener Absatz vor dem Text) und an die Kennzeichnungspflicht erinnern.
 
 ## Hinweis zur Herkunft
 

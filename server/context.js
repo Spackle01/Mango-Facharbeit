@@ -123,12 +123,13 @@ function renderOverview(project, now = new Date()) {
 async function recentFiles(project, files, max = 25) {
   const created = Date.parse(project.data.createdAt || 0) || 0;
   return files
-    .filter((f) => !f.path.startsWith('00_vorgaben/') && !f.path.startsWith('uebernommen/') && f.path !== 'FACHARBEIT.md' && f.mtime > created + 60000)
+    .filter((f) => !/^(00_vorgaben|uebernommen|abgabe)\//.test(f.path) && f.path !== 'FACHARBEIT.md' && f.mtime > created + 60000)
     .sort((x, y) => y.mtime - x.mtime)
     .slice(0, max);
 }
 
-async function buildContext(project, files, now = new Date()) {
+// abgabe: [{ path, mtime, extrakt? }] – Abgabe-Dateien mit Fassung mit Absatznummern
+async function buildContext(project, files, now = new Date(), { abgabe = [] } = {}) {
   const a = project.data.angaben;
   const L = [];
   L.push(`Heute: ${formatDateDE(now, { weekday: true })}`);
@@ -170,6 +171,11 @@ async function buildContext(project, files, now = new Date()) {
     if (u.versionen && u.versionen.length) L.push(`Offene Fragen zu Entwurfsständen: ${u.versionen.map((v) => `${v.frage || 'Welche Fassung ist aktuell?'} (${v.dateien.join(', ')})`).join('; ')}`);
     L.push('');
   }
+  if (abgabe.length) {
+    L.push('Abgabe-Dateien in abgabe/ (hier arbeiten; Word-Dateien nur per Block ```word ändern, Nummern aus der Fassung mit Absatznummern):');
+    for (const f of abgabe) L.push(`- ${f.path} (Stand ${formatDateDE(new Date(f.mtime), { withTime: true })})${f.extrakt ? ` → Absätze: ${f.extrakt}` : ''}`);
+    L.push('');
+  }
   const recent = await recentFiles(project, files);
   if (recent.length) {
     L.push('Eigene Dateien im Arbeitsraum (zuletzt geändert zuerst):');
@@ -180,7 +186,9 @@ async function buildContext(project, files, now = new Date()) {
   L.push('Vorgaben: 00_vorgaben/anforderungen.md · Regeln: .facharbeit/regeln.md');
   const body = L.join('\n');
   // Der Hash ignoriert die Uhrzeit, damit unveränderter Kontext nicht erneut gesendet wird.
-  return { text: `<projektkontext stand="${formatDateDE(now, { withTime: true })}">\n${body}\n</projektkontext>`, hash: sha1(body) };
+  // Geänderte Abgabe-Dateien (auch innerhalb derselben Minute) gelten als neuer Kontext.
+  const stand = abgabe.map((f) => `${f.path}@${Math.round(f.mtime)}`).join('|');
+  return { text: `<projektkontext stand="${formatDateDE(now, { withTime: true })}">\n${body}\n</projektkontext>`, hash: sha1(body + stand) };
 }
 
 function describeAttachment(att) {

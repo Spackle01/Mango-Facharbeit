@@ -53,7 +53,7 @@ async function exportFacharbeit(project) {
   for (const f of files.filter((x) => x.prefix !== '00' && x.prefix !== '01')) {
     teile.push({ name: f.name, markdown: await fsp.readFile(f.abs, 'utf8') });
   }
-  if (!teile.length) throw Object.assign(new Error('Im Ordner 05_facharbeit_entwurf wurden keine Kapitel gefunden.'), { status: 400 });
+  if (!teile.length) throw Object.assign(new Error(`Im Ordner 05_facharbeit_entwurf gibt es keine Kapitel als Markdown. Deine Facharbeit liegt als Word-Datei in abgabe/${project.data.abgabe && project.data.abgabe.facharbeit ? ` (${project.data.abgabe.facharbeit.split('/').pop()})` : ''} – dort direkt weiterschreiben.`), { status: 400 });
   const buf = facharbeitToDocx({ angaben: project.data.angaben, teile, datum: formatDateDE(new Date()) });
   const dir = path.join(project.workspace, 'exporte');
   await ensureDir(dir);

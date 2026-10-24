@@ -338,3 +338,117 @@ test('Einsortieren: Plan lesen und sicher ausführen', async () => {
   assert.match(res[7].fehler, /01_ bis 08_/);
   assert.ok(!fs.existsSync(path.join(dir, 'notiz.md')));
 });
+
+// ---------- Word-Dateien bearbeiten ----------
+
+const word = require('../server/word');
+const abgabe = require('../server/abgabe');
+const LT = path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx');
+
+// Kleines PNG (1×1) für Bildtests
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+function nummer(text, re) {
+  return +(new RegExp(`^\\[(\\d+)\\] ${re}`, 'm').exec(text) || [])[1];
+}
+
+test('Word: Vorlage wird unverändert gelesen und geschrieben', () => {
+  let xml = readZip(fs.readFileSync(LT)).read('word/document.xml').toString('utf8');
+  if (xml.charCodeAt(0) === 0xfeff) xml = xml.slice(1);
+  assert.strictEqual(word.serialize(word.parseXml(xml)), xml);
+  const t = word.nummeriert(fs.readFileSync(LT), { datei: 'abgabe/lt.docx' });
+  assert.match(t, /^Word-Datei: abgabe\/lt\.docx/);
+  assert.match(t, /^\[\d+\] Vorname, Nachname$/m);
+  assert.match(t, /^Tabelle 1 \(4 Zeilen × 3 Spalten/m);
+  assert.match(t, /^\[\d+\] T1 Z1 S2: Pro$/m);
+});
+
+test('Word: ersetzen, Teiltext, einfügen, Tabellenzeile, Bild, löschen', async () => {
+  const buf = fs.readFileSync(LT);
+  const t = word.nummeriert(buf);
+  const name = nummer(t, 'Vorname, Nachname');
+  const fach = nummer(t, 'im Fach');
+  const erf = nummer(t, 'Meine Erfahrungen');
+  const ziele = nummer(t, 'Das sind meine drei');
+  const r = await word.apply(buf, [
+    { ersetzen: name, text: 'Alex Beispiel' },
+    { ersetzen: fach, alt: '...', text: 'Kunst' },
+    { ersetzen: erf + 1, text: 'Erster Absatz mit **fett**.\n\nZweiter Absatz.' },
+    { nach: ziele, text: '1. Ziel eins\n- Punkt' },
+    { zeile: 1, zellen: ['4. Ethik', 'spannend', 'viel Lesen'] },
+    { bild: 'bild.png', nach: ziele, breite_cm: 5, unterschrift: 'Abb. 1: Test' },
+    { loeschen: erf + 2 },
+    { ersetzen: name, alt: 'gibt es nicht', text: 'x' },
+    { zeile: 99, zellen: ['x'] },
+  ], { bildLaden: async () => PNG });
+  assert.strictEqual(r.ok, 7);
+  assert.deepStrictEqual(r.results.filter((x) => x.fehler).map((x) => x.was), [`Absatz ${name} ersetzt`, 'Zeile in Tabelle 99']);
+  const neu = word.nummeriert(r.buffer);
+  assert.match(neu, /^\[\d+\] Alex Beispiel$/m);
+  assert.match(neu, /^\[\d+\] im Fach Kunst$/m);
+  assert.match(neu, /^\[\d+\] Erster Absatz mit fett\.$/m);
+  assert.match(neu, /^\[\d+\] Zweiter Absatz\.$/m);
+  assert.match(neu, /^\[\d+\] 1\. Ziel eins$/m);
+  assert.match(neu, /^\[\d+\] – Punkt$/m);
+  assert.match(neu, /^\[\d+\] T1 Z5 S3: viel Lesen$/m);
+  assert.match(neu, /^\[\d+\] Abb\. 1: Test$/m);
+  const z = readZip(r.buffer);
+  assert.ok(z.names().some((n) => /^word\/media\/mango_bild1\.png$/.test(n)));
+  assert.match(z.read('word/_rels/document.xml.rels').toString('utf8'), /Id="rIdMango1"[^>]*Target="media\/mango_bild1\.png"/);
+  // Fett bleibt als Formatierung erhalten, die Datei bleibt lesbar.
+  assert.match(extract.docxToText(r.buffer), /Erster Absatz mit \*\*fett\*\*\./);
+  // Unbekannte Änderung und ungültige Nummern ändern nichts.
+  const leer = await word.apply(buf, [{ ersetzen: 0, text: 'x' }, { foo: 1 }]);
+  assert.strictEqual(leer.buffer, null);
+});
+
+test('Word: Block in der Antwort wird gelesen und entfernt', () => {
+  const p = word.parseBlock('Fertig.\n\n```word\n{"datei":"abgabe\\\\lt.docx","aenderungen":[{"ersetzen":3,"text":"x"},]}\n```\n');
+  assert.strictEqual(p.text, 'Fertig.');
+  assert.deepStrictEqual(p.dateien, [{ datei: 'abgabe/lt.docx', neu: false, text: '', ops: [{ ersetzen: 3, text: 'x' }] }]);
+  assert.strictEqual(word.parseBlock('```word\nkaputt\n```').invalid, true);
+  assert.deepStrictEqual(word.imageSize(PNG), { ext: 'png', w: 1, h: 1 });
+});
+
+test('Abgabe-Dateien: angelegt, vorausgefüllt, ältere Arbeitsräume übernommen', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-abgabe-'));
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel', klasse: 'FOS 12a', fach: 'Ethik', lehrkraft: 'Herr Lehrer' });
+    assert.deepStrictEqual(p.data.abgabe, { lerntagebuch: 'abgabe/Lerntagebuch_Beispiel_Alex.docx', facharbeit: 'abgabe/Facharbeit_Beispiel_Alex.docx' });
+    const lt = word.nummeriert(fs.readFileSync(path.join(p.workspace, 'abgabe', 'Lerntagebuch_Beispiel_Alex.docx')));
+    assert.match(lt, /^\[\d+\] Alex Beispiel$/m);
+    assert.match(lt, /^\[\d+\] Klasse: {2}FOS 12a$/m);
+    assert.match(lt, /Betreuende Lehrkraft: {2}Herr Lehrer$/m);
+    const fa = word.nummeriert(fs.readFileSync(path.join(p.workspace, 'abgabe', 'Facharbeit_Beispiel_Alex.docx')));
+    assert.match(fa, /^\[\d+\] # 1 Einleitung$/m);
+    assert.ok(!/\[Hier /.test(fa), 'Platzhalter der Kapitelvorlagen fehlen');
+    assert.ok(!fs.existsSync(path.join(p.workspace, '05_facharbeit_entwurf', '02_einleitung.md')));
+    // Original der Schule ist schreibgeschützt.
+    if (process.platform !== 'win32') assert.strictEqual(fs.statSync(path.join(p.workspace, '00_vorgaben', 'Lerntagebuch-Vorlage.docx')).mode & 0o222, 0);
+    // Gelöschte Abgabe-Datei wird nicht erneut angelegt.
+    fs.unlinkSync(path.join(p.workspace, 'abgabe', 'Facharbeit_Beispiel_Alex.docx'));
+    await Project.open(p.workspace);
+    assert.ok(!fs.existsSync(path.join(p.workspace, 'abgabe', 'Facharbeit_Beispiel_Alex.docx')));
+
+    // Älterer Arbeitsraum: ausgefülltes Lerntagebuch in 06_ und Kapitel in 05_ werden übernommen.
+    const alt = await Project.create(path.join(dir, 'alt'), { name: 'Kim' });
+    delete alt.data.abgabe;
+    await alt.saveProject();
+    fs.rmSync(path.join(alt.workspace, 'abgabe'), { recursive: true });
+    const eigenes = (await word.apply(fs.readFileSync(LT), [{ ersetzen: nummer(word.nummeriert(fs.readFileSync(LT)), 'Vorname, Nachname'), text: 'Kim' }])).buffer;
+    fs.writeFileSync(path.join(alt.workspace, '06_lerntagebuch_und_konsultationen', 'Lerntagebuch-Vorlage.docx'), eigenes);
+    fs.writeFileSync(path.join(alt.workspace, '05_facharbeit_entwurf', '02_einleitung.md'), '# 1 Einleitung\n\nMein eigener Anfang.');
+    const wieder = await Project.open(alt.workspace);
+    assert.deepStrictEqual(wieder.data.abgabe, { lerntagebuch: 'abgabe/Lerntagebuch_Kim.docx', facharbeit: 'abgabe/Facharbeit_Kim.docx' });
+    assert.ok(fs.readFileSync(path.join(alt.workspace, 'abgabe', 'Lerntagebuch_Kim.docx')).equals(eigenes));
+    assert.match(word.nummeriert(fs.readFileSync(path.join(alt.workspace, 'abgabe', 'Facharbeit_Kim.docx'))), /Mein eigener Anfang\./);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Abgabe-Dateien: Namensteil wie von der Schule empfohlen', () => {
+  assert.strictEqual(abgabe.namensteil('Max Muster'), 'Muster_Max');
+  assert.strictEqual(abgabe.namensteil('Anna Lena Beispiel'), 'Beispiel_Anna_Lena');
+  assert.strictEqual(abgabe.namensteil(''), '');
+});

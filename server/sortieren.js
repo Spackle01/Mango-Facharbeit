@@ -9,8 +9,8 @@ const { docxToText, odtToText } = require('./extract');
 const MAX_EINTRAEGE = 200;
 // Quellen: nur mitgebrachte Originale (Drop-in) und Chat-Anhänge.
 const QUELLEN = /^(uebernommen|anhaenge)\//;
-// Ziele: die Arbeitsordner 01_ bis 08_ (auch Unterordner).
-const ZIELE = /^0[1-8]_[^/]+\//;
+// Ziele: die Arbeitsordner 01_ bis 08_ (auch Unterordner) und die Abgabe-Dateien.
+const ZIELE = /^(0[1-8]_[^/]+|abgabe)\//;
 const UMWANDELBAR = { '.docx': docxToText, '.docm': docxToText, '.odt': odtToText };
 const TEXT = new Set(['.md', '.markdown', '.txt']);
 
@@ -80,7 +80,7 @@ async function applyPlan(project, plan) {
       const srcAbs = resolveInside(workspace, e.von);
       if (!srcAbs || !(await exists(srcAbs))) throw new Error('Quelle nicht gefunden');
       let target = cleanTarget(e.nach);
-      if (!target || !ZIELE.test(target)) throw new Error('Ziel muss in einem der Ordner 01_ bis 08_ liegen');
+      if (!target || !ZIELE.test(target)) throw new Error('Ziel muss in abgabe/ oder einem der Ordner 01_ bis 08_ liegen');
       const extSrc = path.extname(srcAbs).toLowerCase();
       const extDst = path.extname(target).toLowerCase();
       const umwandeln = extDst === '.md' && extSrc !== '.md' && (UMWANDELBAR[extSrc] || TEXT.has(extSrc));

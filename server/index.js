@@ -351,6 +351,12 @@ route('DELETE', /^\/api\/chats\/([\w-]+)$/, async (req, url, m) => {
 
 route('POST', /^\/api\/chats\/([\w-]+)\/stop$/, async (req, url, m) => ({ stopped: runs.stop(m[1]) }));
 
+// Word-Änderungen erneut eintragen, nachdem die Datei geschlossen wurde.
+route('POST', /^\/api\/chats\/([\w-]+)\/messages\/([\w-]+)\/word$/, async (req, url, m) => {
+  const msg = await runs.wordErneut(requireProject(), m[1], m[2]);
+  return { message: msg };
+});
+
 route('GET', /^\/api\/chats\/([\w-]+)\/export$/, async (req, url, m, res) => {
   const p = requireProject();
   const chat = p.getChat(m[1]);

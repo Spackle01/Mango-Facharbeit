@@ -56,7 +56,7 @@ Was schon für die Facharbeit entstanden ist (Entwürfe, Notizen, Quellen, Bilde
 - **Ablauf:** Hochladen und Prüfen mit Fortschrittsanzeige unten rechts, danach sortiert der Assistent in einem eigenen Chat ein. Grenzen: 2000 Dateien, 200 MB je Datei, 1 GB insgesamt. Systemdateien (`.DS_Store`, `Thumbs.db`, `~$…`) werden übersprungen.
 - **Originale bleiben unverändert:** Die App legt alles mit Ordnerstruktur und Änderungsdatum schreibgeschützt in `uebernommen/<Datum_Uhrzeit>/` ab. Ändert der Assistent dort trotzdem etwas, stellt die App die Datei wieder her („zurückgesetzt“).
 - **Prüfung durch die App:** Textauszüge, Lesbarkeit, Umfang, vermutliche Art mit Ordnervorschlag, identische Dateien, mögliche Entwurfsstände und schon vorhandene Schulvorgaben (`.facharbeit/import/<id>/inventar.md`). Dateien, die nicht ankamen, stehen als „nicht übernommen“ in der Übersicht.
-- **Einsortieren:** Der Assistent (Skill `bestehende-arbeit-uebernehmen`) entscheidet nur, wohin jede Datei gehört, und gibt das als Block `einsortieren` zurück. Die App kopiert dann bzw. wandelt Word und Text wortgetreu in Markdown um (Überschriften, Listen, Tabellen, Fett/Kursiv). Ziele sind nur die Ordner `01_` bis `08_`. Vorhandenes wird nie ungesichert überschrieben: neue Fassung `_v2`, bei „ersetzen“ mit Sicherung der alten. Das spart Verbrauch und verhindert, dass Texte der Person umformuliert werden.
+- **Einsortieren:** Der Assistent (Skill `bestehende-arbeit-uebernehmen`) entscheidet nur, wohin jede Datei gehört, und gibt das als Block `einsortieren` zurück. Die App kopiert dann bzw. wandelt Word und Text wortgetreu in Markdown um (Überschriften, Listen, Tabellen, Fett/Kursiv). Ziele sind nur die Ordner `01_` bis `08_` und `abgabe/` (ein eigenes, schon ausgefülltes Lerntagebuch oder eine eigene Facharbeit ersetzt dort die leere Datei und bleibt Word). Vorhandenes wird nie ungesichert überschrieben: neue Fassung `_v2`, bei „ersetzen“ mit Sicherung der alten. Das spart Verbrauch und verhindert, dass Texte der Person umformuliert werden.
 - **Aktualisieren:** Vorhandene Arbeitsdateien ergänzt der Assistent gezielt (z. B. Quellen in der Literaturliste). Erkennbare Projektangaben kommen in leere Felder; Abweichungen zeigt der Chat mit „Übernehmen“. Der Arbeitsstand wird aktualisiert, „Erledigt“ nur nach Prüfung mit der einsortierten Datei als Nachweis.
 - **Übersicht im Chat:** „Einsortiert“ (Original → Ziel), „Das ist bereits vorhanden“, „Das fehlt noch“, nächster Schritt („Damit anfangen“), Unsicheres, Frage nach der aktuellen Fassung (Auswahl per Knopf, danach sortiert der Assistent genau diese ein), nicht lesbare und doppelte Dateien.
 - **Dauerhafte Zusammenfassung:** im Projekt-Panel und in `.facharbeit/uebernahme.md`, in jedem späteren Chat dabei. Neues Material ergänzt den Stand; getroffene Entscheidungen bleiben.
@@ -69,8 +69,10 @@ Jede Facharbeit hat einen eigenen Ordner (Vorschlag: `Dokumente/Facharbeit – <
 ```
 <Arbeitsraum>/
 ├── FACHARBEIT.md                  Übersicht: Angaben, Arbeitsstand, gemerkte Ergebnisse (von der App erzeugt)
-├── 00_vorgaben/                   Schulvorgaben: anforderungen.md + Original-PDFs
-├── 01_themenfindung_und_mindmap/  … bis 08_praesentation_verteidigung/ (Vorlagen)
+├── abgabe/                        Abgabe-Dateien, hier wird gearbeitet: Lerntagebuch_<Name>.docx (Kopie der Schulvorlage,
+│                                  Deckblatt ausgefüllt) und Facharbeit_<Name>.docx (Schulformat, Kapitelgerüst)
+├── 00_vorgaben/                   Originale der Schule (PDFs, Lerntagebuch-Vorlage, schreibgeschützt) + anforderungen.md
+├── 01_themenfindung_und_mindmap/  … bis 08_praesentation_verteidigung/ (Notizen, Material, Vorlagen)
 ├── anhaenge/JJJJ-MM-TT/           Dateien, die im Chat angehängt wurden
 ├── uebernommen/<Datum_Uhrzeit>/   per Drop-in mitgebrachte Originale (schreibgeschützt)
 ├── exporte/                       Word-Export der Gesamtarbeit
@@ -79,9 +81,11 @@ Jede Facharbeit hat einen eigenen Ordner (Vorschlag: `Dokumente/Facharbeit – <
 └── .facharbeit/                   projekt.json, arbeitsstand.json, chats/, versionen/, extrakte/, import/, uebernahme.md, regeln.md
 ```
 
+- **Originale und Arbeitskopien:** Was die Schule vorgibt, liegt unverändert in `00_vorgaben/` (schreibgeschützt; ändert der Assistent dort etwas, setzt die App es zurück). Gearbeitet wird in den Kopien in `abgabe/` – das sind die Dateien, die am Ende abgegeben werden. Der Assistent legt dafür keine Markdown-Kopien an.
+- **Word-Dateien bearbeiten:** Word-Dateien kann der Assistent nicht selbst schreiben. Die App erstellt für jede Word-Datei in `abgabe/` (und `01_`–`08_`) eine Fassung mit Absatznummern (`.facharbeit/extrakte/…docx.txt`, Pfad im Projektkontext). Der Assistent nennt Änderungen im Block `word` (Absatz ersetzen, Teiltext wie „...“ ersetzen, Absätze einfügen, Tabellenzeile anhängen, Bild einfügen, Absatz löschen); die App trägt sie ein und behält Schrift, Abstände, Tabellen und Deckblatt der Vorlage. Vorher wird die alte Fassung gesichert. Unter der Antwort steht „In Word eingetragen“; ist die Datei gerade in Word geöffnet, gibt es „Erneut eintragen“. Eine vom Assistenten als Text überschriebene (also kaputte) Word-Datei setzt die App zurück; in Word gespeicherte Änderungen der Person bleiben.
 - **Versionen:** Ändert der Assistent eine vorhandene Datei, sichert die App die vorherige Fassung unter `.facharbeit/versionen/`. Im Chat steht „geändert“ mit Link zur alten Fassung; im Arbeitsraum gibt es „Frühere Fassungen“ und „Als Kopie wiederherstellen“. Der Assistent ist außerdem angewiesen, Überarbeitungen als `_v2`, `_v3` zu speichern.
 - **Textauszüge:** Für Word, PowerPoint, Excel, OpenDocument und (falls `pdftotext` vorhanden) PDF erzeugt die App Textauszüge, damit beide Anbieter den Inhalt zuverlässig lesen.
-- **Exporte:** Gesprächsverläufe für den Anhang (Markdown + Word) nach `07_ki_prompts_anhang/`, einzelne Markdown-Dateien als Word, die Gesamtarbeit als Word mit Schulformatierung (A4, Arial 11 pt, 1,5-zeilig, Ränder 2,5/2,0 cm, Titelblatt ohne Seitenzahl, Seitenzahl oben zentriert ab der Einleitung, Inhaltsverzeichnis als Word-Feld) und eine ZIP-Sicherung.
+- **Exporte:** Gesprächsverläufe für den Anhang (Markdown + Word) nach `07_ki_prompts_anhang/`, einzelne Markdown-Dateien als Word, bei älteren Arbeitsräumen mit Kapiteln in `05_facharbeit_entwurf/` die Gesamtarbeit als Word mit Schulformatierung (A4, Arial 11 pt, 1,5-zeilig, Ränder 2,5/2,0 cm, Titelblatt ohne Seitenzahl, Seitenzahl oben zentriert ab der Einleitung, Inhaltsverzeichnis als Word-Feld) und eine ZIP-Sicherung.
 
 ## Wie der Assistent Bescheid weiß
 

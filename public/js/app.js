@@ -611,6 +611,36 @@ function einsortiertEl(list) {
   return sec;
 }
 
+// Von der App in Word-Dateien eingetragene Änderungen des Assistenten.
+function wordEl(m, isLast) {
+  const list = m.word || [];
+  const ok = list.filter((r) => r.ok);
+  const sec = h('section', { class: 'ic-sec sorted' }, h('h4', {}, ok.length ? 'In Word eingetragen' : 'Nicht in Word eingetragen'));
+  sec.append(h('ul', { class: 'sorted-list' }, list.map((r) => h('li', {},
+    h('button', { type: 'button', class: 'file-ref', 'data-path': r.datei }, r.datei),
+    r.aktion === 'neu' ? h('span', { class: 'tag' }, r.ok ? 'neu angelegt' : 'nicht angelegt')
+      : h('span', { class: 'tag' }, `${r.ok} von ${r.gesamt} ${r.gesamt === 1 ? 'Änderung' : 'Änderungen'}`),
+    r.version ? h('span', { class: 'tag' }, 'vorherige Fassung gesichert') : null,
+    r.hinweis ? h('span', { class: 'word-hinweis' }, r.hinweis) : null))));
+  const fehler = list.flatMap((r) => (r.fehler || []).map((f) => ({ ...f, datei: r.datei })));
+  if (fehler.length) {
+    sec.append(h('details', { class: 'ic-details' }, h('summary', {}, iconEl('chevronRight', 14), `Nicht ausgeführt (${fehler.length})`),
+      h('ul', {}, fehler.map((f) => h('li', {}, h('b', {}, `${shortName(f.datei)}: ${f.was}`), ` – ${f.fehler}`)))));
+  }
+  if (m.wordOffen && m.wordOffen.length) {
+    sec.append(h('div', {}, btn('Erneut eintragen', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: async () => {
+      try {
+        const r = await api.post(`/api/chats/${S.chat.id}/messages/${m.id}/word`, {});
+        Object.assign(m, r.message);
+        const el = document.querySelector(`.msg[data-id="${m.id}"]`);
+        if (el) el.replaceWith(renderAssistantMessage(m, isLast));
+        refreshPanel();
+      } catch (err) { toast(err.message, { error: true }); }
+    } })));
+  }
+  return h('div', { class: 'import-card compact' }, sec);
+}
+
 function importResultEl(r, isLast) {
   const ok = (r.einsortiert || []).filter((x) => !x.fehler).length;
   const head = [`${r.anzahl} ${r.anzahl === 1 ? 'Datei' : 'Dateien'} angekommen`];
@@ -694,8 +724,10 @@ function renderAssistantMessage(m, isLast) {
   } else if (running && (!text || m.phase === 'werkzeug')) el.append(liveStepEl(m));
   if (m.importErgebnis) el.append(importResultEl(m.importErgebnis, isLast && m.status !== 'fehler'));
   else if (m.einsortiert && m.einsortiert.length) el.append(h('div', { class: 'import-card compact' }, einsortiertEl(m.einsortiert)));
-  // Einsortierte Dateien stehen schon in der Liste „Einsortiert“; hier nur die übrigen Änderungen.
+  if (m.word && m.word.length) el.append(wordEl(m, isLast));
+  // Einsortierte und in Word eingetragene Dateien stehen schon oben; hier nur die übrigen Änderungen.
   const sorted = new Set(((m.importErgebnis && m.importErgebnis.einsortiert) || m.einsortiert || []).map((x) => x.nach));
+  for (const r of m.word || []) if (r.ok) sorted.add(r.datei);
   const files = (m.files || []).filter((f) => !sorted.has(f.path));
   if (files.length) {
     const label = { neu: 'neu', geaendert: 'geändert', geloescht: 'gelöscht', zurueckgesetzt: 'zurückgesetzt' };

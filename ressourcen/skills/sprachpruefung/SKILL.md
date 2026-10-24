@@ -30,7 +30,7 @@ Beibehalten: <1–3 Dinge, die schon gut funktionieren>
 
 4. **Nicht kleinlich sein.** Ein „zudem“ in 1.000 Wörtern ist in Ordnung. Markiere, was einer Leserin oder einem Leser auffallen würde.
 5. Wirkt der Text durchgehend schablonenhaft, empfiehl eine Neufassung mit dem Skill `wissenschaftlich-schreiben`. Einzelne Wörter auszutauschen lässt das Gerüst stehen.
-6. Die Prüfung ändert keine Dateien. Soll ein überarbeiteter Text gespeichert werden, als neue Version (`kapitel_v2.md`).
+6. Die Prüfung ändert keine Dateien. Soll ein überarbeiteter Text gespeichert werden: in Word-Dateien aus `abgabe/` per Block `word` (die App sichert die vorherige Fassung), in Markdown-Dateien als neue Version (`kapitel_v2.md`).
 
 ## Sofort auffällige Merkmale
 

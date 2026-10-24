@@ -311,6 +311,44 @@ test('Kompletter Ablauf', async (t) => {
     assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '' });
   });
 
+  await t.test('Abgabe-Dateien: Originale geschützt, KI arbeitet in der Word-Kopie', async () => {
+    const files = await call('GET', '/api/files');
+    const liste = (files.files || files).map((f) => f.path);
+    const lt = liste.find((p) => /^abgabe\/Lerntagebuch_.*\.docx$/.test(p));
+    assert.ok(lt, 'Lerntagebuch liegt in abgabe/');
+    assert.ok(liste.some((p) => /^abgabe\/Facharbeit_.*\.docx$/.test(p)), 'Facharbeit liegt in abgabe/');
+    assert.ok(liste.includes('00_vorgaben/Lerntagebuch-Vorlage.docx'), 'Original der Schule in 00_vorgaben/');
+    assert.ok(!liste.some((p) => p.startsWith('06_') && p.endsWith('.docx')), 'keine zweite Vorlage in 06_');
+    const original = fs.readFileSync(path.join(WS, '00_vorgaben', 'Lerntagebuch-Vorlage.docx'));
+    const chat = await call('POST', '/api/chats');
+    const { done } = await send(chat.id, 'Trag das bitte ins LERNTAGEBUCH ein');
+    const m = done.message;
+    assert.ok(!/```word/.test(m.text), 'Block wird nicht angezeigt');
+    assert.strictEqual(m.word.length, 1);
+    assert.strictEqual(m.word[0].datei, lt);
+    assert.strictEqual(m.word[0].ok, 2);
+    assert.strictEqual(m.word[0].fehler.length, 1);
+    assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
+    // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
+    const extract = require('../server/extract');
+    const info = await extract.analyse(path.join(WS, ...lt.split('/')));
+    assert.strictEqual(info.lesbar, 'ja');
+    assert.match(info.text, /Projektarbeit über \*\*Solarenergie\*\*/);
+    assert.match(info.text, /4\. Kunst \| kreativ \| zeitaufwendig/);
+    assert.match(info.text, /Lerntagebuch zur/, 'Vorlage bleibt erhalten');
+    assert.ok(original.equals(fs.readFileSync(path.join(WS, '00_vorgaben', 'Lerntagebuch-Vorlage.docx'))), 'Original unverändert');
+    const nummern = fs.readFileSync(path.join(WS, '.facharbeit', 'extrakte', ...`${lt}.txt`.split('/')), 'utf8');
+    assert.match(nummern, /^\[\d+\] Ich habe in Klasse 11/m, 'Fassung mit Absatznummern ist aktuell');
+    // Neue Word-Datei ja, Originale nie.
+    const r2 = (await send(chat.id, 'LERNTAGEBUCH NEU')).done.message;
+    const neu = r2.word.find((x) => x.datei === 'abgabe/Expose.docx');
+    assert.strictEqual(neu.ok, 1);
+    assert.ok(fs.existsSync(path.join(WS, 'abgabe', 'Expose.docx')));
+    const orig = r2.word.find((x) => x.datei.startsWith('00_vorgaben/'));
+    assert.strictEqual(orig.ok, 0);
+    assert.match(orig.hinweis, /Originale/);
+  });
+
   await t.test('Exporte: Gesprächsverläufe, Word, Gesamtarbeit, Sicherung', async () => {
     const tr = await call('POST', '/api/export/transcripts');
     const md = fs.readFileSync(path.join(WS, tr.path), 'utf8');
@@ -320,6 +358,9 @@ test('Kompletter Ablauf', async (t) => {
     assert.ok(fs.existsSync(path.join(WS, tr.docx)));
     const d = await call('POST', '/api/export/docx', { path: '02_expose_und_zeitplan/expose_v1.md' });
     assert.ok(fs.existsSync(path.join(WS, d.path)));
+    // Neue Arbeitsräume: die Facharbeit liegt als Word-Datei in abgabe/.
+    await assert.rejects(call('POST', '/api/export/facharbeit'), /abgabe\//);
+    fs.writeFileSync(path.join(WS, '05_facharbeit_entwurf', '02_einleitung.md'), '# 1 Einleitung\n\nText.');
     const fa = await call('POST', '/api/export/facharbeit');
     assert.ok(fa.path.startsWith('exporte/'));
     assert.ok(fa.teile.includes('02_einleitung.md'));

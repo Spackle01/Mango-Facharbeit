@@ -145,11 +145,11 @@ function taskEl(t) {
 // ---------- Arbeitsraum ----------
 
 let fileFilter = '';
-const openGroups = new Set(['anhaenge']);
+const openGroups = new Set(['anhaenge', 'abgabe']);
 
 function groupLabel(dir) {
   const names = {
-    '00_vorgaben': 'Vorgaben der Schule', '01_themenfindung_und_mindmap': 'Themenfindung und Mindmap', '02_expose_und_zeitplan': 'Exposé und Zeitplan',
+    '00_vorgaben': 'Originale der Schule (geschützt)', abgabe: 'Abgabe-Dateien (hier wird gearbeitet)', '01_themenfindung_und_mindmap': 'Themenfindung und Mindmap', '02_expose_und_zeitplan': 'Exposé und Zeitplan',
     '03_literatur_und_quellen': 'Literatur und Quellen', '04_forschung_und_eigenanteil': 'Forschung und Eigenanteil', '05_facharbeit_entwurf': 'Facharbeit (Entwurf)',
     '06_lerntagebuch_und_konsultationen': 'Lerntagebuch und Konsultationen', '07_ki_prompts_anhang': 'KI-Nutzung und Anhang', '08_praesentation_verteidigung': 'Präsentation und Verteidigung',
     anhaenge: 'Anhänge aus dem Chat', uebernommen: 'Originale (mitgebracht)', exporte: 'Exporte', '': 'Hauptordner',
@@ -257,7 +257,9 @@ async function renderFiles(body, headExtra) {
       if (!groups.has(dir)) groups.set(dir, []);
       groups.get(dir).push(f);
     }
-    const order = [...groups.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
+    // Abgabe-Dateien zuerst, dann Hauptordner und Arbeitsordner.
+    const rang = (d) => (d === 'abgabe' ? 0 : d === '' ? 1 : 2);
+    const order = [...groups.keys()].sort((a, b) => rang(a) - rang(b) || a.localeCompare(b));
     for (const dir of order) {
       const items = groups.get(dir);
       if (dir === '') { items.forEach((f) => listBox.append(fileRow(f))); continue; }

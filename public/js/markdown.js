@@ -158,7 +158,7 @@ export function renderMarkdown(src, opts = {}) {
 export function stripUpdateBlock(text) {
   let out = text;
   for (;;) {
-    const idx = out.search(/```[ \t]*(arbeitsstand|uebernahme|einsortieren)/i);
+    const idx = out.search(/```[ \t]*(arbeitsstand|uebernahme|einsortieren|word)\b/i);
     if (idx < 0) return out;
     const rest = out.slice(idx);
     const end = rest.indexOf('```', 3);

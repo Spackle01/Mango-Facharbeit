@@ -6,6 +6,8 @@ const ws = require('./workspace');
 const ctx = require('./context');
 const importer = require('./importer');
 const sortieren = require('./sortieren');
+const word = require('./word');
+const abgabe = require('./abgabe');
 const { kindOf } = require('./extract');
 const { GRUENDLICHKEIT } = require('./providers/models');
 
@@ -50,6 +52,21 @@ function errorHint(kind, providerState, model = '') {
   return null;
 }
 
+// Ergebnis der Word-Änderungen in die Dateiliste übernehmen; gesperrte Dateien für „Erneut eintragen“ merken.
+function merkeWord(msg, dateien, changes) {
+  const offen = [];
+  for (const r of msg.word) {
+    if (r.gesperrt) offen.push(dateien.find((d) => d.datei === r.datei));
+    if (!r.ok) continue;
+    const known = changes.find((c) => c.path === r.datei);
+    const aktion = r.aktion === 'neu' ? 'neu' : 'geaendert';
+    if (known) Object.assign(known, { aktion, version: r.version || known.version });
+    else changes.push({ path: r.datei, aktion, kind: 'word', version: r.version || undefined });
+  }
+  msg.wordOffen = offen.filter(Boolean);
+  if (!msg.wordOffen.length) delete msg.wordOffen;
+}
+
 class RunManager {
   // bereit: liefert ein Promise, das nach laufenden Anbieterprüfungen erfüllt ist.
   // modellAbgelehnt(anbieter, id): ein automatisch gewähltes Modell wurde abgelehnt.
@@ -75,6 +92,21 @@ class RunManager {
     run.subscribers.add(send);
     send({ type: 'snapshot', message: run.message });
     return () => run.subscribers.delete(send);
+  }
+
+  // Gesperrte Word-Änderungen einer Antwort erneut eintragen (Datei war z. B. in Word geöffnet).
+  async wordErneut(project, chatId, messageId) {
+    if (this.runs.has(chatId)) throw Object.assign(new Error('In diesem Chat läuft gerade eine Antwort.'), { status: 409 });
+    const chat = project.getChat(chatId);
+    const msg = chat.messages.find((m) => m.id === messageId);
+    if (!msg || !msg.wordOffen || !msg.wordOffen.length) throw Object.assign(new Error('Es gibt nichts mehr einzutragen.'), { status: 400 });
+    const neu = await abgabe.anwenden(project, msg.wordOffen);
+    const rest = msg.word.filter((r) => !msg.wordOffen.some((d) => d.datei === r.datei));
+    const offen = msg.wordOffen;
+    msg.word = [...rest, ...neu];
+    merkeWord(msg, offen, msg.files || (msg.files = []));
+    await project.saveChat(chat);
+    return msg;
   }
 
   stop(chatId) {
@@ -166,7 +198,7 @@ class RunManager {
 
       // Projektkontext: nur senden, wenn er sich seit der letzten Nachricht geändert hat.
       const files = await ws.listFiles(project.workspace);
-      const context = await ctx.buildContext(project, files);
+      const context = await ctx.buildContext(project, files, new Date(), { abgabe: await abgabe.listeFuerKontext(project, files) });
       const sess = chat.sessions[providerId] || {};
       let sessionId = sess.id || null;
       let resume = !!sessionId;
@@ -279,7 +311,15 @@ class RunManager {
       }
       if (sp.invalid) msg.activity.push({ kind: 'info', label: 'Einsortier-Plan war nicht lesbar und wurde ignoriert' });
 
-      const parsed = ctx.parseUpdate(sp.text);
+      // Word-Dateien: Der Assistent nennt die Änderungen, die App trägt sie formatgetreu ein.
+      const wp = word.parseBlock(sp.text);
+      if (wp.dateien.length && !res.canceled) {
+        msg.word = await abgabe.anwenden(project, wp.dateien);
+        merkeWord(msg, wp.dateien, changes);
+      }
+      if (wp.invalid) msg.activity.push({ kind: 'info', label: 'Word-Änderungen waren nicht lesbar und wurden ignoriert' });
+
+      const parsed = ctx.parseUpdate(wp.text);
       const filesAfter = await ws.listFiles(project.workspace);
       let applied = null;
       if (!res.canceled && parsed.update) applied = await ctx.applyUpdate(project, parsed.update, filesAfter, { nurLeereFelder: !!inv });
