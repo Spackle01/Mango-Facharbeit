@@ -718,3 +718,13 @@ test('Umwandlung in PDF: ohne Office oder LibreOffice kein Ergebnis, mit LibreOf
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Streaming: Steuerblöcke und angefangene Blöcke erscheinen nie im Chat', async () => {
+  const { stripUpdateBlock } = await import('../public/js/markdown.js');
+  assert.strictEqual(stripUpdateBlock('Fertig.\n\n```erstellen\n[{"datei":'), 'Fertig.');
+  assert.strictEqual(stripUpdateBlock('Fertig.\n\n```aufraeumen\n[]\n```\n\nDanach.'), 'Fertig.\n\nDanach.');
+  for (const teil of ['`', '``', '```', '```e', '```erst', '```erstellen', '```word', '```aufr']) assert.strictEqual(stripUpdateBlock(`Text\n${teil}`), 'Text', teil);
+  // normale Codeblöcke bleiben, auch mit schließendem Zaun am Ende
+  assert.strictEqual(stripUpdateBlock('Code:\n```js\nx\n```'), 'Code:\n```js\nx\n```');
+  assert.strictEqual(stripUpdateBlock('Code:\n```js'), 'Code:\n```js');
+});

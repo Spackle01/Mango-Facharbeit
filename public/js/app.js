@@ -524,9 +524,10 @@ function liveStepEl(m) {
 
 function stepsEl(m) {
   const n = m.activity.length;
-  const d = h('details', { class: 'steps' },
+  const d = h('details', { class: 'steps', open: m.stepsOffen || null },
     h('summary', {}, iconEl('chevronRight', 14), `${n} ${n === 1 ? 'Arbeitsschritt' : 'Arbeitsschritte'}`),
     h('ol', {}, m.activity.map((a) => h('li', {}, iconEl({ lesen: 'eye', schreiben: 'pencil', suchen: 'search', web: 'globe', planen: 'checks', skill: 'sparkle', befehl: 'terminal' }[a.kind] || 'info', 14), h('span', {}, a.label)))));
+  d.addEventListener('toggle', () => { m.stepsOffen = d.open; });
   return d;
 }
 
@@ -772,7 +773,7 @@ function hintBox(hint, { withCheck = false } = {}) {
 function renderAssistantMessage(m, isLast) {
   const el = h('div', { class: `msg assistant${isLast ? ' last' : ''}`, 'data-id': m.id });
   const running = m.status === 'laeuft';
-  if (m.activity && m.activity.length && !running) el.append(stepsEl(m));
+  if (m.activity && m.activity.length) el.append(stepsEl(m));
   const text = running ? stripUpdateBlock(m.text || '') : m.text || '';
   const content = h('div', { class: 'content' });
   if (text) content.innerHTML = renderMarkdown(text, { isFile: (p) => S.fileIndex.has(p) || /^[\w.-]+\/.+\.\w{1,5}$/.test(p) });
@@ -885,6 +886,7 @@ function handleEvent(chatId, ev, sid) {
     msgs.push(ev.userMessage, ev.message);
     if (ev.chat) { S.chat.title = ev.chat.title; upsertChatMeta(ev.chat); renderTopbar(); }
     renderThread();
+    for (const m of [ev.userMessage, ev.message]) { const el = S.els.thread.querySelector(`[data-id="${CSS.escape(m.id)}"]`); if (el) el.classList.add('fresh'); }
     scrollToEnd(false);
   } else if (ev.type === 'snapshot') {
     const i = msgs.findIndex((m) => m.id === ev.message.id);
@@ -901,7 +903,8 @@ function handleEvent(chatId, ev, sid) {
     if (i >= 0) msgs[i] = ev.message; else msgs.push(ev.message);
     if (ev.chat) { S.chat.title = ev.chat.title; upsertChatMeta(ev.chat); }
     const stick = isNearEnd();
-    renderThread();
+    // Nur die fertige Antwort neu zeichnen, nicht den ganzen Verlauf (sonst springt die Ansicht).
+    if (S.els.thread.querySelector(`[data-id="${CSS.escape(ev.message.id)}"]`)) replaceMessageEl(ev.message); else renderThread();
     if (stick) scrollToEnd(false);
     refreshAfterRun(ev);
     announce(ev.message.status === 'fertig' ? 'Antwort fertig' : ev.message.status === 'abgebrochen' ? 'Antwort abgebrochen' : 'Fehler bei der Antwort');

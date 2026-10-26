@@ -225,7 +225,9 @@ kbd, .cmd {
 
 /* ---------- Nachrichten ---------- */
 
-.msg { margin: 0 0 26px; animation: rise var(--t) var(--ease); }
+.msg { margin: 0 0 26px; }
+/* Nur beim ersten Erscheinen einblenden: Neuzeichnen während der Antwort darf nicht flackern. */
+.msg.fresh { animation: rise var(--t) var(--ease); }
 .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
 .bubble {
   max-width: min(85%, 620px); background: var(--surface-2); padding: 10px 15px; border-radius: 18px 18px 6px 18px;

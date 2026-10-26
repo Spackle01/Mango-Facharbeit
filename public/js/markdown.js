@@ -154,15 +154,28 @@ export function renderMarkdown(src, opts = {}) {
   return out.join('\n');
 }
 
-// Entfernt die (ggf. unvollständigen) Steuerblöcke für Arbeitsstand und Übernahme während des Streamens.
+// Steuerblöcke, die die App aus der Antwort entfernt und selbst ausführt.
+const STEUERBLOECKE = ['arbeitsstand', 'uebernahme', 'einsortieren', 'word', 'erstellen', 'aufraeumen'];
+
+// Entfernt die (ggf. unvollständigen) Steuerblöcke während des Streamens, auch einen gerade erst
+// begonnenen Anfang wie „```erste“, damit nichts kurz im Chat aufblitzt und wieder verschwindet.
 export function stripUpdateBlock(text) {
   let out = text;
+  const namen = STEUERBLOECKE.join('|');
+  const re = new RegExp(`\`\`\`[ \\t]*(${namen})\\b`, 'i');
   for (;;) {
-    const idx = out.search(/```[ \t]*(arbeitsstand|uebernahme|einsortieren|word)\b/i);
-    if (idx < 0) return out;
+    const idx = out.search(re);
+    if (idx < 0) break;
     const rest = out.slice(idx);
     const end = rest.indexOf('```', 3);
     if (end < 0) return out.slice(0, idx).trimEnd();
-    out = (out.slice(0, idx) + rest.slice(end + 3)).trim();
+    out = (out.slice(0, idx) + rest.slice(end + 3)).replace(/\n{3,}/g, '\n\n').trim();
   }
+  const tail = /(?:^|\n)[ \t]*(`{1,3})([a-z]{0,12})[ \t]*$/i.exec(out);
+  const davor = tail ? (out.slice(0, tail.index).match(/```/g) || []).length : 0;
+  // Ein einzelnes „```“ am Ende ist nur dann ein Anfang, wenn davor kein Codeblock offen ist (sonst schließt es einen).
+  if (tail && (tail[1].length < 3 || (!tail[2] && davor % 2 === 0) || (tail[2] && STEUERBLOECKE.some((n) => n.startsWith(tail[2].toLowerCase()))))) {
+    return out.slice(0, tail.index).trimEnd();
+  }
+  return out;
 }

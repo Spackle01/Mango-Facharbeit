@@ -142,7 +142,8 @@ process.stdin.on('end', () => {
     ];
     const t = `Erstellt.\n\n\`\`\`erstellen\n${JSON.stringify(blocks)}\n\`\`\``;
     out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
-    out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
+    // In kleinen Stücken, damit auch angefangene Blöcke („```erst“) beim Streamen vorkommen
+    for (const chunk of t.match(/[\s\S]{1,7}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: chunk } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
     return;
   }
