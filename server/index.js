@@ -15,6 +15,7 @@ const exporter = require('./export');
 const importer = require('./importer');
 const vorschau = require('./vorschau');
 const ordnung = require('./ordnung');
+const konvertieren = require('./konvertieren');
 const system = require('./system');
 const { STATUS_INFO, PHASEN } = require('./aufgaben');
 const { kindLabel } = require('./extract');
@@ -486,6 +487,29 @@ route('GET', /^\/api\/files\/vorschau$/, async (req, url) => {
   const st = abs ? await fsp.stat(abs).catch(() => null) : null;
   if (!st || !st.isFile()) throw new HttpError(404, 'Datei nicht gefunden. Sie wurde eventuell verschoben oder gelöscht.');
   return { path: rel, name: path.basename(abs), size: st.size, sizeLabel: humanSize(st.size), mtime: st.mtimeMs, ...(await vorschau.erzeugen(abs, path.basename(abs))) };
+});
+
+// Echte Ansicht (PDF aus Office oder LibreOffice) für Word und PowerPoint, falls installiert.
+route('POST', /^\/api\/files\/vorschau\/echt$/, async (req) => {
+  const p = requireProject();
+  const body = await readBody(req);
+  const rel = String(body.path || '');
+  const abs = resolveInside(p.workspace, rel);
+  if (!abs || !(await exists(abs))) throw new HttpError(404, 'Datei nicht gefunden.');
+  const r = await konvertieren.nachPdf(p.workspace, rel).catch(() => null);
+  return r ? { ok: true, quelle: r.quelle } : { ok: false };
+});
+
+route('GET', /^\/api\/files\/vorschau-pdf$/, async (req, url, m, res) => {
+  const p = requireProject();
+  const rel = url.searchParams.get('path') || '';
+  const abs = resolveInside(p.workspace, rel);
+  const r = abs ? await konvertieren.vorhanden(p.workspace, rel) : null;
+  if (!r) throw new HttpError(404, 'Keine Vorschau vorhanden.');
+  const st = await fsp.stat(r.pdf);
+  res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': st.size, 'Content-Disposition': 'inline; filename="vorschau.pdf"', 'X-Content-Type-Options': 'nosniff' });
+  require('fs').createReadStream(r.pdf).pipe(res);
+  return undefined;
 });
 
 route('GET', /^\/api\/files\/raw$/, async (req, url, m, res) => {

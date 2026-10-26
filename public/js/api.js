@@ -77,6 +77,10 @@ export const api = {
     if (buf.trim()) { try { onEvent(JSON.parse(buf)); } catch { /* unvollständig */ } }
   },
 
+  vorschauPdfUrl(path) {
+    return `/api/files/vorschau-pdf?path=${encodeURIComponent(path)}&t=${TOKEN}&v=${Date.now()}#toolbar=0&navpanes=0&view=FitH`;
+  },
+
   rawUrl(path, download = false) {
     return `/api/files/raw?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}&t=${TOKEN}`;
   },

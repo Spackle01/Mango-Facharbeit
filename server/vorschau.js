@@ -4,6 +4,7 @@
 const { fsp } = require('./util');
 const { readZip } = require('./zip');
 const word = require('./word');
+const { folienAlsHtml } = require('./pptxrender');
 const { kindOf } = require('./extract');
 
 const MAX_TEXT = 200 * 1024;
@@ -108,7 +109,13 @@ async function erzeugen(abs, name) {
   if (st.size > MAX_BYTES) return { typ: 'keine', hinweis: 'Die Datei ist zu groß für die Vorschau.' };
   try {
     if (['.docx', '.docm'].includes(ext)) return { typ: 'word', ...word.vorschau(await fsp.readFile(abs)) };
-    if (ext === '.pptx') return pptx(await fsp.readFile(abs));
+    if (ext === '.pptx') {
+      const buf = await fsp.readFile(abs);
+      const text = pptx(buf);
+      // Gezeichnete Folien (wie in PowerPoint); bei Fehlern bleibt die Textansicht.
+      try { text.seiten = folienAlsHtml(buf); } catch { /* Textansicht */ }
+      return text;
+    }
     if (['.xlsx', '.xlsm'].includes(ext)) return xlsx(await fsp.readFile(abs));
   } catch {
     return { typ: 'keine', hinweis: 'Die Datei lässt sich nicht lesen. Öffne sie im Programm.' };

@@ -675,3 +675,46 @@ test('Aktivität: Skills werden erkannt (Skill-Werkzeug und SKILL.md lesen)', ()
   assert.strictEqual(describeTool('Read', { file_path: '/w/.agents/skills/sprachpruefung/SKILL.md' }, '/w').skill, 'sprachpruefung');
   assert.strictEqual(describeTool('Read', { file_path: '/w/notiz.md' }, '/w').skill, undefined);
 });
+
+test('Folien zeichnen: Titel, Aufzählung, Tabelle, Bild, Farben, Platzhalter aus dem Layout', async () => {
+  const { folienAlsHtml } = require('../server/pptxrender');
+  const { markdownToPptx } = require('../server/pptx');
+  const buf = await markdownToPptx('# Titel <b>x</b>\nUntertitel\n\n---\n## Frage\n- Punkt A\n  - Unterpunkt\n\n---\n## Tabelle\n| A | B |\n|---|---|\n| 1 | 2 |\n![Bild](x.png)', { bildLaden: async () => PNG1 });
+  const o = folienAlsHtml(buf);
+  assert.strictEqual(o.folien.length, 3);
+  assert.strictEqual(o.breite, 960);
+  assert.strictEqual(o.hoehe, 540);
+  assert.match(o.folien[0], /Titel &lt;b&gt;x&lt;\/b&gt;/, 'Text ist maskiert');
+  assert.ok(!/<b>x/.test(o.folien[0]));
+  assert.match(o.folien[0], /background:#5b5fb8/i, 'Akzentfläche');
+  assert.match(o.folien[1], /Punkt A/);
+  assert.match(o.folien[1], />•<\/span>/, 'Aufzählungszeichen');
+  assert.match(o.folien[2], /<table[\s\S]*>A<[\s\S]*>2</);
+  assert.match(o.folien[2], /<img[^>]*src="data:image\/png;base64,/);
+  // Fremde Datei: Platzhalter erben Lage und Stil vom Layout (python-pptx-Vorlage, falls vorhanden)
+  const fremd = process.env.MANGO_TEST_PPTX;
+  if (fremd && fs.existsSync(fremd)) assert.ok(folienAlsHtml(fs.readFileSync(fremd)).folien.length > 0);
+});
+
+test('Umwandlung in PDF: ohne Office oder LibreOffice kein Ergebnis, mit LibreOffice ein PDF (gespeichert)', async () => {
+  const konv = require('../server/konvertieren');
+  const { markdownToPptx } = require('../server/pptx');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-konv-'));
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel' });
+    fs.writeFileSync(path.join(p.workspace, 'abgabe', 'F.pptx'), await markdownToPptx('# T\n\n---\n## A\n- b'));
+    process.env.MANGO_OHNE_KONVERTIERUNG = '1';
+    assert.strictEqual(await konv.nachPdf(p.workspace, 'abgabe/F.pptx'), null);
+    delete process.env.MANGO_OHNE_KONVERTIERUNG;
+    const { which } = require('../server/providers/proc');
+    if (!which('soffice') && !which('libreoffice')) return; // kein LibreOffice: nichts zu prüfen
+    const r = await konv.nachPdf(p.workspace, 'abgabe/F.pptx');
+    assert.strictEqual(r.quelle, 'LibreOffice');
+    assert.strictEqual(fs.readFileSync(r.pdf).subarray(0, 5).toString(), '%PDF-');
+    assert.ok((await konv.vorhanden(p.workspace, 'abgabe/F.pptx')).pdf === r.pdf, 'zweiter Aufruf nutzt den gespeicherten Stand');
+    fs.writeFileSync(path.join(p.workspace, 'abgabe', 'F.pptx'), await markdownToPptx('# Neu'));
+    assert.strictEqual(await konv.vorhanden(p.workspace, 'abgabe/F.pptx'), null, 'geänderte Datei braucht eine neue Umwandlung');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -31,7 +31,30 @@ function wordAnsicht(info) {
   return box;
 }
 
+// Gezeichnete Folien (wie in PowerPoint), je Folie auf die Fensterbreite skaliert.
 function folienAnsicht(info) {
+  const box = h('div', { class: 'vs-slides vs-slides-echt' });
+  const seiten = info.seiten;
+  if (!seiten) return folienText(info);
+  const anpassen = [];
+  info.folien.forEach((f, i) => {
+    const rahmen = h('div', { class: 'vs-folie-rahmen', style: { aspectRatio: `${seiten.breite} / ${seiten.hoehe}` } });
+    const innen = h('div', { class: 'vs-folie-innen', style: { width: `${seiten.breite}px`, height: `${seiten.hoehe}px` }, html: seiten.folien[i] || '' });
+    rahmen.append(innen);
+    anpassen.push(() => { const k = rahmen.clientWidth / seiten.breite; if (k > 0) innen.style.transform = `scale(${k})`; });
+    const block = h('section', { class: 'vs-folie' }, h('div', { class: 'vs-nr' }, `Folie ${i + 1}`), rahmen);
+    if (f && f.notizen) block.append(h('p', { class: 'vs-notiz' }, h('b', {}, 'Notizen: '), f.notizen));
+    box.append(block);
+  });
+  const messen = () => anpassen.forEach((fn) => fn());
+  if (typeof ResizeObserver === 'function') new ResizeObserver(messen).observe(box); else window.addEventListener('resize', messen);
+  setTimeout(messen);
+  if (info.gesamt > seiten.folien.length) box.append(h('p', { class: 'vs-leer' }, `Die Vorschau zeigt die ersten ${seiten.folien.length} von ${info.gesamt} Folien.`));
+  return box;
+}
+
+// Nur Text (falls Folien nicht gezeichnet werden konnten)
+function folienText(info) {
   const box = h('div', { class: 'vs-slides' });
   info.folien.forEach((f, i) => {
     const s = h('section', { class: 'vs-slide' }, h('div', { class: 'vs-nr' }, `Folie ${i + 1}`), h('h4', {}, f.titel || '(ohne Titel)'));
@@ -46,7 +69,6 @@ function folienAnsicht(info) {
     if (f.notizen) s.append(h('p', { class: 'vs-notiz' }, h('b', {}, 'Notizen: '), f.notizen));
     box.append(s);
   });
-  if (info.gesamt > info.folien.length) box.append(h('p', { class: 'vs-leer' }, `Die Vorschau zeigt die ersten ${info.folien.length} von ${info.gesamt} Folien.`));
   return box;
 }
 
@@ -94,8 +116,26 @@ export async function showPreview(path) {
   else if (info.typ === 'folien') inhalt = folienAnsicht(info);
   else if (info.typ === 'tabelle') inhalt = tabellenAnsicht(info);
   else inhalt = h('p', { class: 'vs-leer' }, info.hinweis || 'Keine Vorschau möglich.');
-  if (['word', 'folien', 'tabelle'].includes(info.typ)) inhalt = h('div', {}, h('p', { class: 'vs-hinweis' }, iconEl('info', 14), ' Vereinfachte Vorschau. Schrift, Layout und Bilder siehst du, wenn du die Datei im Programm öffnest.'), inhalt);
+  const kannEcht = ['word', 'folien'].includes(info.typ) && navigator.pdfViewerEnabled !== false;
+  let status = null;
+  if (['word', 'folien', 'tabelle'].includes(info.typ)) {
+    status = h('p', { class: 'vs-hinweis' }, iconEl('info', 14), info.typ === 'folien' && info.seiten
+      ? ' Nachgezeichnete Ansicht der Folien.'
+      : ' Vereinfachte Vorschau. Das echte Aussehen siehst du im Programm.');
+    inhalt = h('div', {}, status, inhalt);
+  }
   body.replaceChildren(inhalt);
   aktionen();
+  // Originalansicht: Word bzw. PowerPoint (oder LibreOffice) erzeugt im Hintergrund ein PDF.
+  if (kannEcht) {
+    const wartet = h('span', { class: 'vs-warte' }, ' Originalansicht wird erstellt …');
+    status.append(wartet);
+    api.post('/api/files/vorschau/echt', { path }).then((r) => {
+      if (!r.ok || !document.body.contains(body)) { wartet.remove(); return; }
+      body.replaceChildren(h('div', {},
+        h('p', { class: 'vs-hinweis' }, iconEl('check', 14), ` Originalansicht (erzeugt mit ${r.quelle})`),
+        h('iframe', { class: 'vs-pdf vs-pdf-hoch', src: api.vorschauPdfUrl(path), title: `Originalansicht ${name}` })));
+    }).catch(() => wartet.remove());
+  }
   return d;
 }

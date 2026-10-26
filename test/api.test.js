@@ -26,7 +26,7 @@ function startServer() {
     server = spawn(process.execPath, [path.join(ROOT, 'server/index.js'), '--no-open', '--port', String(port)], {
       env: {
         ...process.env,
-        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), FAKE_LOG: LOG, FAKE_AGY_LOG: AGY_LOG,
+        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), MANGO_OHNE_KONVERTIERUNG: '1', FAKE_LOG: LOG, FAKE_AGY_LOG: AGY_LOG,
         PATH: `${path.join(__dirname, 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -392,6 +392,10 @@ test('Kompletter Ablauf', async (t) => {
     const v = await call('GET', '/api/files/vorschau?path=abgabe/Praesentation.pptx');
     assert.strictEqual(v.typ, 'folien');
     assert.strictEqual(v.folien[1].notizen, 'Das sage ich dazu.');
+    assert.strictEqual(v.seiten.folien.length, 2, 'Folien werden gezeichnet');
+    assert.match(v.seiten.folien[0], /Titel der Arbeit/);
+    assert.deepStrictEqual(await call('POST', '/api/files/vorschau/echt', { path: 'abgabe/Praesentation.pptx' }), { ok: false }, 'ohne Umwandlung bleibt es bei der eigenen Ansicht');
+    await assert.rejects(call('GET', '/api/files/vorschau-pdf?path=abgabe/Praesentation.pptx'), /Keine Vorschau/);
     assert.strictEqual((await call('GET', '/api/files/vorschau?path=abgabe/Info.pdf')).typ, 'pdf');
     const pdf = await call('GET', '/api/files/raw?path=abgabe/Info.pdf', null, { raw: true });
     assert.strictEqual(pdf.headers.get('content-type'), 'application/pdf');

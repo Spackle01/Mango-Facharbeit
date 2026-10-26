@@ -66,8 +66,8 @@ function childEnv() {
 
 // Startet ein Programm. Nutzereingaben gehören nie in eine Shell-Zeile:
 // .cmd-Dateien unter Windows bekommen nur feste Optionen und Pfade.
-function spawnProgram(file, args, { cwd, stdin = 'pipe' } = {}) {
-  const opts = { cwd, env: childEnv(), windowsHide: true, stdio: [stdin, 'pipe', 'pipe'] };
+function spawnProgram(file, args, { cwd, stdin = 'pipe', env = null } = {}) {
+  const opts = { cwd, env: env ? { ...childEnv(), ...env } : childEnv(), windowsHide: true, stdio: [stdin, 'pipe', 'pipe'] };
   if (!IS_WIN) opts.detached = true; // eigene Prozessgruppe, damit Stopp alle Unterprozesse beendet
   if (needsShell(file)) {
     const line = [quoteForCmd(file), ...args.map(quoteForCmd)].join(' ');
@@ -93,11 +93,11 @@ function killTree(child) {
 }
 
 // Führt ein Programm aus und sammelt die Ausgabe.
-function runCapture(file, args, { cwd, timeout = 20000, input = null } = {}) {
+function runCapture(file, args, { cwd, timeout = 20000, input = null, env = null } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawnProgram(file, args, { cwd, stdin: input === null ? 'ignore' : 'pipe' });
+      child = spawnProgram(file, args, { cwd, stdin: input === null ? 'ignore' : 'pipe', env });
     } catch (error) {
       resolve({ code: -1, stdout: '', stderr: '', error });
       return;
