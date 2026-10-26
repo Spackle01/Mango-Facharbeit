@@ -728,3 +728,92 @@ test('Streaming: Steuerblöcke und angefangene Blöcke erscheinen nie im Chat', 
   assert.strictEqual(stripUpdateBlock('Code:\n```js\nx\n```'), 'Code:\n```js\nx\n```');
   assert.strictEqual(stripUpdateBlock('Code:\n```js'), 'Code:\n```js');
 });
+
+// ---------- Updates ----------
+
+test('Update: Versionsvergleich und Auswahl der neuesten Veröffentlichung', () => {
+  const { vergleiche, parseVersion, neuesteVersion } = require('../server/update');
+  assert.deepStrictEqual(parseVersion('v0.2.8-beta'), { nums: [0, 2, 8], pre: 'beta' });
+  assert.strictEqual(parseVersion('kaputt'), null);
+  assert.ok(vergleiche('0.2.9-beta', '0.2.8-beta') > 0);
+  assert.ok(vergleiche('0.10.0-beta', '0.9.9-beta') > 0, 'Zahlen, nicht Text');
+  assert.ok(vergleiche('1.0.0', '1.0.0-beta') > 0, 'Fassung ohne Zusatz ist neuer');
+  assert.strictEqual(vergleiche('0.2.8-beta', '0.2.8-beta'), 0);
+  assert.ok(vergleiche('0.2.7-beta', '0.2.8-beta') < 0);
+  const asset = (name, tag) => ({ name, size: 1000, browser_download_url: `https://github.com/Spackle01/Mango-Facharbeit/releases/download/${tag}/${name}` });
+  const rel = (tag, extra = {}) => ({ tag_name: tag, draft: false, html_url: `https://github.com/Spackle01/Mango-Facharbeit/releases/tag/${tag}`, body: `Kurztext zu ${tag}\n\n## Mehr`, assets: [asset(`Mango-Facharbeit-Setup-${tag.slice(1)}.exe`, tag), asset(`Mango-Facharbeit-Setup-${tag.slice(1)}.exe.sha256`, tag)], ...extra });
+  const n = neuesteVersion([rel('v0.2.7-beta'), rel('v0.2.9-beta'), rel('v0.3.0-beta', { draft: true }), { ...rel('v0.4.0-beta'), assets: [] }]);
+  assert.strictEqual(n.version, '0.2.9-beta');
+  assert.strictEqual(n.notizen, 'Kurztext zu v0.2.9-beta');
+  assert.match(n.shaUrl, /\.exe\.sha256$/);
+  // Fremde Download-Adressen werden nicht akzeptiert
+  const boese = rel('v0.5.0-beta');
+  boese.assets[0].browser_download_url = 'https://evil.example/Mango-Facharbeit-Setup-0.5.0-beta.exe';
+  assert.strictEqual(neuesteVersion([boese]), null);
+});
+
+test('Update: laden, Prüfsumme prüfen, Installer starten', async () => {
+  const http = require('http');
+  const crypto = require('crypto');
+  const { Updater } = require('../server/update');
+  const exe = Buffer.alloc(300000, 7);
+  const sha = crypto.createHash('sha256').update(exe).digest('hex');
+  let falsch = false;
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/releases') {
+      const base = `http://127.0.0.1:${srv.address().port}`;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify([{ tag_name: 'v9.0.0-beta', draft: false, html_url: `${base}/seite`, body: 'Neu.', assets: [
+        { name: 'Mango-Facharbeit-Setup-9.0.0-beta.exe', size: exe.length, browser_download_url: `${base}/dl/Mango-Facharbeit-Setup-9.0.0-beta.exe` },
+        { name: 'Mango-Facharbeit-Setup-9.0.0-beta.exe.sha256', size: 100, browser_download_url: `${base}/dl/Mango-Facharbeit-Setup-9.0.0-beta.exe.sha256` }] }]));
+    } else if (req.url.endsWith('.exe')) { res.setHeader('Content-Length', exe.length); res.end(exe); } else res.end(`${falsch ? 'a'.repeat(64) : sha}  Mango-Facharbeit-Setup-9.0.0-beta.exe`);
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  process.env.MANGO_UPDATE_API = `http://127.0.0.1:${port}/releases`;
+  delete require.cache[require.resolve('../server/update')];
+  const { Updater: U } = require('../server/update');
+  void Updater;
+  try {
+    const gestartet = [];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-upd-'));
+    const host = { kannAktualisieren: true, updateAnwenden: async (f) => { gestartet.push([f, fs.statSync(f).size]); } };
+    const u = new U({ version: '0.2.8-beta', host, dir });
+    let st = await u.pruefen();
+    assert.strictEqual(st.neu.version, '9.0.0-beta');
+    assert.strictEqual(st.direkt, true);
+    // Nichts Neueres: kein Knopf
+    const gleich = new U({ version: '9.0.0-beta', host, dir });
+    assert.strictEqual((await gleich.pruefen()).neu, null);
+    // Arbeit läuft: kein Update
+    assert.throws(() => u.starten({ laeuftArbeit: () => true }), /arbeitet gerade/);
+    // Falsche Prüfsumme: nichts wird gestartet
+    falsch = true;
+    u.starten();
+    for (let i = 0; i < 100 && u.status.phase === 'laedt'; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(u.status.phase, 'fehler');
+    assert.match(u.status.fehler, /Prüfsumme/);
+    assert.strictEqual(gestartet.length, 0);
+    assert.ok(!fs.existsSync(path.join(dir, 'Mango-Facharbeit-Setup-9.0.0-beta.exe')), 'fehlerhafte Datei wird gelöscht');
+    // Richtige Prüfsumme: Setup wird gestartet
+    falsch = false;
+    u.zuruecksetzen();
+    u.starten();
+    for (let i = 0; i < 100 && u.status.phase !== 'startet'; i++) await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 20 && !gestartet.length; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(u.status.phase, 'startet');
+    assert.strictEqual(gestartet.length, 1);
+    assert.strictEqual(gestartet[0][1], exe.length);
+    // Ohne Desktop-App (Browser, Linux, Mac): nur Hinweis auf die Release-Seite
+    assert.throws(() => new U({ version: '0.2.8-beta', host: null, dir }).starten(), /installierten Windows-App/);
+    // GitHub nicht erreichbar: kein Absturz, Fehler wird gemerkt
+    const kaputt = new U({ version: '0.2.8-beta', host, dir, fetchFn: async () => { throw new Error('offline'); } });
+    const r = await kaputt.pruefen();
+    assert.strictEqual(r.neu, null);
+    assert.match(r.fehler, /offline/);
+  } finally {
+    delete process.env.MANGO_UPDATE_API;
+    delete require.cache[require.resolve('../server/update')];
+    srv.close();
+  }
+});

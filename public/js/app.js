@@ -1,7 +1,7 @@
 // Mango Facharbeit – Hauptmodul: Layout, Seitenleiste, Chat, Eingabefeld, Anbieter.
 import { api, ApiError } from './api.js';
 import {
-  h, iconEl, btn, toast, menu, popover, closePopover, confirmDialog, copyText, fmtTime, fmtDate,
+  h, iconEl, btn, toast, dialog, menu, popover, closePopover, confirmDialog, copyText, fmtTime, fmtDate,
   announce, initials, parseLocal, daysUntil,
 } from './ui.js';
 import { fileIcon } from './icons.js';
@@ -176,6 +176,7 @@ export function mountApp() {
 }
 
 let listenersBound = false;
+let updateTimer = null;
 
 function toggleSidebar(force) {
   const app = S.els.app;
@@ -328,7 +329,69 @@ export function renderTopbar() {
     mk('stand', 'Arbeitsstand', 'checks', { text: `${done}/${total}`, aria: `${done} von ${total} erledigt` }),
     mk('dateien', 'Dateien', 'folder'),
     mk('projekt', 'Projekt', 'book'),
+    S.update && S.update.neu ? btn('', { iconName: 'update', cls: 'btn btn-icon update-btn', title: `Update verfügbar: Version ${S.update.neu.version}`, onClick: openUpdateDialog }) : null,
     btn('', { iconName: 'folderOpen', cls: 'btn btn-icon', title: 'Arbeitsordner öffnen', onClick: openWorkspaceFolder })));
+}
+
+// ---------- Updates ----------
+
+// Fragt (im Hintergrund) nach einer neueren Version; der Knopf oben rechts erscheint nur, wenn es eine gibt.
+export async function checkUpdate({ force = false } = {}) {
+  try {
+    S.update = await api.get(`/api/update${force ? '?neu=1' : ''}`);
+  } catch { S.update = null; }
+  renderTopbar();
+  return S.update;
+}
+
+function mb(bytes) { return `${Math.round(bytes / 1000000)} MB`; }
+
+export function openUpdateDialog() {
+  const u = S.update;
+  if (!u || !u.neu) return;
+  const neu = u.neu;
+  const body = h('div', {});
+  const foot = h('div', { style: { display: 'contents' } });
+  const d = dialog({ title: 'Update verfügbar', body, footer: foot, small: true });
+  const seite = () => window.open(neu.seite, '_blank', 'noopener');
+  const zeigeStart = () => {
+    body.replaceChildren(
+      h('p', {}, h('b', {}, `Version ${neu.version}`), ` ist da. Du hast Version ${u.aktuell}.`),
+      neu.notizen ? h('p', { class: 'upd-notiz' }, neu.notizen) : null,
+      h('p', { class: 'upd-klein' }, u.direkt
+        ? `Mango lädt das Update (${mb(neu.groesse)}), installiert es und startet neu. Deine Projekte und Einstellungen bleiben erhalten.`
+        : 'Lade die neue Version von der Release-Seite und installiere sie über die alte.'));
+    foot.replaceChildren(
+      btn('Später', { cls: 'btn', onClick: () => d.close() }),
+      u.direkt ? btn('Jetzt aktualisieren', { iconName: 'update', cls: 'btn btn-primary', onClick: loslegen }) : btn('Zur Release-Seite', { iconName: 'external', cls: 'btn btn-primary', onClick: seite }));
+  };
+  const loslegen = async () => {
+    const bar = h('div', { class: 'ip-bar upd-bar' }, h('i', { style: { width: '0%' } }));
+    const label = h('p', {}, 'Update wird heruntergeladen …');
+    body.replaceChildren(label, bar);
+    foot.replaceChildren();
+    try {
+      await api.post('/api/update/installieren', {});
+    } catch (err) {
+      body.replaceChildren(h('p', { class: 'upd-fehler' }, err.message));
+      foot.replaceChildren(btn('Schließen', { cls: 'btn', onClick: () => d.close() }), btn('Zur Release-Seite', { cls: 'btn btn-soft', onClick: seite }));
+      return;
+    }
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 700));
+      let st;
+      try { st = await api.get('/api/update'); } catch { label.textContent = 'Mango startet neu …'; return; } // App ist schon beendet
+      const s = st.status || {};
+      if (s.phase === 'fehler') {
+        body.replaceChildren(h('p', { class: 'upd-fehler' }, s.fehler || 'Das Update ist fehlgeschlagen.'));
+        foot.replaceChildren(btn('Schließen', { cls: 'btn', onClick: () => d.close() }), btn('Zur Release-Seite', { cls: 'btn btn-soft', onClick: seite }));
+        return;
+      }
+      if (s.phase === 'startet') label.textContent = 'Mango installiert das Update und startet gleich neu …';
+      bar.firstChild.style.width = `${s.prozent || 0}%`;
+    }
+  };
+  zeigeStart();
 }
 
 // Öffnet den Arbeitsordner im Dateimanager.
@@ -1414,6 +1477,8 @@ export async function enterApp({ greet = false } = {}) {
   await refreshFiles();
   mountApp();
   await openInitialChat();
+  checkUpdate();
+  if (!updateTimer) updateTimer = setInterval(() => checkUpdate(), 3 * 60 * 60 * 1000);
   if (greet) showGreeting(project() ? project().angaben.name : '');
 }
 

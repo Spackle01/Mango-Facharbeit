@@ -1,7 +1,7 @@
 // Einstellungen: Darstellung, KI-Anbieter, Facharbeit.
 import { api } from './api.js';
 import { h, iconEl, btn, toast, dialog, copyText } from './ui.js';
-import { S, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp } from './app.js';
+import { S, checkUpdate, openUpdateDialog, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp } from './app.js';
 import { showOnboarding, chooseFolder } from './onboarding.js';
 import { openModelDialog, selectedModel, selectedModelLabel, gruendlichkeitEl } from './modelle.js';
 import { modelLabel } from './modelname.js';
@@ -71,6 +71,20 @@ export function openSettings(focusSection) {
     const fresh = btn('Neue Facharbeit anlegen', { cls: 'btn btn-soft btn-sm', iconName: 'plus', size: 15, onClick: () => { d.close(); showOnboarding({ fromSettings: true }); } });
     fa.append(h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' } }, other, fresh));
     body.append(fa);
+
+    const pruef = S.state.settings.updatePruefen !== false;
+    const cb = h('input', { type: 'checkbox', id: 'set-update', checked: pruef || null });
+    cb.addEventListener('change', async () => {
+      S.state.settings.updatePruefen = cb.checked;
+      try { await api.put('/api/settings', { updatePruefen: cb.checked }); } catch (err) { toast(err.message, { error: true }); }
+      if (cb.checked) checkUpdate(); else { S.update = null; checkUpdate(); }
+    });
+    const jetzt = btn('Jetzt suchen', { iconName: 'refresh', cls: 'btn btn-sm', size: 15, onClick: async () => {
+      const u = await checkUpdate({ force: true });
+      if (u && u.neu) { d.close(); openUpdateDialog(); } else toast(u && u.fehler ? `Suche nicht möglich: ${u.fehler}` : 'Du hast die neueste Version.');
+    } });
+    body.append(h('section', { class: 'settings-section' }, h('h3', {}, 'Updates'),
+      h('label', { class: 'check-row', for: 'set-update' }, cb, h('span', {}, 'Beim Start nach einer neuen Version suchen')), h('div', { style: { marginTop: '8px' } }, jetzt)));
 
     body.append(h('section', { class: 'settings-section' }, h('h3', {}, 'Über'),
       h('div', { class: 'kv' }, h('span', {}, 'Version'), h('span', {}, S.state.version), h('span', {}, 'App-Daten'), h('code', {}, S.state.dataDir))));

@@ -26,7 +26,7 @@ function startServer() {
     server = spawn(process.execPath, [path.join(ROOT, 'server/index.js'), '--no-open', '--port', String(port)], {
       env: {
         ...process.env,
-        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), MANGO_OHNE_KONVERTIERUNG: '1', FAKE_LOG: LOG, FAKE_AGY_LOG: AGY_LOG,
+        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), MANGO_OHNE_KONVERTIERUNG: '1', MANGO_UPDATE_API: 'http://127.0.0.1:9/releases', FAKE_LOG: LOG, FAKE_AGY_LOG: AGY_LOG,
         PATH: `${path.join(__dirname, 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -438,6 +438,16 @@ test('Kompletter Ablauf', async (t) => {
     fs.rmSync(path.join(WS, 'lose_notiz.md'));
     fs.rmSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md'));
     fs.rmSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v2.md'));
+  });
+
+  await t.test('Update: ohne neuere Version kein Knopf, Einstellung zum Abschalten', async () => {
+    const u = await call('GET', '/api/update?neu=1');
+    assert.strictEqual(u.neu, null, 'ohne erreichbares GitHub gibt es kein Update');
+    assert.strictEqual(u.direkt, false, 'im Browser-Modus nur Hinweis auf die Release-Seite');
+    await assert.rejects(call('POST', '/api/update/installieren', {}), /(installierten Windows-App|kein neueres)/);
+    await call('PUT', '/api/settings', { updatePruefen: false });
+    assert.strictEqual((await call('GET', '/api/update')).aus, true);
+    await call('PUT', '/api/settings', { updatePruefen: true });
   });
 
   await t.test('Exporte: Gesprächsverläufe, Word, Gesamtarbeit, Sicherung', async () => {

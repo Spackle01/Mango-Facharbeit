@@ -166,6 +166,15 @@ if (!SMOKE_FILE && !app.requestSingleInstanceLock()) {
       shell.showItemInFolder(target);
       return true;
     },
+    // Selbstaktualisierung (nur die installierte Windows-App): Setup still starten, App beenden.
+    kannAktualisieren: process.platform === 'win32' && app.isPackaged,
+    async updateAnwenden(datei) {
+      const { spawn } = require('child_process');
+      const child = spawn(datei, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.on('error', () => {});
+      child.unref();
+      setTimeout(() => { if (win && !win.isDestroyed()) win.forceClose = true; app.quit(); }, 600);
+    },
     async pickFolder() {
       const r = await dialog.showOpenDialog(win || undefined, {
         title: 'Speicherort für die Facharbeit wählen',

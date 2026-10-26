@@ -16,6 +16,7 @@ const importer = require('./importer');
 const vorschau = require('./vorschau');
 const ordnung = require('./ordnung');
 const konvertieren = require('./konvertieren');
+const { Updater } = require('./update');
 const system = require('./system');
 const { STATUS_INFO, PHASEN } = require('./aufgaben');
 const { kindLabel } = require('./extract');
@@ -209,6 +210,25 @@ async function serveStatic(req, res, pathname) {
 
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
+
+// ---------- Updates ----------
+
+let updater = null;
+function getUpdater() {
+  if (!updater) updater = new Updater({ version: PKG.version, host: system.updateHost() });
+  return updater;
+}
+
+route('GET', /^\/api\/update$/, async (req, url) => {
+  if (app.settings.updatePruefen === false) return { ...getUpdater().oeffentlich(), neu: null, aus: true };
+  return getUpdater().pruefen({ force: url.searchParams.get('neu') === '1' });
+});
+
+route('POST', /^\/api\/update\/installieren$/, async () => {
+  const u = getUpdater();
+  u.zuruecksetzen();
+  return u.starten({ laeuftArbeit: () => runs.runningChats().length > 0 });
+});
 
 route('GET', /^\/api\/state$/, async () => statePayload());
 

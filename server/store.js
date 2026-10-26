@@ -79,6 +79,7 @@ class AppStore {
       if (!auto) this.data.settings.anbieterGewaehlt = true;
     }
     if (patch.gruendlichkeit && GRUENDLICHKEIT[patch.gruendlichkeit]) this.data.settings.gruendlichkeit = patch.gruendlichkeit;
+    if (typeof patch.updatePruefen === 'boolean') this.data.settings.updatePruefen = patch.updatePruefen;
     if (patch.modelle && typeof patch.modelle === 'object') {
       for (const [anbieter, wert] of Object.entries(patch.modelle)) {
         if (!['claude', 'antigravity'].includes(anbieter) || typeof wert !== 'string') continue;

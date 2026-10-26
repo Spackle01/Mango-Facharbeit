@@ -28,6 +28,11 @@ function setHost(h) {
   host = h || null;
 }
 
+// Die installierte Desktop-App kann sich selbst aktualisieren (Windows); sonst nur Hinweis auf die Release-Seite.
+function updateHost() {
+  return host && host.updateAnwenden ? host : null;
+}
+
 // Öffnet eine Datei oder einen Ordner mit dem Standardprogramm.
 async function openPath(target) {
   if (host && host.openPath) return host.openPath(target);
@@ -130,4 +135,4 @@ async function openAppWindow(url) {
   return false;
 }
 
-module.exports = { setHost, openPath, revealPath, pickFolder, openAppWindow, antigravityAppAvailable, openInAntigravity };
+module.exports = { setHost, updateHost, openPath, revealPath, pickFolder, openAppWindow, antigravityAppAvailable, openInAntigravity };
