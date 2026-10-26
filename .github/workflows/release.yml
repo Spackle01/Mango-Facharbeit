@@ -6,6 +6,7 @@ name: Release (Windows-App)
 on:
   push:
     branches: ['main', 'claude/**']
+    paths-ignore: ['docs/**']
     tags: ['v*']
   workflow_dispatch:
 

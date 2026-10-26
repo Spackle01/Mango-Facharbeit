@@ -4,6 +4,8 @@ Eine Agent-first-App, die Schülerinnen und Schüler der Fachoberschule durch ih
 
 Als KI-Anbieter lassen sich die **Claude Code CLI** und die **Antigravity CLI (`agy`)** wählen. Beide laufen lokal mit dem eigenen Konto; die App simuliert keine Antworten.
 
+**Webseite mit Download:** https://spackle01.github.io/Mango-Facharbeit/ (Quelle: Ordner `docs/`, in den Repository-Einstellungen unter „Pages“ aktivieren: Deploy from a branch, Ordner `/docs`).
+
 ## Starten
 
 ### Windows (Installer)
