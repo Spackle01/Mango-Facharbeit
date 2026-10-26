@@ -329,7 +329,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.word[0].ok, 2);
     assert.strictEqual(m.word[0].fehler.length, 1);
     assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [] }, 'unauffälliger Text wird nicht überarbeitet');
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['wissenschaftlich-schreiben', 'sprachpruefung'], nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, Skills waren geladen');
     // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
     const extract = require('../server/extract');
     const info = await extract.analyse(path.join(WS, ...lt.split('/')));
@@ -355,7 +355,7 @@ test('Kompletter Ablauf', async (t) => {
     const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
     const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
     assert.strictEqual(m.text, 'Eingetragen.', 'Text der Überarbeitung wird nicht angezeigt');
-    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [] });
+    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ['wissenschaftlich-schreiben', 'sprachpruefung'], nachgeholt: false });
     assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen/.test(a.label)));
     const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
     assert.strictEqual(w.ok, 2);
@@ -367,6 +367,73 @@ test('Kompletter Ablauf', async (t) => {
     const text = require('../server/extract').docxToText(fs.readFileSync(path.join(WS, ...w.datei.split('/'))));
     assert.match(text, /Ich habe über Windkraft geschrieben\./);
     assert.ok(!/heutigen Zeit/.test(text));
+  });
+
+  await t.test('Schreib-Skills: nicht geladen → die App lässt sie nachholen', async () => {
+    const chat = await call('POST', '/api/chats');
+    const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
+    const m = (await send(chat.id, 'OHNESKILL LERNTAGEBUCH Ergänzung')).done.message;
+    assert.strictEqual(m.stil.nachgeholt, true);
+    assert.deepStrictEqual(m.stil.skills, ['wissenschaftlich-schreiben', 'sprachpruefung']);
+    assert.ok(m.activity.some((a) => /Schreib-Skills nachholen/.test(a.label)));
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
+    assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
+    assert.match(calls[1].input, /Pflicht-Skills nicht geladen \(`wissenschaftlich-schreiben`, `sprachpruefung`\)/);
+    assert.match(calls[1].input, /aktuelle Absatznummern in \.facharbeit\/extrakte\/abgabe\//);
+  });
+
+  await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {
+    const chat = await call('POST', '/api/chats');
+    const m = (await send(chat.id, 'ERSTELLE eine Präsentation und ein PDF')).done.message;
+    assert.ok(!/```erstellen/.test(m.text), 'Block wird nicht angezeigt');
+    assert.deepStrictEqual(m.word.map((x) => [x.datei, x.aktion, x.ok]), [['abgabe/Praesentation.pptx', 'neu', 1], ['abgabe/Info.pdf', 'neu', 1]]);
+    assert.ok(m.files.some((f) => f.path === 'abgabe/Praesentation.pptx' && f.aktion === 'neu' && f.kind === 'praesentation'));
+    assert.strictEqual(m.stil.nachgeholt, false, 'Skills waren geladen');
+    const v = await call('GET', '/api/files/vorschau?path=abgabe/Praesentation.pptx');
+    assert.strictEqual(v.typ, 'folien');
+    assert.strictEqual(v.folien[1].notizen, 'Das sage ich dazu.');
+    assert.strictEqual((await call('GET', '/api/files/vorschau?path=abgabe/Info.pdf')).typ, 'pdf');
+    const pdf = await call('GET', '/api/files/raw?path=abgabe/Info.pdf', null, { raw: true });
+    assert.strictEqual(pdf.headers.get('content-type'), 'application/pdf');
+    assert.ok(!/sandbox/.test(pdf.headers.get('content-security-policy') || ''), 'PDF darf im Viewer angezeigt werden');
+    assert.match(pdf.headers.get('content-disposition'), /^inline/);
+    const word = await call('GET', '/api/files/raw?path=abgabe/Praesentation.pptx', null, { raw: true });
+    assert.match(word.headers.get('content-disposition'), /^attachment/);
+    await assert.rejects(call('GET', '/api/files/vorschau?path=abgabe/gibtsnicht.pdf'), /nicht gefunden/);
+    await assert.rejects(call('GET', '/api/files/vorschau?path=../x.pdf'), /nicht gefunden/);
+  });
+
+  await t.test('Aufräumen: Fundstellen im Kontext, Plan wird ausgeführt und lässt sich zurücknehmen', async () => {
+    fs.writeFileSync(path.join(WS, 'lose_notiz.md'), 'Notiz');
+    fs.writeFileSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md'), 'Alt');
+    fs.writeFileSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v2.md'), 'Neu');
+    fs.writeFileSync(path.join(WS, '02_expose_und_zeitplan', '~$sperre.docx'), 'x');
+    const o = await call('GET', '/api/ordnung');
+    assert.ok(o.funde.some((f) => f.path === 'lose_notiz.md' && /lose/.test(f.grund)));
+    assert.ok(o.funde.some((f) => f.path === '02_expose_und_zeitplan/umfrage_v1.md' && f.vorschlag === 'archivieren'));
+    const chat = await call('POST', '/api/chats');
+    const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
+    const m = (await send(chat.id, 'RAEUME auf')).done.message;
+    const call1 = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l))[0];
+    assert.match(call1.input, /Aufräumen nötig \(Block `aufraeumen`/);
+    assert.match(call1.input, /- lose_notiz\.md: liegt lose im Hauptordner/);
+    assert.ok(!/```aufraeumen/.test(m.text));
+    assert.deepStrictEqual(m.aufgeraeumt.map((x) => x.ok), [true, true]);
+    assert.ok(fs.existsSync(path.join(WS, '01_themenfindung_und_mindmap', 'lose_notiz.md')));
+    assert.ok(!fs.existsSync(path.join(WS, 'lose_notiz.md')));
+    assert.ok(!fs.existsSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md')));
+    assert.ok(!fs.existsSync(path.join(WS, '02_expose_und_zeitplan', '~$sperre.docx')), 'Reste räumt die App selbst weg');
+    assert.deepStrictEqual(m.aufgeraeumtAuto, { reste: 1, leereOrdner: 0 });
+    assert.strictEqual((await call('GET', '/api/ordnung')).anzahl, 0, 'danach ist alles aufgeräumt');
+    const z = (await call('POST', `/api/chats/${chat.id}/messages/${m.id}/aufraeumen/rueckgaengig`, {})).message;
+    assert.ok(z.aufgeraeumt.every((x) => x.zurueck));
+    assert.ok(fs.existsSync(path.join(WS, 'lose_notiz.md')));
+    assert.ok(fs.existsSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md')));
+    await assert.rejects(call('POST', `/api/chats/${chat.id}/messages/${m.id}/aufraeumen/rueckgaengig`, {}), /nichts rückgängig/);
+    // wieder weglegen, damit spätere Tests unberührt bleiben
+    fs.rmSync(path.join(WS, 'lose_notiz.md'));
+    fs.rmSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md'));
+    fs.rmSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v2.md'));
   });
 
   await t.test('Exporte: Gesprächsverläufe, Word, Gesamtarbeit, Sicherung', async () => {

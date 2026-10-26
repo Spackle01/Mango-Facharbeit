@@ -74,8 +74,23 @@ process.stdin.on('end', () => {
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
     return;
   }
+  // Schreib-Skills: wie die echte CLI über das Skill-Werkzeug laden (außer bei OHNESKILL).
+  const skills = () => {
+    for (const [i, name] of ['wissenschaftlich-schreiben', 'sprachpruefung'].entries()) {
+      out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `s${i}`, name: 'Skill', input: { skill: name } }] } });
+    }
+  };
+  if (msg.includes('Pflicht-Skills nicht geladen') && !msg.includes('Automatische Prüfung hat außerdem')) {
+    skills();
+    const t = 'Überarbeitet.';
+    out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+    out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
+    return;
+  }
   // Sprachprüfung: erst Floskeln eintragen, nach der Rückmeldung der App die Stellen überarbeiten.
-  if (msg.includes('Automatische Sprachprüfung')) {
+  if (msg.includes('Automatische Sprachprüfung') || msg.includes('Automatische Prüfung hat außerdem')) {
+    if (msg.includes('Pflicht-Skills nicht geladen')) skills();
     const m = /^(abgabe\/\S+\.docx) \(Word: Block `word`, aktuelle Absatznummern in (\S+?)\)/m.exec(msg);
     const nummern = fs.readFileSync(path.join(process.cwd(), ...m[2].split('/')), 'utf8');
     const n = +/^\[(\d+)\] In der heutigen Zeit/m.exec(nummern)[1];
@@ -86,6 +101,7 @@ process.stdin.on('end', () => {
     return;
   }
   if (msg.includes('FLOSKEL')) {
+    if (!msg.includes('OHNESKILL')) skills();
     const m = /- (abgabe\/Lerntagebuch[^ ]*\.docx) \(Stand [^)]*\) → Absätze: (\S+)/.exec(input);
     const nummern = fs.readFileSync(path.join(process.cwd(), ...m[2].split('/')), 'utf8');
     const frage = +/^\[(\d+)\] Das sind meine drei/m.exec(nummern)[1];
@@ -98,6 +114,7 @@ process.stdin.on('end', () => {
   // Lerntagebuch ergänzen: liest die Fassung mit Absatznummern aus dem Projektkontext, versucht die
   // Word-Datei (unerlaubt) als Text zu schreiben und liefert die Änderungen als Block ```word.
   if (msg.includes('LERNTAGEBUCH')) {
+    if (!msg.includes('OHNESKILL')) skills();
     const m = /- (abgabe\/Lerntagebuch[^ ]*\.docx) \(Stand [^)]*\) → Absätze: (\S+)/.exec(input);
     const nummern = fs.readFileSync(path.join(process.cwd(), ...m[2].split('/')), 'utf8');
     const nr = (re) => +(new RegExp(`^\\[(\\d+)\\] ${re}`, 'm').exec(nummern) || [])[1];
@@ -111,6 +128,29 @@ process.stdin.on('end', () => {
     const blocks = [{ datei: m[1], aenderungen: ops }];
     if (msg.includes('NEU')) blocks.push({ datei: 'abgabe/Expose.docx', neu: true, text: '# Exposé\n\nErster Absatz.' }, { datei: '00_vorgaben/Lerntagebuch-Vorlage.docx', aenderungen: [{ ersetzen: 1, text: 'x' }] });
     const t = `Eingetragen in \`${m[1]}\`.\n\n\`\`\`word\n${JSON.stringify(msg.includes('NEU') ? blocks.slice(1) : blocks[0])}\n\`\`\``;
+    out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+    out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
+    return;
+  }
+  // Dateien erstellen: PowerPoint und PDF über den Block ```erstellen
+  if (msg.includes('ERSTELLE')) {
+    skills();
+    const blocks = [
+      { datei: 'abgabe/Praesentation.pptx', text: '# Titel der Arbeit\nMax · Fach\n\n---\n## Frage\n- Ein Punkt\n> Das sage ich dazu.' },
+      { datei: 'abgabe/Info.pdf', text: '# Info\n\nEin kurzer Text.' },
+    ];
+    const t = `Erstellt.\n\n\`\`\`erstellen\n${JSON.stringify(blocks)}\n\`\`\``;
+    out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+    out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
+    return;
+  }
+  // Aufräumen: nimmt die Fundstellen aus dem Projektkontext
+  if (msg.includes('RAEUME') || msg.includes('Räum den Arbeitsordner auf')) {
+    const lose = /^- (\S+): liegt lose im Hauptordner/m.exec(input);
+    const plan = [{ verschieben: lose[1], nach: `01_themenfindung_und_mindmap/${lose[1]}` }, { archivieren: '02_expose_und_zeitplan/umfrage_v1.md' }];
+    const t = `Aufgeräumt.\n\n\`\`\`aufraeumen\n${JSON.stringify(plan)}\n\`\`\``;
     out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });

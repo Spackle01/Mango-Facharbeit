@@ -13,6 +13,8 @@ const ws = require('./workspace');
 const ctx = require('./context');
 const exporter = require('./export');
 const importer = require('./importer');
+const vorschau = require('./vorschau');
+const ordnung = require('./ordnung');
 const system = require('./system');
 const { STATUS_INFO, PHASEN } = require('./aufgaben');
 const { kindLabel } = require('./extract');
@@ -357,6 +359,17 @@ route('POST', /^\/api\/chats\/([\w-]+)\/messages\/([\w-]+)\/word$/, async (req, 
   return { message: msg };
 });
 
+route('POST', /^\/api\/chats\/([\w-]+)\/messages\/([\w-]+)\/aufraeumen\/rueckgaengig$/, async (req, url, m) => {
+  const msg = await runs.aufraeumenRueckgaengig(requireProject(), m[1], m[2]);
+  return { message: msg };
+});
+
+route('GET', /^\/api\/ordnung$/, async () => {
+  const p = requireProject();
+  const funde = await ordnung.pruefen(p, await ws.listFiles(p.workspace));
+  return { funde: funde.slice(0, 50), anzahl: funde.length };
+});
+
 route('GET', /^\/api\/chats\/([\w-]+)\/export$/, async (req, url, m, res) => {
   const p = requireProject();
   const chat = p.getChat(m[1]);
@@ -466,6 +479,15 @@ route('GET', /^\/api\/files\/info$/, async (req, url) => {
   return { path: rel, exists: !!st, size: st ? st.size : 0, ...info, kindLabel: kindLabel(info.kind), versions: await ws.listVersions(p.workspace, rel) };
 });
 
+route('GET', /^\/api\/files\/vorschau$/, async (req, url) => {
+  const p = requireProject();
+  const rel = url.searchParams.get('path') || '';
+  const abs = resolveInside(p.workspace, rel);
+  const st = abs ? await fsp.stat(abs).catch(() => null) : null;
+  if (!st || !st.isFile()) throw new HttpError(404, 'Datei nicht gefunden. Sie wurde eventuell verschoben oder gelöscht.');
+  return { path: rel, name: path.basename(abs), size: st.size, sizeLabel: humanSize(st.size), mtime: st.mtimeMs, ...(await vorschau.erzeugen(abs, path.basename(abs))) };
+});
+
 route('GET', /^\/api\/files\/raw$/, async (req, url, m, res) => {
   const p = requireProject();
   const rel = url.searchParams.get('path') || '';
@@ -480,7 +502,9 @@ route('GET', /^\/api\/files\/raw$/, async (req, url, m, res) => {
     'Content-Length': st.size,
     'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="datei${ext}"; filename*=UTF-8''${encodeURIComponent(name)}`,
     'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+    // Der eingebaute PDF-Viewer läuft nicht in einer Sandbox und braucht keine einschränkende Richtlinie.
+    // Alle anderen Dateien bleiben in der Sandbox.
+    ...(ext === '.pdf' && inline ? {} : { 'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox" }),
   });
   require('fs').createReadStream(abs).pipe(res);
   return undefined;

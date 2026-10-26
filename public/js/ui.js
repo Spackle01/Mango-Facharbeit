@@ -138,11 +138,11 @@ export function menu(anchor, items, opts = {}) {
 
 const dialogStack = [];
 
-export function dialog({ title, body, footer, small = false, onClose, labelledBy } = {}) {
+export function dialog({ title, body, footer, small = false, wide = false, onClose, labelledBy } = {}) {
   const previous = document.activeElement;
   const titleId = `dlg-${Math.random().toString(36).slice(2)}`;
   const closeBtn = btn('', { iconName: 'x', cls: 'btn btn-icon', title: 'Schließen' });
-  const box = h('div', { class: `dialog${small ? ' small' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': labelledBy || titleId },
+  const box = h('div', { class: `dialog${small ? ' small' : ''}${wide ? ' wide' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': labelledBy || titleId },
     h('div', { class: 'dialog-head' }, h('h2', { id: titleId }, title), closeBtn),
     h('div', { class: 'dialog-body' }, body),
     footer ? h('div', { class: 'dialog-foot' }, footer) : null);

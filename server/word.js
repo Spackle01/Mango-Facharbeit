@@ -634,23 +634,70 @@ async function apply(buffer, ops, { bildLaden } = {}) {
   return { buffer: ok ? d.toBuffer() : null, results, ok };
 }
 
+// ---------- Vorschau (vereinfacht, für die Anzeige in der App) ----------
+
+// Blöcke in Lesereihenfolge: { t:'h', n, text } | { t:'p', text } | { t:'tabelle', rows }
+function vorschau(buffer, { max = 600 } = {}) {
+  const d = new WordDoc(buffer);
+  const out = [];
+  let tbl = null;
+  let gekuerzt = false;
+  for (const p of d.paras) {
+    if (out.length >= max) { gekuerzt = true; break; }
+    const info = paraInfo(p.node);
+    const text = info.text.replace(/\t/g, ' ').replace(/\s+$/, '');
+    if (p.tbl) {
+      if (!tbl || tbl.nr !== p.tbl.nr) { tbl = { nr: p.tbl.nr, rows: [] }; out.push({ t: 'tabelle', rows: tbl.rows }); }
+      const row = tbl.rows[p.tbl.z - 1] || (tbl.rows[p.tbl.z - 1] = []);
+      const col = Math.max(0, p.tbl.s - 1);
+      row[col] = [row[col], text].filter(Boolean).join(' ');
+      continue;
+    }
+    tbl = null;
+    const lvl = headingLevel(styleOf(p.node), d.styles);
+    if (lvl && text.trim()) out.push({ t: 'h', n: Math.min(3, lvl), text: text.trim() });
+    else if (info.bild && !text.trim()) out.push({ t: 'p', text: '[Bild]' });
+    else if (text.trim()) out.push({ t: 'p', text });
+  }
+  for (const b of out) if (b.t === 'tabelle') b.rows = b.rows.map((r) => Array.from(r || [], (c) => c || ''));
+  return { bloecke: out, gekuerzt };
+}
+
+// Word-Datei als Markdown (für PDF oder Präsentation aus einer vorhandenen Datei).
+function alsMarkdown(buffer) {
+  const { bloecke } = vorschau(buffer, { max: 100000 });
+  return bloecke.map((b) => {
+    if (b.t === 'h') return `${'#'.repeat(b.n)} ${b.text}`;
+    if (b.t === 'tabelle') {
+      const cols = Math.max(1, ...b.rows.map((r) => r.length));
+      const row = (r) => `| ${Array.from({ length: cols }, (_, i) => String(r[i] || '').replace(/\|/g, '/')).join(' | ')} |`;
+      return [row(b.rows[0] || []), `|${' --- |'.repeat(cols)}`, ...b.rows.slice(1).map(row)].join('\n');
+    }
+    return b.text === '[Bild]' ? '' : b.text;
+  }).filter((x) => x !== '').join('\n\n');
+}
+
 // ---------- Block in der Antwort ----------
 
-const BLOCK_RE = /```[ \t]*word[^\n]*\n([\s\S]*?)(?:\n```|$)/gi;
+// Zwei Blöcke: `word` (bestehende Word-Datei ändern, oder neu:true) und `erstellen` (neue Datei
+// als Word, PDF, PowerPoint oder Excel aus Markdown).
+const BLOCK_RE = /```[ \t]*(word|erstellen)[^\n]*\n([\s\S]*?)(?:\n```|$)/gi;
 
 function parseBlock(text) {
   const raw = String(text || '');
   const dateien = [];
   let invalid = false;
   for (const m of raw.matchAll(BLOCK_RE)) {
+    const erstellen = m[1].toLowerCase() === 'erstellen';
     try {
-      const j = JSON.parse(m[1].trim().replace(/,\s*([}\]])/g, '$1'));
+      const j = JSON.parse(m[2].trim().replace(/,\s*([}\]])/g, '$1'));
       for (const e of Array.isArray(j) ? j : [j]) {
         if (!e || typeof e !== 'object') continue;
         const datei = String(e.datei || '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
         if (!datei) continue;
+        const neu = erstellen || e.neu === true;
         const ops = Array.isArray(e.aenderungen) ? e.aenderungen : Array.isArray(e.änderungen) ? e.änderungen : [];
-        dateien.push({ datei, neu: e.neu === true, text: e.neu === true ? String(e.text || '') : '', ops: ops.slice(0, 200) });
+        dateien.push({ datei, neu, ersetzen: e.ersetzen === true, aus: neu && e.aus ? String(e.aus).trim().replace(/\\/g, '/').replace(/^\.\//, '') : '', text: neu ? String(e.text || e.inhalt || '') : '', ops: ops.slice(0, 200) });
       }
     } catch {
       invalid = true;
@@ -659,4 +706,4 @@ function parseBlock(text) {
   return { text: raw.replace(BLOCK_RE, '').replace(/\n{3,}/g, '\n\n').trim(), dateien: dateien.slice(0, 20), invalid };
 }
 
-module.exports = { nummeriert, apply, parseBlock, imageSize, parseXml, serialize, WordDoc, paraInfo };
+module.exports = { nummeriert, vorschau, alsMarkdown, apply, parseBlock, imageSize, parseXml, serialize, WordDoc, paraInfo };

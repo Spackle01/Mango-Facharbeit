@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { h, iconEl, btn, toast, menu, popover, dialog, fmtRelative, fmtDate, parseLocal, daysUntil, parseDateDE, formatDateDE, shortPath } from './ui.js';
 import { fileIcon } from './icons.js';
 import {
-  S, project, setProject, statusPill, statusMenu, setTaskStatus, openFile, refreshFiles, renderTopbar, startImportChat,
+  S, project, setProject, statusPill, statusMenu, setTaskStatus, openFile, ansehen, refreshFiles, renderTopbar, startImportChat, sendText, openWorkspaceFolder,
 } from './app.js';
 import { openImportDialog } from './importer.js';
 import { renderMarkdown } from './markdown.js';
@@ -159,15 +159,16 @@ function groupLabel(dir) {
 
 function fileRow(f, { indent = false, showDir = false } = {}) {
   const row = h('div', { class: `file-row${indent ? ' file-indent' : ''}` });
-  const main = h('button', { type: 'button', class: 'f-main', title: `${f.path} öffnen` },
+  const main = h('button', { type: 'button', class: 'f-main', title: `${f.path} ansehen` },
     h('span', { html: fileIcon(f.kind, 18) }).firstChild,
     h('span', { class: 'f-text' }, h('span', { class: 'f-name' }, f.name),
       h('span', { class: 'f-meta' }, [showDir ? f.path.split('/').slice(0, -1).join('/') : null, fmtRelative(f.mtime), f.sizeLabel].filter(Boolean).join(' · '))));
-  main.addEventListener('click', () => openFile(f.path));
+  main.addEventListener('click', () => ansehen(f.path));
   const more = btn('', { iconName: 'more', cls: 'btn btn-sm btn-icon', title: `Weitere Aktionen für ${f.name}`, attrs: { 'aria-haspopup': 'menu' } });
   more.addEventListener('click', () => {
     menu(more, [
-      { label: 'Öffnen', icon: 'external', onClick: () => openFile(f.path) },
+      { label: 'Ansehen', icon: 'eye', onClick: () => ansehen(f.path) },
+      { label: 'Im Programm öffnen', icon: 'external', onClick: () => openFile(f.path) },
       { label: 'Im Ordner zeigen', icon: 'folder', onClick: () => openFile(f.path, { reveal: true }) },
       { label: 'Im Chat anhängen', icon: 'clip', onClick: () => attachFromPanel(f.path) },
       { label: 'Herunterladen', icon: 'download', onClick: () => { window.location.href = api.rawUrl(f.path, true); } },
@@ -217,8 +218,9 @@ async function renderFiles(body, headExtra) {
   const scrollTop = body.scrollTop;
   body.innerHTML = '';
 
-  const openBtn = btn('Arbeitsraum öffnen', { iconName: 'folderOpen', cls: 'btn btn-primary', onClick: () => openWorkspace() });
-  const tools = h('div', { class: 'files-tools' }, openBtn);
+  const openBtn = btn('Arbeitsordner öffnen', { iconName: 'folderOpen', cls: 'btn btn-primary', onClick: () => openWorkspaceFolder() });
+  const tools = h('div', { class: 'files-tools' }, openBtn,
+    btn('Aufräumen', { iconName: 'sparkle', cls: 'btn btn-soft', title: 'Die KI räumt den Arbeitsordner auf (nichts wird gelöscht)', onClick: () => { closePanel(); sendText('Räum den Arbeitsordner auf.'); } }));
   if (S.state.antigravityApp) tools.append(btn('In Antigravity öffnen', { iconName: 'external', cls: 'btn btn-soft', onClick: () => openWorkspace('antigravity') }));
   const moreBtn = btn('Exportieren', { iconName: 'download', cls: 'btn btn-soft', attrs: { 'aria-haspopup': 'menu' } });
   moreBtn.addEventListener('click', () => menu(moreBtn, [
@@ -229,6 +231,14 @@ async function renderFiles(body, headExtra) {
   tools.append(moreBtn);
   tools.append(btn('Dateien einsortieren', { iconName: 'upload', cls: 'btn btn-soft', onClick: () => { closePanel(); openImportDialog([], (inv) => startImportChat(inv)); } }));
   body.append(h('div', { class: 'ws-path', title: p.workspace }, iconEl('folder', 15), h('span', {}, shortPath(p.workspace))), tools);
+  // Hinweis, wenn etwas nicht am richtigen Platz liegt.
+  api.get('/api/ordnung').then((o) => {
+    if (!o.anzahl || !current || current.id !== 'dateien') return;
+    const hint = h('div', { class: 'ordnung-hint' }, iconEl('alert', 15),
+      h('span', {}, `${o.anzahl} ${o.anzahl === 1 ? 'Datei liegt' : 'Dateien liegen'} nicht am richtigen Platz.`),
+      btn('Aufräumen', { cls: 'btn btn-sm btn-soft', onClick: () => { closePanel(); sendText('Räum den Arbeitsordner auf.'); } }));
+    tools.after(hint);
+  }).catch(() => {});
 
   const search = h('input', { class: 'input', type: 'search', placeholder: 'Dateien durchsuchen', 'aria-label': 'Dateien durchsuchen', value: fileFilter });
   body.append(h('div', { class: 'search' }, iconEl('search', 16), search));

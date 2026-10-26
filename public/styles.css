@@ -615,6 +615,7 @@ button.status-pill:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px
   background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: pop var(--t) var(--ease);
 }
 .dialog.small { width: min(420px, 100%); }
+.dialog.wide { width: min(920px, 100%); max-height: min(92vh, 900px); }
 .dialog-head { display: flex; align-items: center; gap: 8px; padding: 18px 16px 6px 22px; }
 .dialog-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
 .dialog-body { padding: 6px 22px 18px; overflow-y: auto; }
@@ -919,3 +920,40 @@ button.status-pill:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px
 .stil-details ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2); }
 .stil-details li { margin: 3px 0; }
 .stil-details .satz { color: var(--text); }
+
+/* ---------- Vorschau ---------- */
+
+.vs-meta { font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
+.vs-body { min-height: 120px; }
+.vs-foot { display: flex; flex-wrap: wrap; gap: 8px; }
+.vs-hinweis { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--text-3); margin: 0 0 12px; }
+.vs-leer { color: var(--text-3); font-size: 13px; }
+.vs-pdf { width: 100%; height: min(66vh, 720px); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.vs-img { max-width: 100%; max-height: 66vh; display: block; margin: 0 auto; border-radius: var(--radius-sm); }
+.vs-pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.5 var(--mono, ui-monospace, monospace); margin: 0; }
+.vs-doc { max-width: 680px; margin: 0 auto; padding: 8px 4px; font-size: 14.5px; line-height: 1.6; color: var(--text); }
+.vs-doc h2, .vs-doc h3, .vs-doc h4, .vs-doc h5 { margin: 1.2em 0 0.4em; line-height: 1.3; }
+.vs-doc h2 { font-size: 20px; }
+.vs-doc h3 { font-size: 17px; }
+.vs-doc p { color: var(--text); margin: 0 0 0.8em; }
+.vs-bild { font-style: italic; color: var(--text-3) !important; }
+.vs-table-wrap { overflow-x: auto; margin: 6px 0 14px; }
+.vs-table { border-collapse: collapse; font-size: 13.5px; min-width: 50%; }
+.vs-table th, .vs-table td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; vertical-align: top; }
+.vs-table th { background: var(--surface-2); font-weight: 600; }
+.vs-slides { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.vs-slide { border: 1px solid var(--border); border-top: 4px solid var(--accent); border-radius: var(--radius-sm); padding: 12px 14px 10px; background: var(--bg); min-height: 150px; }
+.vs-slide h4 { margin: 2px 0 8px; font-size: 15px; }
+.vs-slide ul { margin: 0; padding-left: 18px; font-size: 13.5px; }
+.vs-slide li { margin-bottom: 3px; }
+.vs-slide p { font-size: 13.5px; margin: 0 0 6px; color: var(--text); }
+.vs-nr { font-size: 11.5px; color: var(--text-3); }
+.vs-notiz { color: var(--text-2) !important; font-size: 12.5px !important; border-top: 1px dashed var(--border); padding-top: 6px; margin-top: 8px !important; }
+.vs-sheets h4 { margin: 12px 0 4px; font-size: 14px; }
+.doc-open { margin-left: 6px; }
+.ordnung-hint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 2px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--text); font-size: 13px; }
+.ordnung-hint span { flex: 1; min-width: 160px; }
+.doc-name { font-size: 13px; font-weight: 550; color: var(--text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sorted-list .btn-sm { padding: 3px 10px; }
+.sorted-list .file-ref.btn-primary { background: var(--accent); color: var(--accent-text); font-family: inherit; font-size: 12.5px; }
+.sorted-list .file-ref.btn-primary:hover { background: var(--accent-hover); }

@@ -8,10 +8,15 @@ const { fsp, path, ensureDir, exists, toPosix, resolveInside, safeFileName, form
 const ws = require('./workspace');
 const word = require('./word');
 const { facharbeitToDocx, markdownToDocx } = require('./docx');
+const { markdownToPdf } = require('./pdf');
+const { markdownToPptx } = require('./pptx');
+const { markdownToXlsx } = require('./xlsx');
 
 const ORDNER = 'abgabe';
 // Word-Dateien, die der Assistent über die App bearbeiten darf (keine Originale).
 const BEARBEITBAR = /^(abgabe|0[1-8]_[^/]+)\/.+\.docx$/i;
+// Dateien, die die App aus Markdown erzeugt (Block ```erstellen).
+const ERSTELLBAR = /^(abgabe|0[1-8]_[^/]+)\/.+\.(docx|pdf|pptx|xlsx)$/i;
 const MAX_BILD = 20 * 1024 * 1024;
 
 // „Max Mustermann“ → „Mustermann_Max“ (Dateiname wie von der Schule empfohlen)
@@ -131,40 +136,70 @@ async function schreiben(abs, buf) {
   }
 }
 
+async function bildLaden(workspace, rel) {
+  const clean = String(rel).replace(/\\/g, '/').replace(/^\.\//, '');
+  const b = resolveInside(workspace, clean);
+  if (!b || clean.startsWith('.facharbeit/')) throw new Error('Ungültiger Bildpfad');
+  const st = await fsp.stat(b).catch(() => null);
+  if (!st) throw new Error(`Bild „${clean}“ nicht gefunden`);
+  if (st.size > MAX_BILD) throw new Error('Bild ist zu groß (maximal 20 MB)');
+  return fsp.readFile(b);
+}
+
 // Führt die Word-Änderungen aus einer Antwort aus. Ergebnis je Datei:
 // { datei, aktion: 'bearbeitet'|'neu', ok, gesamt, fehler: [{was, fehler}], version?, gesperrt?, hinweis? }
 async function anwenden(project, dateien) {
   const workspace = project.workspace;
   const results = [];
-  for (const e of dateien) {
+  for (const eintrag of dateien) {
+    let e = eintrag;
     const r = { datei: e.datei, aktion: e.neu ? 'neu' : 'bearbeitet', ok: 0, gesamt: e.neu ? 1 : e.ops.length, fehler: [] };
     try {
-      if (e.datei.split('/').includes('..') || !BEARBEITBAR.test(e.datei)) {
-        throw new Error('Bearbeitet werden nur Word-Dateien in abgabe/ oder 01_ bis 08_. Originale (00_vorgaben/, uebernommen/, anhaenge/) bleiben unverändert – bei Bedarf erst einsortieren.');
+      if (e.datei.split('/').includes('..') || !(e.neu ? ERSTELLBAR : BEARBEITBAR).test(e.datei)) {
+        throw new Error(e.neu
+          ? 'Neue Dateien (Word, PDF, PowerPoint, Excel) entstehen nur in abgabe/ oder 01_ bis 08_.'
+          : 'Bearbeitet werden nur Word-Dateien in abgabe/ oder 01_ bis 08_. Originale (00_vorgaben/, uebernommen/, anhaenge/) bleiben unverändert – bei Bedarf erst einsortieren.');
       }
       const abs = resolveInside(workspace, e.datei);
       if (!abs) throw new Error('Ungültiger Pfad');
       if (e.neu) {
-        if (await exists(abs)) throw new Error('Die Datei gibt es schon – Änderungen bitte mit Absatznummern angeben');
+        const ext = path.extname(abs).toLowerCase();
+        const vorhanden = await exists(abs);
+        if (vorhanden && (!e.ersetzen || ext === '.docx')) {
+          throw new Error(ext === '.docx'
+            ? 'Die Datei gibt es schon – Änderungen bitte mit Absatznummern angeben'
+            : 'Die Datei gibt es schon – nimm einen neuen Namen oder setze "ersetzen": true');
+        }
+        let quelltext = e.text;
+        if (e.aus) {
+          const q = resolveInside(workspace, e.aus);
+          if (!q || e.aus.startsWith('.facharbeit/')) throw new Error('Ungültige Quelldatei');
+          const qb = await fsp.readFile(q).catch(() => null);
+          if (!qb) throw new Error(`Quelldatei „${e.aus}“ nicht gefunden`);
+          const qext = path.extname(q).toLowerCase();
+          if (qext === '.docx') quelltext = word.alsMarkdown(qb);
+          else if (['.md', '.txt'].includes(qext)) quelltext = qb.toString('utf8');
+          else throw new Error('Als Quelle sind nur Word- (.docx) und Textdateien (.md, .txt) möglich');
+        }
+        e = { ...e, text: quelltext };
         if (!e.text.trim()) throw new Error('Kein Text für die neue Datei');
         await ensureDir(path.dirname(abs));
-        await schreiben(abs, markdownToDocx(e.text, { title: path.basename(abs, '.docx'), author: project.data.angaben.name || '' }));
+        const alt = vorhanden ? await fsp.readFile(abs).catch(() => null) : null;
+        const titel = path.basename(abs, ext);
+        const autor = project.data.angaben.name || '';
+        let buf;
+        if (ext === '.docx') buf = markdownToDocx(e.text, { title: titel, author: autor });
+        else if (ext === '.pdf') buf = markdownToPdf(e.text, { title: titel, author: autor });
+        else if (ext === '.xlsx') buf = markdownToXlsx(e.text, { title: titel, author: autor });
+        else buf = await markdownToPptx(e.text, { title: titel, author: autor, bildLaden: (rel) => bildLaden(workspace, rel) });
+        await schreiben(abs, buf);
+        if (alt) { r.aktion = 'bearbeitet'; r.version = await ws.saveVersion(workspace, e.datei, alt); }
         r.ok = 1;
       } else {
         const alt = await fsp.readFile(abs).catch(() => null);
         if (!alt) throw new Error('Datei nicht gefunden');
         if (!e.ops.length) throw new Error('Keine Änderungen angegeben');
-        const res = await word.apply(alt, e.ops, {
-          bildLaden: async (rel) => {
-            const clean = String(rel).replace(/\\/g, '/').replace(/^\.\//, '');
-            const b = resolveInside(workspace, clean);
-            if (!b || clean.startsWith('.facharbeit/')) throw new Error('Ungültiger Bildpfad');
-            const st = await fsp.stat(b).catch(() => null);
-            if (!st) throw new Error(`Bild „${clean}“ nicht gefunden`);
-            if (st.size > MAX_BILD) throw new Error('Bild ist zu groß (maximal 20 MB)');
-            return fsp.readFile(b);
-          },
-        });
+        const res = await word.apply(alt, e.ops, { bildLaden: (rel) => bildLaden(workspace, rel) });
         r.ok = res.ok;
         r.fehler = res.results.filter((x) => x.fehler).map((x) => ({ was: x.was, fehler: x.fehler }));
         if (res.buffer) {

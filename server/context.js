@@ -129,7 +129,7 @@ async function recentFiles(project, files, max = 25) {
 }
 
 // abgabe: [{ path, mtime, extrakt? }] – Abgabe-Dateien mit Fassung mit Absatznummern
-async function buildContext(project, files, now = new Date(), { abgabe = [] } = {}) {
+async function buildContext(project, files, now = new Date(), { abgabe = [], ordnung = '' } = {}) {
   const a = project.data.angaben;
   const L = [];
   L.push(`Heute: ${formatDateDE(now, { weekday: true })}`);
@@ -176,6 +176,7 @@ async function buildContext(project, files, now = new Date(), { abgabe = [] } = 
     for (const f of abgabe) L.push(`- ${f.path} (Stand ${formatDateDE(new Date(f.mtime), { withTime: true })})${f.extrakt ? ` → Absätze: ${f.extrakt}` : ''}`);
     L.push('');
   }
+  if (ordnung) { L.push(ordnung); L.push(''); }
   const recent = await recentFiles(project, files);
   if (recent.length) {
     L.push('Eigene Dateien im Arbeitsraum (zuletzt geändert zuerst):');
@@ -224,8 +225,10 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
   }
   if (schreibaufgabe) {
-    parts.push('<schreibregeln>Wenn du dafür Text schreibst oder überarbeitest: zuerst den Skill `wissenschaftlich-schreiben` laden, danach mit `sprachpruefung` prüfen. Kurz und einfach. Antwort im Chat: zwei bis fünf Sätze.</schreibregeln>');
+    parts.push('<schreibregeln>Ablauf bei jedem Text für eine Datei (auch Folien, PDF, Notizen): 1. Skill `wissenschaftlich-schreiben` laden. 2. Text schreiben, kurz und einfach. 3. Skill `sprachpruefung` laden und den Text damit prüfen. 4. Erst dann eintragen (Block).</schreibregeln>');
   }
+  // Gilt bei jeder Nachricht: hält die Antworten kurz, auch in langen Chats.
+  parts.push('<antwortstil>Chat-Antwort: höchstens drei kurze Sätze und 40 Wörter, jeder Satz höchstens 15 Wörter. Einfache Wörter, so wie du es einer Mitschülerin erklären würdest. Keine Überschriften, Listen oder Fettdruck, keine Einleitung, kein Beispiel und keine Zusammenfassung, wenn nicht danach gefragt wurde. Länger nur, wenn die Person ausdrücklich Ausführliches verlangt. Dateiinhalte nicht im Chat wiederholen.</antwortstil>');
   parts.push(`Nachricht der Schülerin bzw. des Schülers:\n${text}`);
   return parts.join('\n\n');
 }

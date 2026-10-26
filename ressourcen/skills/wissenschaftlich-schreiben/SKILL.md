@@ -19,6 +19,7 @@ Das wichtigste Ziel: Der Text ist kurz und leicht zu lesen. Die Person muss ihn 
 
 - Kurze Sätze (meist 8 bis 20 Wörter, nie über 25), gängige Wörter, ein Gedanke pro Satz.
 - So lang wie nötig, nicht länger: Lerntagebuch-Eintrag zwei bis fünf Sätze; Absatz der Facharbeit drei bis sechs Sätze; E-Mail an die Lehrkraft höchstens fünf Sätze plus Gruß. Mindestlängen der Schule (z. B. Exposé ab 400 Wörtern) gelten trotzdem, aber nicht mehr als verlangt.
+- Folien: höchstens fünf Stichpunkte, jeder höchstens zehn Wörter. Was die Person dazu sagt, steht in den Sprechernotizen, in ganzen, einfachen Sätzen.
 - Erst den Kern schreiben, dann kürzen. Was keinen Fakt, keine Erfahrung und keine Bewertung enthält, fällt weg.
 
 ## 1. Vor dem Schreiben

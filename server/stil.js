@@ -137,10 +137,15 @@ function neueZeilen(vorher, nachher) {
 }
 
 // Nachricht an den Assistenten mit den gefundenen Stellen (für den Überarbeitungsdurchlauf).
-function korrekturPrompt(funde, extrakte = {}) {
-  const L = ['Automatische Sprachprüfung (Skills `sprachpruefung` und `wissenschaftlich-schreiben`) deines gerade eingetragenen Textes. Überarbeite nur diese Stellen, direkt in der Datei: kurz und einfach, ohne neue Inhalte. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.'];
+function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = [] } = {}) {
+  const L = [];
+  if (fehlendeSkills.length) {
+    L.push(`Du hast für den eben eingetragenen Text die Pflicht-Skills nicht geladen (${fehlendeSkills.map((x) => `\`${x}\``).join(', ')}). Lade sie jetzt mit dem Skill-Werkzeug, prüfe den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} danach mit der Checkliste und überarbeite ihn direkt in der Datei. Kurz und einfach, ohne neue Inhalte. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
+  }
+  if (funde.length) L.push(`${fehlendeSkills.length ? '' : 'Automatische Sprachprüfung (Skills `sprachpruefung` und `wissenschaftlich-schreiben`) deines gerade eingetragenen Textes. Überarbeite nur diese Stellen, direkt in der Datei: kurz und einfach, ohne neue Inhalte. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.'}${fehlendeSkills.length ? 'Die automatische Prüfung hat außerdem diese Stellen gefunden:' : ''}`);
   for (const f of funde) {
-    const hinweis = extrakte[f.datei] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[f.datei]})` : ' (Edit)';
+    const hinweis = extrakte[f.datei] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[f.datei]})`
+      : /\.(pdf|pptx|xlsx)$/i.test(f.datei) ? ' (Block `erstellen` mit "ersetzen": true und dem vollständigen überarbeiteten Text)' : ' (Edit)';
     L.push('', `${f.datei}${hinweis}:`);
     for (const s of f.stellen.slice(0, 12)) L.push(`- „${s.satz}“ – ${s.grund}`);
   }

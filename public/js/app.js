@@ -12,6 +12,7 @@ import { openSettings } from './settings.js';
 import { openImportDialog, entriesFromDrop, dropIn, itemsFromInput } from './importer.js';
 import { modelMenuSection, openModelDialog, providerModels, selectedModel, selectedModelLabel } from './modelle.js';
 import { modelLabel } from './modelname.js';
+import { showPreview } from './vorschau.js';
 
 export const S = {
   state: null,
@@ -118,6 +119,12 @@ export async function openFile(path, { reveal = false } = {}) {
   }
 }
 
+// Ansehen in der App (PDF, Word, PowerPoint, Excel, Bilder, Text); andere Dateien öffnet das Programm.
+const ANSEHBAR = /\.(pdf|docx|docm|pptx|xlsx|xlsm|png|jpe?g|gif|webp|md|markdown|txt|csv|tsv)$/i;
+export function ansehen(path) {
+  if (ANSEHBAR.test(path)) showPreview(path); else openFile(path);
+}
+
 export function fileChip(f, { badge, actions = true, onRemove } = {}) {
   const missing = f.aktion === 'geloescht';
   const unreadable = f.lesbar === 'nein';
@@ -126,10 +133,11 @@ export function fileChip(f, { badge, actions = true, onRemove } = {}) {
     h('span', { html: fileIcon(f.kind, 16) }).firstChild,
     h('span', { class: 'name' }, f.name || f.path.split('/').pop()),
     (unreadable || f.kindLabel) ? h('span', { class: 'kind' }, unreadable ? 'nicht lesbar' : f.kindLabel) : null);
-  if (!missing) main.addEventListener('click', () => openFile(f.path));
+  if (!missing) main.addEventListener('click', () => (actions ? ansehen(f.path) : openFile(f.path)));
   chip.append(main);
   if (badge) chip.append(h('span', { class: `badge ${f.aktion || ''}` }, badge));
-  if (actions && !missing) chip.append(btn('', { iconName: 'folder', cls: 'chip-act', title: 'Im Arbeitsraum zeigen', size: 15, onClick: () => openFile(f.path, { reveal: true }) }));
+  if (actions && !missing) chip.append(btn('', { iconName: 'external', cls: 'chip-act', title: 'Im Programm öffnen', size: 15, onClick: () => openFile(f.path) }),
+    btn('', { iconName: 'folder', cls: 'chip-act', title: 'Im Arbeitsraum zeigen', size: 15, onClick: () => openFile(f.path, { reveal: true }) }));
   if (f.version) chip.append(btn('', { iconName: 'history', cls: 'chip-act', title: 'Vorherige Fassung öffnen', size: 15, onClick: () => openFile(f.version) }));
   if (onRemove) chip.append(btn('', { iconName: 'x', cls: 'chip-act', title: `${f.name} entfernen`, size: 15, onClick: onRemove }));
   return chip;
@@ -319,7 +327,13 @@ export function renderTopbar() {
   tb.append(h('div', { class: 'actions' },
     mk('stand', 'Arbeitsstand', 'checks', { text: `${done}/${total}`, aria: `${done} von ${total} erledigt` }),
     mk('dateien', 'Dateien', 'folder'),
-    mk('projekt', 'Projekt', 'book')));
+    mk('projekt', 'Projekt', 'book'),
+    btn('', { iconName: 'folderOpen', cls: 'btn btn-icon', title: 'Arbeitsordner öffnen', onClick: openWorkspaceFolder })));
+}
+
+// Öffnet den Arbeitsordner im Dateimanager.
+export async function openWorkspaceFolder() {
+  try { await api.post('/api/workspace/open', {}); } catch (err) { toast(err.message, { error: true }); }
 }
 
 // ---------- Chats ----------
@@ -615,9 +629,11 @@ function einsortiertEl(list) {
 function wordEl(m, isLast) {
   const list = m.word || [];
   const ok = list.filter((r) => r.ok);
-  const sec = h('section', { class: 'ic-sec sorted' }, h('h4', {}, ok.length ? 'In Word eingetragen' : 'Nicht in Word eingetragen'));
+  const sec = h('section', { class: 'ic-sec sorted' }, h('h4', {}, ok.length ? (ok.every((r) => r.aktion === 'neu') ? (ok.length === 1 ? 'Datei erstellt' : 'Dateien erstellt') : 'In Word eingetragen') : 'Nicht eingetragen'));
   sec.append(h('ul', { class: 'sorted-list' }, list.map((r) => h('li', {},
-    h('button', { type: 'button', class: 'file-ref', 'data-path': r.datei }, r.datei),
+    h('span', { class: 'doc-name', title: r.datei }, r.datei),
+    r.ok ? h('button', { type: 'button', class: 'file-ref btn btn-sm btn-primary', 'data-path': r.datei, title: 'Hier in der App ansehen' }, 'Ansehen') : null,
+    r.ok ? h('button', { type: 'button', class: 'file-open btn btn-sm btn-soft', 'data-path': r.datei, title: 'Im passenden Programm öffnen (Word, PowerPoint, PDF-Programm)' }, 'Öffnen') : null,
     r.aktion === 'neu' ? h('span', { class: 'tag' }, r.ok ? 'neu angelegt' : 'nicht angelegt')
       : h('span', { class: 'tag' }, `${r.ok} von ${r.gesamt} ${r.gesamt === 1 ? 'Änderung' : 'Änderungen'}`),
     r.version ? h('span', { class: 'tag' }, 'vorherige Fassung gesichert') : null,
@@ -648,10 +664,41 @@ function stilEl(st) {
   let text = 'Sprachprüfung: unauffällig';
   if (st.gefunden && !offen.length) text = `Sprachprüfung: ${st.gefunden} ${st.gefunden === 1 ? 'Stelle' : 'Stellen'} gefunden und überarbeitet`;
   else if (offen.length) text = `Sprachprüfung: ${behoben ? `${behoben} überarbeitet, ` : ''}${offen.length} ${offen.length === 1 ? 'Stelle' : 'Stellen'} noch prüfen`;
-  const el = h('div', { class: `stil-note${offen.length ? ' warn' : ''}` }, iconEl(offen.length ? 'alert' : 'check', 14), h('span', {}, text));
+  const skills = st.skills || [];
+  const skillText = skills.length >= 2 ? `Schreib-Skills ${st.nachgeholt ? 'nachgeholt' : 'gelesen'}` : st.skills ? 'Schreib-Skills nicht vollständig geladen' : '';
+  const el = h('div', { class: `stil-note${offen.length ? ' warn' : ''}` }, iconEl(offen.length ? 'alert' : 'check', 14), h('span', {}, [text, skillText].filter(Boolean).join(' · ')));
   if (!offen.length) return el;
   return h('details', { class: 'stil-details' }, h('summary', {}, el),
     h('ul', {}, offen.map((o) => h('li', {}, h('span', { class: 'satz' }, `„${o.satz}“`), ` – ${o.grund} `, h('button', { type: 'button', class: 'file-ref', 'data-path': o.datei }, shortName(o.datei))))));
+}
+
+// Aufgeräumte Dateien (verschoben oder archiviert) mit „Rückgängig“.
+function aufgeraeumtEl(m, isLast) {
+  const list = m.aufgeraeumt || [];
+  const ok = list.filter((r) => r.ok);
+  const zurueck = list.filter((r) => r.zurueck);
+  const fehler = list.filter((r) => r.fehler);
+  const sec = h('section', { class: 'ic-sec sorted' }, h('h4', {}, ok.length ? 'Aufgeräumt' : zurueck.length ? 'Aufräumen rückgängig gemacht' : 'Nicht aufgeräumt'));
+  sec.append(h('ul', { class: 'sorted-list' }, [...ok, ...zurueck].map((r) => h('li', {},
+    h('span', { class: 'from', title: r.von }, r.von),
+    r.zurueck ? h('span', { class: 'tag' }, 'wieder am alten Platz') : h('span', { class: 'arrow', 'aria-hidden': 'true' }, '→'),
+    r.zurueck ? null : (r.aktion === 'archivieren' ? h('span', { class: 'tag' }, 'weggelegt (zurückholbar)') : h('button', { type: 'button', class: 'file-ref', 'data-path': r.nach }, r.nach))))));
+  if (fehler.length) {
+    sec.append(h('details', { class: 'ic-details' }, h('summary', {}, iconEl('chevronRight', 14), `Nicht aufgeräumt (${fehler.length})`),
+      h('ul', {}, fehler.map((f) => h('li', {}, h('b', {}, shortName(f.von)), ` – ${f.fehler}`)))));
+  }
+  if (ok.length) {
+    sec.append(h('div', {}, btn('Rückgängig', { iconName: 'history', cls: 'btn btn-sm btn-soft', size: 15, onClick: async () => {
+      try {
+        const r = await api.post(`/api/chats/${S.chat.id}/messages/${m.id}/aufraeumen/rueckgaengig`, {});
+        Object.assign(m, r.message);
+        const el = document.querySelector(`.msg[data-id="${m.id}"]`);
+        if (el) el.replaceWith(renderAssistantMessage(m, isLast));
+        refreshPanel();
+      } catch (err) { toast(err.message, { error: true }); }
+    } })));
+  }
+  return h('div', { class: 'import-card compact' }, sec);
 }
 
 function importResultEl(r, isLast) {
@@ -739,6 +786,7 @@ function renderAssistantMessage(m, isLast) {
   else if (m.einsortiert && m.einsortiert.length) el.append(h('div', { class: 'import-card compact' }, einsortiertEl(m.einsortiert)));
   if (m.word && m.word.length) el.append(wordEl(m, isLast));
   if (m.stil && !running) el.append(stilEl(m.stil));
+  if (m.aufgeraeumt && m.aufgeraeumt.length) el.append(aufgeraeumtEl(m, isLast));
   // Einsortierte und in Word eingetragene Dateien stehen schon oben; hier nur die übrigen Änderungen.
   const sorted = new Set(((m.importErgebnis && m.importErgebnis.einsortiert) || m.einsortiert || []).map((x) => x.nach));
   for (const r of m.word || []) if (r.ok) sorted.add(r.datei);
@@ -811,7 +859,9 @@ function scheduleStreamRender() {
 
 function onThreadClick(e) {
   const ref = e.target.closest('.file-ref');
-  if (ref) { openFile(ref.dataset.path); return; }
+  if (ref) { ansehen(ref.dataset.path); return; }
+  const open = e.target.closest('.file-open');
+  if (open) { openFile(open.dataset.path); return; }
   const copy = e.target.closest('.code-copy');
   if (copy) { copyText(copy.closest('.code-block').querySelector('code').textContent); }
 }
@@ -985,7 +1035,7 @@ export async function startImportChat(inv, { sameChat = false } = {}) {
 }
 
 // Kurze Antwort direkt senden (z. B. Auswahl der aktuellen Fassung).
-async function sendText(text) {
+export async function sendText(text) {
   if (isStreaming()) return;
   const ta = S.els.composerWrap.querySelector('textarea');
   ta.value = text;

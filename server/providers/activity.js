@@ -27,6 +27,12 @@ const PATH_KEYS = ['file_path', 'path', 'absolute_path', 'AbsolutePath', 'Target
 const QUERY_KEYS = ['query', 'Query', 'search_query', 'q'];
 const PATTERN_KEYS = ['pattern', 'Pattern', 'regex', 'glob'];
 
+// Skills werden entweder über das Skill-Werkzeug oder durch Lesen der SKILL.md geladen.
+function skillAusPfad(file) {
+  const m = /(?:^|\/)skills\/([\w-]+)\/SKILL\.md$/i.exec(file || '');
+  return m ? { skill: m[1] } : {};
+}
+
 function describeTool(name, input, cwd) {
   const n = String(name || '');
   const lower = n.toLowerCase();
@@ -35,7 +41,7 @@ function describeTool(name, input, cwd) {
   const pattern = pick(input, PATTERN_KEYS);
   const url = pick(input, ['url', 'Url', 'URL']);
   switch (n) {
-    case 'Read': return { kind: 'lesen', label: `Liest ${file || 'eine Datei'}`, path: file };
+    case 'Read': return { kind: 'lesen', label: `Liest ${file || 'eine Datei'}`, path: file, ...skillAusPfad(file) };
     case 'Write': return { kind: 'schreiben', label: `Schreibt ${file || 'eine Datei'}`, path: file };
     case 'Edit': case 'MultiEdit': case 'NotebookEdit': return { kind: 'schreiben', label: `Bearbeitet ${file || 'eine Datei'}`, path: file };
     case 'Glob': return { kind: 'suchen', label: `Sucht Dateien${pattern ? ` (${pattern})` : ''}` };
@@ -43,7 +49,7 @@ function describeTool(name, input, cwd) {
     case 'WebSearch': return { kind: 'web', label: `Sucht im Web${query ? `: „${String(query).slice(0, 80)}“` : ''}` };
     case 'WebFetch': return { kind: 'web', label: `Öffnet ${host(url) || 'eine Webseite'}` };
     case 'TodoWrite': return { kind: 'planen', label: 'Plant die Arbeitsschritte' };
-    case 'Skill': return { kind: 'skill', label: `Nutzt den Skill ${pick(input, ['skill', 'name', 'command']) || ''}`.trim() };
+    case 'Skill': { const sk = String(pick(input, ['skill', 'name', 'command']) || '').replace(/^.*:/, ''); return { kind: 'skill', label: `Nutzt den Skill ${sk}`.trim(), skill: sk }; }
     case 'Task': case 'Agent': return { kind: 'planen', label: 'Bearbeitet eine Teilaufgabe' };
     case 'Bash': return { kind: 'befehl', label: 'Führt einen Befehl aus' };
     default: break;
@@ -53,7 +59,7 @@ function describeTool(name, input, cwd) {
   }
   if (/write|create|save/.test(lower)) return { kind: 'schreiben', label: `Schreibt ${file || 'eine Datei'}`, path: file };
   if (/edit|replace|patch|modify/.test(lower)) return { kind: 'schreiben', label: `Bearbeitet ${file || 'eine Datei'}`, path: file };
-  if (/read|view|open/.test(lower)) return { kind: 'lesen', label: `Liest ${file || 'eine Datei'}`, path: file };
+  if (/read|view|open/.test(lower)) return { kind: 'lesen', label: `Liest ${file || 'eine Datei'}`, path: file, ...skillAusPfad(file) };
   if (/grep|find|search|list|glob/.test(lower)) return { kind: 'suchen', label: pattern ? `Durchsucht Dateien nach „${String(pattern).slice(0, 60)}“` : 'Durchsucht den Arbeitsraum' };
   if (/command|shell|terminal|run|exec/.test(lower)) return { kind: 'befehl', label: 'Führt einen Befehl aus' };
   return { kind: 'werkzeug', label: `Nutzt ${n || 'ein Werkzeug'}` };

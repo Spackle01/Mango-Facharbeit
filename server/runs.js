@@ -9,10 +9,13 @@ const sortieren = require('./sortieren');
 const word = require('./word');
 const abgabe = require('./abgabe');
 const stil = require('./stil');
+const ordnung = require('./ordnung');
 const extract = require('./extract');
 const { kindOf } = require('./extract');
 const { GRUENDLICHKEIT } = require('./providers/models');
 
+// Skills, die bei jedem Text für eine Datei geladen werden müssen.
+const SCHREIB_SKILLS = ['wissenschaftlich-schreiben', 'sprachpruefung'];
 const MAX_ARG_PROMPT = 24000;
 const RETRY_DELAY_MS = Number(process.env.MANGO_RETRY_DELAY_MS || 3000);
 
@@ -55,7 +58,7 @@ function errorHint(kind, providerState, model = '') {
 }
 
 // Schreibaufgaben erkennen: dann erinnert die App ausdrücklich an die Schreib-Skills.
-const SCHREIBAUFGABE = /(schreib|formulier|eintrag|trag\b.*\bein|ergänz|überarbeit|umschreib|verbesser|korrigier|kürz|lerntagebuch|expos[eé]|kapitel|einleitung|fazit|schluss|absatz|e-?mail|mail an|text|entwurf|zusammenfass|reflexion)/i;
+const SCHREIBAUFGABE = /(schreib|formulier|eintrag|trag\b.*\bein|ergänz|überarbeit|umschreib|verbesser|korrigier|kürz|lerntagebuch|expos[eé]|kapitel|einleitung|fazit|schluss|absatz|e-?mail|mail an|text|entwurf|zusammenfass|reflexion|präsentation|praesentation|folie|powerpoint|pptx|\bpdf\b|\bword\b|\bexcel\b|dokument|erstell|handout|thesenpapier|bericht|brief|anschreiben|notiz)/i;
 
 // Texte, die der Assistent in diesem Durchlauf in Dateien geschrieben hat (nur neuer Text).
 async function geschriebeneTexte(project, { dateien, ergebnisse, changes, before, ausgenommen }) {
@@ -115,7 +118,7 @@ function merkeWord(msg, dateien, changes) {
     const known = changes.find((c) => c.path === r.datei);
     const aktion = r.aktion === 'neu' ? 'neu' : 'geaendert';
     if (known) Object.assign(known, { aktion, version: r.version || known.version });
-    else changes.push({ path: r.datei, aktion, kind: 'word', version: r.version || undefined });
+    else changes.push({ path: r.datei, aktion, kind: kindOf(r.datei), version: r.version || undefined });
   }
   msg.wordOffen = offen.filter(Boolean);
   if (!msg.wordOffen.length) delete msg.wordOffen;
@@ -159,6 +162,19 @@ class RunManager {
     const offen = msg.wordOffen;
     msg.word = [...rest, ...neu];
     merkeWord(msg, offen, msg.files || (msg.files = []));
+    await project.saveChat(chat);
+    return msg;
+  }
+
+  // Aufräumen rückgängig machen (verschobene und archivierte Dateien zurückholen).
+  async aufraeumenRueckgaengig(project, chatId, messageId) {
+    if (this.runs.has(chatId)) throw Object.assign(new Error('In diesem Chat läuft gerade eine Antwort.'), { status: 409 });
+    const chat = project.getChat(chatId);
+    const msg = chat.messages.find((m) => m.id === messageId);
+    if (!msg || !msg.aufgeraeumt || !msg.aufgeraeumt.some((r) => r.ok)) throw Object.assign(new Error('Es gibt nichts rückgängig zu machen.'), { status: 400 });
+    const r = await ordnung.rueckgaengig(project, msg.aufgeraeumt);
+    msg.aufgeraeumt = msg.aufgeraeumt.map((x) => (x.ok ? { ...x, ok: false, zurueck: true } : x));
+    msg.aufgeraeumtZurueck = { zurueck: r.zurueck, fehler: r.fehler };
     await project.saveChat(chat);
     return msg;
   }
@@ -252,7 +268,10 @@ class RunManager {
 
       // Projektkontext: nur senden, wenn er sich seit der letzten Nachricht geändert hat.
       const files = await ws.listFiles(project.workspace);
-      const context = await ctx.buildContext(project, files, new Date(), { abgabe: await abgabe.listeFuerKontext(project, files) });
+      const context = await ctx.buildContext(project, files, new Date(), {
+        abgabe: await abgabe.listeFuerKontext(project, files),
+        ordnung: ordnung.kontextText(await ordnung.pruefen(project, files)),
+      });
       const sess = chat.sessions[providerId] || {};
       let sessionId = sess.id || null;
       let resume = !!sessionId;
@@ -276,6 +295,7 @@ class RunManager {
         saveTimer = setTimeout(() => { saveTimer = null; project.saveChat(chat).catch(() => {}); }, 1500);
       };
       let still = false; // Überarbeitungsdurchlauf: Text nicht anzeigen, nur Arbeitsschritte
+      const skillsGeladen = new Set(); // Skills, die der Assistent in diesem Durchlauf geladen hat
       const onEvent = (ev) => {
         if (ev.type === 'init') {
           if (ev.model) msg.model = ev.model;
@@ -285,6 +305,7 @@ class RunManager {
           broadcast({ type: 'text', delta: ev.delta });
           scheduleSave();
         } else if (ev.type === 'activity') {
+          if (ev.item && ev.item.skill) skillsGeladen.add(ev.item.skill);
           if (msg.activity.length < 200) msg.activity.push(ev.item);
           broadcast({ type: 'activity', item: ev.item });
           scheduleSave();
@@ -384,13 +405,15 @@ class RunManager {
         if (texte.length) {
           const funde = texte.map((t) => ({ datei: t.datei, stellen: stil.pruefen(t.text) })).filter((f) => f.stellen.length);
           const gefunden = funde.reduce((n, f) => n + f.stellen.length, 0);
-          msg.stil = { gefunden, offen: [] };
-          if (gefunden) {
-            const info = { kind: 'info', label: `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Überarbeiten` };
+          // Pflicht-Skills: Wurden sie nicht geladen, holt der Assistent das in einem stillen Durchlauf nach.
+          const fehlend = SCHREIB_SKILLS.filter((x) => !skillsGeladen.has(x));
+          msg.stil = { gefunden, offen: [], skills: SCHREIB_SKILLS.filter((x) => skillsGeladen.has(x)), nachgeholt: false };
+          if (gefunden || fehlend.length) {
+            const info = { kind: 'info', label: gefunden ? `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Überarbeiten` : 'Schreib-Skills nachholen und Text prüfen' };
             msg.activity.push(info);
             broadcast({ type: 'activity', item: info });
             const extrakte = {};
-            for (const f of funde) {
+            for (const f of texte) {
               if (!/\.docx$/i.test(f.datei)) continue;
               const e = await ws.ensureExtract(project.workspace, f.datei).catch(() => null);
               if (e && e.extrakt) extrakte[f.datei] = e.extrakt;
@@ -399,11 +422,12 @@ class RunManager {
             sessionId = res.sessionId || sessionId;
             resume = true;
             still = true;
-            const res2 = await launch(stil.korrekturPrompt(funde, extrakte)).catch((err) => ({ error: err.message }));
+            const res2 = await launch(stil.korrekturPrompt(funde, extrakte, { fehlendeSkills: fehlend, dateien: texte.map((t) => t.datei) })).catch((err) => ({ error: err.message }));
             still = false;
             if (res2.error || res2.canceled) {
               msg.activity.push({ kind: 'info', label: 'Überarbeitung nach der Sprachprüfung nicht abgeschlossen' });
             } else {
+              if (fehlend.length) { msg.stil.nachgeholt = true; msg.stil.skills = SCHREIB_SKILLS.filter((x) => skillsGeladen.has(x)); }
               if (res2.sessionId) res.sessionId = res2.sessionId;
               let ch2 = [];
               try { ch2 = await ws.restoreChanges(project.workspace, await ws.diffAndBackup(project.workspace, before2)); } catch { ch2 = []; }
@@ -419,7 +443,28 @@ class RunManager {
         }
       }
 
-      const parsed = ctx.parseUpdate(wp.text);
+      // Aufräumen: Der Assistent nennt Verschieben und Archivieren, die App führt es sicher aus (nichts wird gelöscht).
+      const ap = ordnung.parsePlan(wp.text);
+      if (ap.plan.length && !res.canceled) {
+        msg.aufgeraeumt = await ordnung.anwenden(project, ap.plan);
+        for (const r of msg.aufgeraeumt) {
+          if (!r.ok) continue;
+          const i = changes.findIndex((c) => c.path === r.von);
+          if (i < 0) continue;
+          if (r.aktion === 'verschieben') changes[i] = { ...changes[i], path: r.nach };
+          else changes.splice(i, 1);
+        }
+      }
+      if (ap.invalid) msg.activity.push({ kind: 'info', label: 'Aufräum-Plan war nicht lesbar und wurde ignoriert' });
+      if (!res.canceled) {
+        const auto = await ordnung.autoAufraeumen(project).catch(() => null);
+        if (auto && (auto.reste || auto.leereOrdner)) {
+          msg.aufgeraeumtAuto = auto;
+          msg.activity.push({ kind: 'info', label: `Aufgeräumt: ${[auto.reste && `${auto.reste} ${auto.reste === 1 ? 'Rest' : 'Reste'}`, auto.leereOrdner && `${auto.leereOrdner} leere${auto.leereOrdner === 1 ? 'r Ordner' : ' Ordner'}`].filter(Boolean).join(', ')}` });
+        }
+      }
+
+      const parsed = ctx.parseUpdate(ap.text);
       const filesAfter = await ws.listFiles(project.workspace);
       let applied = null;
       if (!res.canceled && parsed.update) applied = await ctx.applyUpdate(project, parsed.update, filesAfter, { nurLeereFelder: !!inv });
