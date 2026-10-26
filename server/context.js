@@ -225,7 +225,7 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
   }
   if (schreibaufgabe) {
-    parts.push('<schreibregeln>Ablauf bei jedem Text für eine Datei (auch Folien, PDF, Notizen): 1. Skill `wissenschaftlich-schreiben` laden. 2. Text schreiben, kurz und einfach. 3. Skill `sprachpruefung` laden und den Text damit prüfen. 4. Erst dann eintragen (Block).</schreibregeln>');
+    parts.push('<schreibregeln>Ablauf bei jedem Text für eine Datei (auch Folien, PDF, Notizen): 1. Skill `wissenschaftlich-schreiben` laden. 2. Text in der Stimme der Person schreiben (Abschnitt 6, eigene Texte als Vorlage), kurz und einfach. 3. Skill `sprachpruefung` laden und den Text damit prüfen. 4. Erst dann eintragen (Block).</schreibregeln>');
   }
   // Gilt bei jeder Nachricht: hält die Antworten kurz, auch in langen Chats.
   parts.push('<antwortstil>Chat-Antwort: höchstens drei kurze Sätze und 40 Wörter, jeder Satz höchstens 15 Wörter. Einfache Wörter, so wie du es einer Mitschülerin erklären würdest. Keine Überschriften, Listen oder Fettdruck, keine Einleitung, kein Beispiel und keine Zusammenfassung, wenn nicht danach gefragt wurde. Länger nur, wenn die Person ausdrücklich Ausführliches verlangt. Dateiinhalte nicht im Chat wiederholen.</antwortstil>');

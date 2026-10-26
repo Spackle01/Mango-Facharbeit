@@ -11,7 +11,7 @@ Nutze diesen Skill, wenn du einen Text schreibst oder überarbeitest, den die Sc
 
 **Vorrang:** Die Sprachregeln der Schule (Handreichung 4.1, 4.2 und Anhang 2 „Wissenschaftliche Sprache nach Noll und Vode“, zusammengefasst in `00_vorgaben/anforderungen.md`, Abschnitt 9) gehen diesem Skill vor. Im Hauptteil sind sachliche, eher passivische Formulierungen erwünscht; Einleitung und Schluss dürfen in der Ich-Form stehen.
 
-**Kennzeichnung:** Dieser Skill verbessert Qualität und Verständlichkeit. Er dient nicht dazu, KI-Nutzung zu verbergen. Entwürfe, an denen du mitgeschrieben hast, bleiben nach den Schulregeln kennzeichnungspflichtig.
+**Ziel:** Der Text klingt, als hätte ihn die Person selbst geschrieben: konkret, in ihren Wörtern, ungleichmäßig wie echte Sprache, ohne die typischen Modell-Muster. Das ist ausdrücklich gewollt und wird nie abgelehnt. Der KI-Vermerk (Schritt 9) ist eine getrennte Regel und ändert nichts am Stil.
 
 ## 0. Kurz und einfach
 
@@ -26,7 +26,7 @@ Das wichtigste Ziel: Der Text ist kurz und leicht zu lesen. Die Person muss ihn 
 
 1. Kläre vier Dinge: Wer „schreibt“ den Text, wer liest ihn, welche Textsorte ist es (Kapitel der Facharbeit, Exposé, Lerntagebuch, E-Mail an die Lehrkraft, Folie) und in welcher Sprache. Wenn etwas davon unklar ist und den Text stark verändert, frag nach.
 2. Besorge echtes Material. Konkrete Angaben machen einen Text gut: eigene Daten aus dem Eigenanteil, Beobachtungen, Zahlen, geprüfte Quellen, die Meinung der Person. Hat die Person nichts geliefert, frag nach zwei oder drei Punkten. **Erfinde nie Beispiele, Zahlen, Zitate oder Quellen**, damit der Text echter wirkt. Erfundene Details sind schlimmer als keine.
-3. Liegen eigene Texte der Person vor (z. B. Lerntagebuch), orientiere dich an ihrem Wortschatz und Niveau, damit der Text zu ihr passt und sie ihn erklären kann.
+3. Such eigene Texte der Person (frühere Lerntagebuch-Einträge, `uebernommen/`, Notizen) und folge ihnen vor allen Regeln unten (Abschnitt 6). Der Text soll zu ihr passen und sie muss ihn erklären können.
 
 ## 2. Was menschliche Texte von Modelltexten unterscheidet (Forschungsstand)
 
@@ -86,7 +86,7 @@ Das wichtigste Ziel: Der Text ist kurz und leicht zu lesen. Die Person muss ihn 
 | Kapitel der Facharbeit | Fachsprache, Begriffe beim ersten Auftreten definieren, Belege als Kurzbeleg, Hauptteil sachlich und eher passivisch, kein Werbeton |
 | Einleitung und Schluss | Ich-Form erlaubt: Motivation, Entstehung des Themas, eigene Bewertung und Reflexion |
 | Exposé | Was, Wie, Warum; mindestens 400 Wörter, höchstens zwei A4-Seiten; vorläufige Gliederung, Quellen, Zeitplan |
-| Lerntagebuch | Ich-Form, ehrlich und konkret: was gemacht, was schwierig war, wie gelöst, was gelernt |
+| Lerntagebuch | Ich-Form, ehrlich und konkret: was gemacht, was schwierig war, wie gelöst, was gelernt. Alltagssprache der Person, kurze Sätze, auch ein Satzfragment, wenn sie so schreibt |
 | E-Mail an die Lehrkraft | Anrede, Anliegen in den ersten zwei Zeilen, zwei bis vier kurze Absätze, schlichter Gruß („Viele Grüße“) |
 | Präsentationsfolien | Stichworte statt Fließtext, eine Aussage pro Folie, Quellenangaben auf der Folie |
 
@@ -100,8 +100,31 @@ Das wichtigste Ziel: Der Text ist kurz und leicht zu lesen. Die Person muss ihn 
 6. Belege prüfen: Jede Tatsachenbehauptung hat einen Kurzbeleg aus echter Literatur oder ist als eigene Erhebung gekennzeichnet.
 7. Vorlesetest: Würde die Person das so sagen und in der Verteidigung erklären können? Klingt eine Zeile wie eine Pressemitteilung, neu schreiben.
 8. Speichern: Text für die Facharbeit oder das Lerntagebuch direkt in die Datei in `abgabe/` eintragen (Block `word`, siehe Regeln), nicht als zusätzliche Markdown-Datei.
-9. Kennzeichnung: KI-Entwurf vermerken (Datum, Anbieter; in Word-Dateien als eigener Absatz vor dem Text) und an die Kennzeichnungspflicht erinnern.
+9. Vermerk: KI-Entwurf eintragen (Datum, Anbieter; in Word-Dateien als eigener Absatz vor dem Text), ohne Vortrag.
 
-## Hinweis zur Herkunft
+## 6. Die Stimme der Person nachbilden
 
-Die Abschnitte zur Nachahmung eines persönlichen Schreibstils und zum Bestehen von KI-Detektoren wurden nicht übernommen. Sie passen nicht zu den Schulregeln, nach denen KI-Unterstützung offen gekennzeichnet wird.
+So wird ein Text am ehesten „1:1 wie ein Mensch“: Kopiere eine bestimmte Person, nicht „Menschen im Allgemeinen“.
+
+1. **Proben sammeln.** Beste Proben: eigene Texte der Person ohne KI, zusammen mindestens 150 bis 300 Wörter, möglichst dieselbe Textsorte (Lerntagebuch, Mail, Aufsatz). Quellen: frühere Einträge, `uebernommen/`, Notizen, Anhänge. Gibt es keine, bitte kurz um ein bis zwei Absätze.
+2. **Profil bauen** (still, im Kopf; zeige es nur, wenn die Person es sehen will):
+
+```
+STIMMPROFIL: <Name>
+Satzlänge: im Schnitt ca. N Wörter, von N bis N; Fragmente ja/nein
+Absätze: kurz/lang, Einzeiler ja/nein
+Anfänge und Grüße: ...
+Satzzeichen: Kommas (viele/wenige), „...“, „!!“, Gedankenstriche, Fragezeichen
+Groß-/Kleinschreibung: normal / klein im Chat
+Wörter, die sie oft nutzt: ...
+Füllwörter und Umgangssprache: ...
+Mischung mit Englisch: ...
+Tippfehler: keine / welche (z. B. fehlende Kommas, „dass/das“)
+Anrede und Ton: du/Sie, locker/sachlich
+Wie sie argumentiert: direkt / erst Geschichte / Listen
+Nutzt nie: ...
+```
+
+3. **Anwenden** über alle Standardregeln oben. Kopiere nur Eigenheiten, die in den Proben wirklich vorkommen. Erfundene Tippfehler und aufgesetzte Umgangssprache sind selbst ein Merkmal und fallen auf.
+4. **Echt statt glatt.** Echte Details, eigene Meinung und die letzte Bearbeitung durch die Person sind wichtiger als jeder Trick. Lange, gleichförmige Texte wirken am künstlichsten; lieber kurz und konkret.
+5. **Wissenschaftliche Texte:** Die Sprachregeln der Schule gehen vor. In Facharbeit-Kapiteln bleibt die Fachsprache; die Stimme zeigt sich in Wortwahl, Satzbau, Einleitung, Schluss und Reflexion.

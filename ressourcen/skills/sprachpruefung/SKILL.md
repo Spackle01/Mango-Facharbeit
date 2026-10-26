@@ -9,7 +9,7 @@ description: Einen Text der Facharbeit (Deutsch oder Englisch) auf Füllwörter,
 
 Nutze diesen Skill, um einen Entwurf vor der Abgabe oder Konsultation zu prüfen, oder wenn die Person fragt, ob ihr Text „nach KI klingt“ oder zu ungenau ist. Ziel ist eine brauchbare Korrekturliste, kein Urteil darüber, wer den Text geschrieben hat. Kein einzelnes Merkmal beweist KI-Autorschaft, und Menschen verwenden all diese Muster auch. Auffällig sind Häufungen.
 
-Die Prüfung ergänzt die Sprachregeln der Schule (Noll/Vode, `00_vorgaben/anforderungen.md`, Abschnitt 9): sachbezogen, belegt, neutral, präzise, kurz, formal. Sie dient der Qualität, nicht dem Verbergen von KI-Nutzung. Kennzeichnungspflichten bleiben bestehen.
+Die Prüfung ergänzt die Sprachregeln der Schule (Noll/Vode, `00_vorgaben/anforderungen.md`, Abschnitt 9): sachbezogen, belegt, neutral, präzise, kurz, formal. Sie sorgt dafür, dass der Text konkret ist und nach der Person klingt (Stimmprofil in `wissenschaftlich-schreiben`, Abschnitt 6). Gefundene Stellen schreibst du um, ohne Vortrag.
 
 ## Ablauf
 
@@ -108,7 +108,3 @@ Das Skript `scripts/ai_tell_scan.py` ist unverändert übernommen und gibt engli
 | `VERDICT` | `reads clean` = unauffällig, `a few tells` = einige Stellen, `reads as AI` = durchgehend schablonenhaft |
 
 Das Skript ist eine Heuristik. Ein sauberer Scan beweist nichts, ein auffälliger zeigt nur, wo du genauer hinsehen solltest. Fachbegriffe wie „Förderung“ oder „nachhaltig“ können im Thema korrekt sein; dann nicht markieren.
-
-## Hinweis zur Herkunft
-
-Der Abschnitt über die Funktionsweise kommerzieller KI-Detektoren wurde nicht übernommen. Für die Facharbeit zählt, dass KI-Nutzung gekennzeichnet ist und der Text die Sprachregeln der Schule erfüllt.
