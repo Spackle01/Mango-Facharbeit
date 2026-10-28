@@ -80,10 +80,12 @@ h1 .zwei { margin-left: .04em; }
 .meta { font-size: 15px; color: var(--ink-soft); line-height: 1.4; }
 .meta b { color: var(--ink); }
 .meta a { color: var(--ink); text-underline-offset: 3px; }
-.alle { margin-top: 22px; font-size: 15px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
-.alle a { color: var(--ink); font-weight: 700; text-decoration: none; border: 2px solid var(--ink); border-radius: 999px; padding: 4px 13px; background: var(--paper-2); }
-.alle a:hover { background: var(--mustard); }
-.alle a[aria-current="true"] { background: var(--mustard); }
+.dl.zweit { background: var(--mustard); color: var(--ink); }
+.dl small { display: block; font-size: .62em; font-weight: 700; opacity: .85; letter-spacing: 0; margin-top: 2px; }
+.dl .t { line-height: 1.1; }
+.dl-row.zwei { align-items: stretch; gap: 18px 22px; }
+.dl-row.zwei .dl { padding: 16px 26px; }
+.meta { margin-top: 22px; }
 .macnote { display: none; }
 .ist-mac .macnote { display: block; }
 .ist-mac .winnote { display: none; }
@@ -178,19 +180,17 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
     <h1><span>Mango-</span><span class="zwei">Facharbeit</span></h1>
     <p class="unter">Dein Assistent für die Facharbeit. Er arbeitet direkt in deinem Lerntagebuch und deiner Facharbeit.</p>
 
-    <div class="dl-row">
-      <a class="dl" id="download" href="https://github.com/Spackle01/Mango-Facharbeit/releases">
+    <div class="dl-row zwei">
+      <a class="dl" id="dl-win" href="https://github.com/Spackle01/Mango-Facharbeit/releases">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
-        <span>Jetzt herunterladen</span>
+        <span class="t">Für Windows<small>Windows 10 und 11</small></span>
       </a>
-      <p class="meta" id="meta">Für Windows 10 und 11<br><a href="https://github.com/Spackle01/Mango-Facharbeit/releases">Alle Versionen</a></p>
+      <a class="dl zweit" id="dl-mac" href="https://github.com/Spackle01/Mango-Facharbeit/releases">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+        <span class="t">Für Mac<small>Apple-Chip (M1 und neuer)</small></span>
+      </a>
     </div>
-    <div class="alle" id="alle">
-      <span>Alle Downloads:</span>
-      <a id="dl-win" href="https://github.com/Spackle01/Mango-Facharbeit/releases">Windows</a>
-      <a id="dl-arm" href="https://github.com/Spackle01/Mango-Facharbeit/releases">Mac · Apple-Chip (M1 und neuer)</a>
-      <a id="dl-intel" href="https://github.com/Spackle01/Mango-Facharbeit/releases">Mac · Intel</a>
-    </div>
+    <p class="meta" id="meta">Kostenlos · <a href="https://github.com/Spackle01/Mango-Facharbeit/releases">Alle Versionen</a></p>
   </div>
 </header>
 
@@ -259,14 +259,18 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
   var seite = 'https://github.com/' + repo + '/releases';
   var ua = navigator.userAgent || '';
   var istMac = /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad|iPod/.test(ua);
-  if (istMac) document.documentElement.classList.add('ist-mac');
-
-  var btn = document.getElementById('download');
+  var win = document.getElementById('dl-win');
+  var mac = document.getElementById('dl-mac');
   var meta = document.getElementById('meta');
-  var links = { win: document.getElementById('dl-win'), arm: document.getElementById('dl-arm'), intel: document.getElementById('dl-intel') };
-  var muster = { win: /\.exe$/i, arm: /-Mac-arm64\.dmg$/i, intel: /-Mac-x64\.dmg$/i };
 
-  // Safari meldet immer "Intel". Wer WebGL-Grafik von Apple sieht, hat meist einen Apple-Chip.
+  if (istMac) {
+    document.documentElement.classList.add('ist-mac');
+    mac.classList.remove('zweit');
+    win.classList.add('zweit');
+    mac.parentNode.insertBefore(mac, win); // das eigene System steht vorn
+  }
+
+  // Safari meldet immer "Intel". Die Grafikkarte verrät den Apple-Chip.
   function appleChip() {
     try {
       var gl = document.createElement('canvas').getContext('webgl');
@@ -275,36 +279,42 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
       if (/Apple (M|GPU)/i.test(r)) return true;
       if (/Intel|AMD|Radeon/i.test(r)) return false;
     } catch (e) { /* egal */ }
-    return true; // neue Macs haben fast alle den Apple-Chip
+    return true;
   }
 
+  var muster = { win: /\.exe$/i, arm: /-Mac-arm64\.dmg$/i, intel: /-Mac-x64\.dmg$/i };
   function finde(rel, art) { return rel.assets.find(function (a) { return muster[art].test(a.name); }); }
 
   fetch('https://api.github.com/repos/' + repo + '/releases?per_page=15', { headers: { Accept: 'application/vnd.github+json' } })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
     .then(function (list) {
       var offen = list.filter(function (r) { return !r.draft; });
-      var hat = function (art) { return function (r) { return !!finde(r, art); }; };
-      var rel = { win: offen.find(hat('win')), arm: offen.find(hat('arm')), intel: offen.find(hat('intel')) };
-      var asset = {};
-      Object.keys(rel).forEach(function (k) {
-        if (rel[k]) { asset[k] = finde(rel[k], k); links[k].href = asset[k].browser_download_url; }
-      });
+      function neueste(art) { var rel = offen.find(function (r) { return !!finde(r, art); }); return rel && { rel: rel, a: finde(rel, art) }; }
+      var w = neueste('win'), arm = neueste('arm'), intel = neueste('intel');
+      if (w) win.href = w.a.browser_download_url;
 
-      var art = istMac ? (appleChip() ? 'arm' : 'intel') : 'win';
-      if (istMac && !asset[art]) art = asset.arm ? 'arm' : (asset.intel ? 'intel' : 'win');
-      if (!asset[art]) return;
-      links[art].setAttribute('aria-current', 'true');
-      btn.href = asset[art].browser_download_url;
-      var mb = Math.round(asset[art].size / 1000000);
-      var version = (rel[art].tag_name || '').replace(/^v/, '').replace(/[<>&"]/g, '');
-      var datum = rel[art].published_at ? new Date(rel[art].published_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
-      var fuer = art === 'win' ? 'Windows 10 und 11' : (art === 'arm' ? 'Mac mit Apple-Chip' : 'Mac mit Intel-Chip');
-      meta.innerHTML = '<b>Version ' + version + '</b> · ' + mb + ' MB · ' + fuer + (datum ? '<br>Veröffentlicht am ' + datum : '') + '<br><a href="' + seite + '">Alle Versionen</a>';
+      var macArt = (istMac && !appleChip() && intel) ? intel : (arm || intel);
+      if (macArt) {
+        mac.href = macArt.a.browser_download_url;
+        mac.querySelector('small').textContent = macArt === intel ? 'Intel-Chip' : 'Apple-Chip (M1 und neuer)';
+      }
+
+      var ref = istMac ? macArt : w;
+      var teile = [];
+      if (ref) {
+        teile.push('<b>Version ' + (ref.rel.tag_name || '').replace(/^v/, '').replace(/[<>&"]/g, '') + '</b>');
+        teile.push(Math.round(ref.a.size / 1000000) + ' MB');
+      }
+      teile.push('kostenlos');
+      var html = teile.join(' · ');
+      if (arm && intel) {
+        var anderer = macArt === intel ? arm : intel;
+        html += '<br>Mac mit ' + (macArt === intel ? 'Apple-Chip' : 'Intel-Chip') + '? <a href="' + anderer.a.browser_download_url + '">Hier herunterladen</a>';
+      }
+      html += '<br><a href="' + seite + '">Alle Versionen</a>';
+      meta.innerHTML = html;
     })
     .catch(function () { /* bleibt bei der Release-Seite */ });
-
-  if (istMac) meta.innerHTML = 'Für Mac · <a href="#alle">Intel-Mac? Hier wählen</a><br><a href="' + seite + '">Alle Versionen</a>';
 })();
 </script>
 </body>
