@@ -1,0 +1,982 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const { readZip, writeZip } = require('../server/zip');
+const extract = require('../server/extract');
+const ctx = require('../server/context');
+const { autoTitle } = require('../server/runs');
+const { describeTool, classifyError } = require('../server/providers/activity');
+const { markdownToDocx, facharbeitToDocx } = require('../server/docx');
+const { AUFGABEN, STATUS_INFO } = require('../server/aufgaben');
+const { Project } = require('../server/store');
+const { resolveInside, safeFileName } = require('../server/util');
+
+const ROOT = path.join(__dirname, '..');
+
+test('ZIP: schreiben und wieder lesen', () => {
+  const buf = writeZip([{ name: 'a.txt', data: 'Hallo Ä' }, { name: 'ordner/b.bin', data: Buffer.alloc(5000, 7) }]);
+  const z = readZip(buf);
+  assert.deepStrictEqual(z.names().sort(), ['a.txt', 'ordner/b.bin']);
+  assert.strictEqual(z.read('a.txt').toString('utf8'), 'Hallo Ä');
+  assert.strictEqual(z.read('ordner/b.bin').length, 5000);
+});
+
+test('Textauszug aus der Lerntagebuch-Vorlage der Schule', async () => {
+  const r = await extract.analyse(path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx'));
+  assert.strictEqual(r.kind, 'word');
+  assert.strictEqual(r.lesbar, 'ja');
+  assert.match(r.text, /Lerntagebuch/);
+  assert.match(r.text, /Festlegen eigener Lernziele/);
+});
+
+test('Nicht lesbare und nicht unterstützte Dateien werden erkannt', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-'));
+  fs.writeFileSync(path.join(dir, 'kaputt.docx'), 'kein zip');
+  fs.writeFileSync(path.join(dir, 'x.exe'), 'MZ');
+  fs.writeFileSync(path.join(dir, 'leer.md'), '');
+  assert.strictEqual((await extract.analyse(path.join(dir, 'kaputt.docx'))).lesbar, 'nein');
+  assert.strictEqual((await extract.analyse(path.join(dir, 'x.exe'))).lesbar, 'nein');
+  assert.strictEqual((await extract.analyse(path.join(dir, 'leer.md'))).hinweis, 'Datei ist leer');
+  assert.strictEqual((await extract.analyse(path.join(dir, 'fehlt.md'))).hinweis, 'Datei fehlt');
+});
+
+test('Arbeitsstand-Block wird erkannt und aus dem Text entfernt', () => {
+  const text = 'Fertig.\n\n```arbeitsstand\n{"aufgaben":[{"id":"expose","status":"in_arbeit",}],"merken":"Eins"}\n```';
+  const r = ctx.parseUpdate(text);
+  assert.strictEqual(r.text, 'Fertig.');
+  assert.strictEqual(r.update.aufgaben[0].id, 'expose');
+  assert.deepStrictEqual(r.update.merken, ['Eins']);
+  assert.strictEqual(ctx.parseUpdate('Nur Text').update, null);
+  assert.strictEqual(ctx.parseUpdate('```arbeitsstand\n{kaputt\n```').invalid, true);
+});
+
+test('Nachweis-Dateien werden geprüft', () => {
+  const files = [{ path: '02_expose_und_zeitplan/expose_v1.md', name: 'expose_v1.md' }];
+  assert.ok(ctx.nachweisDateiOk('Datei 02_expose_und_zeitplan/expose_v1.md, 430 Wörter', files));
+  assert.ok(!ctx.nachweisDateiOk('02_expose_und_zeitplan/expose_v9.md', files));
+  assert.ok(ctx.nachweisDateiOk('Gegen Abschnitt 6 geprüft', files));
+});
+
+test('Arbeitsstand-Updates: erledigt nur mit Nachweis, externe Aufgaben nur als Vorschlag', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ws-'));
+  const p = await Project.create(dir, { name: 'Test' });
+  fs.writeFileSync(path.join(dir, '02_expose_und_zeitplan', 'expose_v1.md'), '# Exposé');
+  const files = [{ path: '02_expose_und_zeitplan/expose_v1.md', name: 'expose_v1.md' }];
+  const r = await ctx.applyUpdate(p, {
+    aufgaben: [
+      { id: 'expose', status: 'erledigt', nachweis: '02_expose_und_zeitplan/expose_v1.md' },
+      { id: 'gliederung', status: 'erledigt' },
+      { id: 'abgabe', status: 'erledigt', nachweis: 'abgegeben' },
+      { id: 'unbekannt', status: 'erledigt' },
+      { id: 'zeitplan', status: 'erledigt', nachweis: '02_expose_und_zeitplan/zeitplan_v3.md' },
+    ],
+    projekt: { forschungsfrage: 'Frage?', abgabedatum: 'morgen', unsinn: 'x' },
+    merken: ['Methode: Umfrage'],
+  }, files);
+  const st = Object.fromEntries(p.aufgaben().map((t) => [t.id, t.status]));
+  assert.strictEqual(st.expose, 'erledigt');
+  assert.strictEqual(st.gliederung, 'in_arbeit');
+  assert.strictEqual(st.abgabe, 'offen');
+  assert.strictEqual(st.zeitplan, 'in_arbeit');
+  assert.strictEqual(r.vorschlaege[0].id, 'abgabe');
+  assert.strictEqual(p.data.angaben.forschungsfrage, 'Frage?');
+  assert.strictEqual(p.data.angaben.abgabedatum, '');
+  assert.strictEqual(p.data.merken[0].text, 'Methode: Umfrage');
+  const overview = fs.readFileSync(path.join(dir, 'FACHARBEIT.md'), 'utf8');
+  assert.match(overview, /✓ Erledigt – Exposé schreiben/);
+  assert.match(overview, /Methode: Umfrage/);
+});
+
+test('Projektkontext enthält Angaben, Arbeitsstand und Fristen', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ws-'));
+  const p = await Project.create(dir, { name: 'Alex', titel: 'Testthema', fach: 'Mathematik' });
+  const c = await ctx.buildContext(p, [], new Date(2026, 9, 6, 12, 0));
+  assert.match(c.text, /Titel: Testthema/);
+  assert.match(c.text, /× expose – Exposé schreiben/);
+  assert.match(c.text, /Abgabe: 07\.12\.2026, 16:00 Uhr \(in 62 Tagen\)/);
+  assert.match(c.text, /Noch fehlende Angaben: Bezugsfach, Lehrkraft|Noch fehlende Angaben: Klasse\/Kurs, Bezugsfach/);
+  const c2 = await ctx.buildContext(p, [], new Date(2026, 9, 6, 15, 30));
+  assert.strictEqual(c.hash, c2.hash, 'Uhrzeit allein ändert den Kontext nicht');
+});
+
+test('Aufgabenliste: drei Status, Quellen vorhanden', () => {
+  assert.deepStrictEqual(Object.keys(STATUS_INFO), ['offen', 'in_arbeit', 'erledigt']);
+  assert.deepStrictEqual(Object.values(STATUS_INFO).map((s) => s.symbol), ['×', '?', '✓']);
+  for (const a of AUFGABEN) assert.ok(a.quelle && a.hilfe && a.titel, a.id);
+});
+
+test('Chat-Titel werden kurz und verständlich', () => {
+  assert.strictEqual(autoTitle('Hallo! Kannst du mir helfen, ein Exposé zu schreiben?'), 'Exposé schreiben');
+  assert.strictEqual(autoTitle('Wie zitiere ich eine Internetquelle richtig?'), 'Wie zitiere ich eine Internetquelle richtig');
+  assert.strictEqual(autoTitle('', [{ name: 'notizen.pdf' }]), 'Datei: notizen.pdf');
+  assert.ok(autoTitle('a '.repeat(80)).length <= 50);
+});
+
+test('Werkzeugaufrufe werden auf Deutsch beschrieben', () => {
+  assert.strictEqual(describeTool('Write', { file_path: '/ws/02_x/a.md' }, '/ws').label, 'Schreibt 02_x/a.md');
+  assert.match(describeTool('WebSearch', { query: 'Goldener Schnitt' }, '/ws').label, /Sucht im Web/);
+  assert.strictEqual(describeTool('read_file', { AbsolutePath: '/ws/b.md' }, '/ws').label, 'Liest b.md');
+  assert.strictEqual(classifyError('Not logged in · Please run /login'), 'anmeldung');
+  assert.strictEqual(classifyError('Error: authentication required'), 'anmeldung');
+  assert.strictEqual(classifyError('No conversation found with session ID'), 'sitzung');
+  assert.strictEqual(classifyError('RESOURCE_EXHAUSTED 429'), 'limit');
+});
+
+test('Word-Export erzeugt gültiges Paket mit Schulformatierung', () => {
+  const buf = markdownToDocx('# Einleitung\n\nText mit **fett**.\n\n- Punkt\n\n| A | B |\n|---|---|\n| 1 | 2 |');
+  const z = readZip(buf);
+  const doc = z.read('word/document.xml').toString('utf8');
+  const styles = z.read('word/styles.xml').toString('utf8');
+  assert.match(doc, /<w:pStyle w:val="Heading1"\/>/);
+  assert.match(doc, /<w:b\/>/);
+  assert.match(doc, /<w:tbl>/);
+  assert.match(doc, /w:left="1418"/); // 2,5 cm
+  assert.match(doc, /w:top="1134"/); // 2,0 cm
+  assert.match(styles, /w:ascii="Arial"/);
+  assert.match(styles, /<w:sz w:val="22"\/>/); // 11 pt
+  assert.match(styles, /w:line="360"/); // 1,5-zeilig
+  const full = readZip(facharbeitToDocx({ angaben: { titel: 'T', name: 'N', fach: 'Mathe' }, teile: [{ markdown: '# 1 Einleitung\n\nText' }], datum: '06.10.2026' }));
+  const fdoc = full.read('word/document.xml').toString('utf8');
+  assert.match(fdoc, /TOC \\o/);
+  assert.match(fdoc, /<w:pgNumType w:start="1"\/>/);
+  assert.strictEqual((fdoc.match(/<w:sectPr>/g) || []).length, 3);
+});
+
+test('Pfade bleiben im Arbeitsraum', () => {
+  assert.strictEqual(resolveInside('/ws', '../etc/passwd'), null);
+  assert.strictEqual(resolveInside('/ws', 'a/../../b'), null);
+  assert.ok(resolveInside('/ws', 'a/b.md').endsWith(path.join('ws', 'a', 'b.md')));
+  assert.strictEqual(safeFileName('a/b:c?.pdf'), 'a_b_c_.pdf');
+  assert.strictEqual(safeFileName('CON.txt'), '_CON.txt');
+});
+
+test('Markdown-Renderer maskiert HTML und erkennt Dateien', async () => {
+  const { renderMarkdown, stripUpdateBlock } = await import('../public/js/markdown.js');
+  const html = renderMarkdown('<img src=x onerror=alert(1)> `a/b.md` [x](javascript:alert(1))', { isFile: (p) => p === 'a/b.md' });
+  assert.ok(!html.includes('<img'));
+  assert.ok(!html.includes('javascript:'));
+  assert.match(html, /class="file-ref" data-path="a\/b\.md"/);
+  assert.strictEqual(stripUpdateBlock('Text\n```arbeitsstand\n{"auf'), 'Text');
+});
+
+test('Modelle: IDs, Liste von agy, Fehlererkennung, Anzeigenamen', async () => {
+  const models = require('../server/providers/models');
+  for (const ok of ['', 'sonnet', 'claude-opus-5-5', 'sonnet[1m]', 'gemini-3.1-pro-high', 'us.anthropic.claude-opus-5-5'])
+    assert.ok(models.validModelId(ok), ok);
+  for (const bad of ['opus & calc', 'a b', '-p', '"x"', 'x;y', 'x|y', '%PATH%', '$(id)', 'x'.repeat(101)])
+    assert.ok(!models.validModelId(bad), bad);
+  const list = models.parseAgyModels('\u001b[1mSLUG                      NAME\u001b[0m\ngemini-3.8-flash-high     Gemini 3.8 Flash (High)\n\n* gemini-3.1-pro-high       Gemini 3.1 Pro (High)\nUse --model <slug> to pick one.\n');
+  assert.deepStrictEqual(list.map((m) => [m.id, m.name]), [['gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)'], ['gemini-3.1-pro-high', 'Gemini 3.1 Pro (High)']]);
+  assert.strictEqual(classifyError("There's an issue with the selected model (claude-x). It may not exist or you may not have access to it."), 'modell');
+  assert.strictEqual(classifyError('Error: unknown model "gemini-9"'), 'modell');
+  assert.strictEqual(classifyError('API Error: 529 overloaded'), 'limit');
+  assert.strictEqual(classifyError('Not logged in · Please run /login'), 'anmeldung');
+  const { modelLabel } = await import('../public/js/modelname.js');
+  assert.strictEqual(modelLabel(''), 'Standard');
+  assert.strictEqual(modelLabel('sonnet'), 'Sonnet');
+  assert.strictEqual(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
+  assert.strictEqual(modelLabel('claude-haiku-4-5-20251001'), 'Haiku 4.5');
+  assert.strictEqual(modelLabel('claude-fable-5'), 'Fable 5');
+  assert.strictEqual(modelLabel('opus[1m]'), 'Opus (1M)');
+  assert.strictEqual(modelLabel('gemini-3.1-pro-high'), 'Gemini 3.1 Pro (High)');
+  assert.strictEqual(modelLabel('x-1', [{ id: 'x-1', name: 'Mein Modell' }]), 'Mein Modell');
+  assert.strictEqual(modelLabel('claude-gibtsnicht-9'), 'claude-gibtsnicht-9', 'Unbekanntes bleibt wie eingegeben');
+});
+
+test('Bestes Gemini-Modell: Pro vor Flash, neueste Version, höchste Denkstufe', () => {
+  const { bestGeminiModel } = require('../server/providers/models');
+  const ids = (...l) => l.map((id) => ({ id }));
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.7-flash-high', 'gemini-3.1-pro-high')), 'gemini-3.1-pro-high');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.1-pro-low', 'gemini-3.1-pro-high', 'gemini-3.1-pro-medium')), 'gemini-3.1-pro-high');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3-pro-high', 'gemini-3.1-pro-high', 'gemini-2.5-pro')), 'gemini-3.1-pro-high');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.8-flash-lite', 'gemini-3.8-flash-medium', 'gemini-3.7-flash-high')), 'gemini-3.8-flash-medium', 'ohne Pro: neuestes Flash');
+  assert.strictEqual(bestGeminiModel(ids('gemini-3.1-pro-preview-high', 'gemini-3.1-pro-high')), 'gemini-3.1-pro-high', 'stabil vor Vorschau');
+  assert.strictEqual(bestGeminiModel(ids('claude-sonnet-4-6', 'gpt-oss-120b')), '', 'kein Gemini: Voreinstellung der CLI');
+  assert.strictEqual(bestGeminiModel([]), '');
+  assert.strictEqual(bestGeminiModel(undefined), '');
+});
+
+test('Einstellungen: automatische Wahl überschreibt keine eigene Wahl', async () => {
+  const { AppStore } = require('../server/store');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-settings-'));
+  const prev = process.env.MANGO_DATA_DIR;
+  process.env.MANGO_DATA_DIR = dir;
+  try {
+    let st = new AppStore();
+    await st.load();
+    assert.strictEqual(st.settings.provider, 'claude');
+    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '' });
+    assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt);
+    await st.updateSettings({ provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } }, { auto: true });
+    assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt, 'automatisch heißt nicht gewählt');
+    await st.updateSettings({ modelle: { antigravity: '' } });
+    assert.strictEqual(st.settings.modellGewaehlt.antigravity, true);
+    await st.updateSettings({ provider: 'claude' });
+    assert.strictEqual(st.settings.anbieterGewaehlt, true);
+
+    // Einstellungen aus 0.2.0: Antigravity war damals eine eigene Wahl.
+    fs.writeFileSync(path.join(dir, 'app.json'), JSON.stringify({ version: 1, settings: { provider: 'antigravity', modelle: { claude: 'sonnet', antigravity: 'gemini-x-1' }, version: 2 }, projects: [] }));
+    st = new AppStore();
+    await st.load();
+    assert.strictEqual(st.settings.anbieterGewaehlt, true);
+    assert.strictEqual(st.settings.modellGewaehlt.antigravity, true);
+    assert.strictEqual(st.settings.version, 3);
+  } finally {
+    if (prev === undefined) delete process.env.MANGO_DATA_DIR; else process.env.MANGO_DATA_DIR = prev;
+  }
+});
+
+test('Übernahme: Entwurfsstände, Systemdateien und Pfade', () => {
+  const importer = require('../server/importer');
+  const key = importer.familyKey;
+  assert.strictEqual(key('Facharbeit_v2.docx'), 'facharbeit');
+  assert.strictEqual(key('Facharbeit final (1) - Kopie.docx'), 'facharbeit');
+  assert.strictEqual(key('Facharbeit 2026-10-05.pdf'), 'facharbeit');
+  assert.strictEqual(key('Exposé Stand 3.md'), 'exposé');
+  assert.strictEqual(key('Lerntagebuch.docx'), 'lerntagebuch');
+  assert.notStrictEqual(key('Kapitel 2.docx'), key('Fragebogen.docx'));
+  for (const junk of ['a/.DS_Store', 'Thumbs.db', '~$Facharbeit.docx', '__MACOSX/a/b.md', 'x/.git/config', 'datei.tmp', 'a/'])
+    assert.ok(importer.isJunk(junk), junk);
+  assert.ok(!importer.isJunk('Ordner/Facharbeit.docx'));
+  assert.strictEqual(importer.cleanRelPath('..\\..\\Ordner/./Unter:ordner/Datei?.md'), 'Ordner/Unter_ordner/Datei_.md');
+  assert.strictEqual(importer.cleanRelPath('/etc/passwd'), 'etc/passwd');
+  assert.strictEqual(importer.guessCategory('Mindmap_Thema.png', '').id, 'mindmap');
+  assert.deepStrictEqual(importer.guessCategory('scan1.pdf', 'Fragebogen zur Mediennutzung'), { id: 'eigenanteil', label: 'Eigenanteil (Erhebung, Daten)', sicher: false });
+});
+
+test('Übernahme: Ergebnis-Block wird gelesen und entfernt', async () => {
+  const importer = require('../server/importer');
+  const text = 'Einschätzung.\n\n```arbeitsstand\n{"aufgaben":[]}\n```\n\n```uebernahme\n{"zusammenfassung":"Thema X","vorhanden":["A","B",],"fehlt":"Zeitplan","naechsterSchritt":"Zeitplan","versionen":[{"dateien":["a.md","b.md"],"frage":"Welche?"},{"dateien":[]}]}\n```';
+  const r = importer.parseResult(ctx.parseUpdate(text).text);
+  assert.strictEqual(r.text, 'Einschätzung.');
+  assert.strictEqual(r.invalid, false);
+  assert.deepStrictEqual(r.result.vorhanden, ['A', 'B']);
+  assert.deepStrictEqual(r.result.fehlt, ['Zeitplan'], 'einzelner Text wird zur Liste');
+  assert.strictEqual(r.result.versionen.length, 1, 'leere Gruppen fallen weg');
+  const bad = importer.parseResult('Text\n```uebernahme\n{kaputt\n```');
+  assert.strictEqual(bad.result, null);
+  assert.strictEqual(bad.invalid, true);
+  assert.strictEqual(bad.text, 'Text');
+  const { stripUpdateBlock } = await import('../public/js/markdown.js');
+  assert.strictEqual(stripUpdateBlock('Text\n```arbeitsstand\n{}\n```\n```uebernahme\n{"zus'), 'Text');
+});
+
+test('Übernahme: vorhandene Projektangaben werden nicht überschrieben', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ws-'));
+  const p = await Project.create(dir, { name: 'Alex', titel: 'Mein Thema' });
+  const r = await ctx.applyUpdate(p, { aufgaben: [], projekt: { titel: 'Anderes Thema', fach: 'Kunst', name: 'Alex' }, merken: [] }, [], { nurLeereFelder: true });
+  assert.strictEqual(p.data.angaben.titel, 'Mein Thema');
+  assert.strictEqual(p.data.angaben.fach, 'Kunst');
+  assert.deepStrictEqual(r.konflikte, [{ feld: 'titel', label: 'Titel', bisher: 'Mein Thema', gefunden: 'Anderes Thema' }]);
+  const normal = await ctx.applyUpdate(p, { aufgaben: [], projekt: { titel: 'Anderes Thema' }, merken: [] }, []);
+  assert.strictEqual(normal.konflikte.length, 0);
+  assert.strictEqual(p.data.angaben.titel, 'Anderes Thema');
+});
+
+test('Word → Markdown: Überschriften, Fett/Kursiv, Listen, Tabellen', () => {
+  const p = (inner, style = '', num = false) => `<w:p><w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ''}${num ? '<w:numPr><w:ilvl w:val="0"/></w:numPr>' : ''}</w:pPr>${inner}</w:p>`;
+  const r = (t, props = '') => `<w:r>${props ? `<w:rPr>${props}</w:rPr>` : ''}<w:t xml:space="preserve">${t}</w:t></w:r>`;
+  const xml = `<?xml version="1.0"?><w:document xmlns:w="w"><w:body>${[
+    p(r('Mein Titel'), 'Title'),
+    p(r('Einleitung'), 'berschrift1'),
+    p(r('Das ist ') + r('wichtig', '<w:b/>') + r(' und ') + r('betont', '<w:i/>') + r(' – ') + r('nicht fett', '<w:b w:val="0"/>') + r('.')),
+    p(r('Punkt A'), '', true),
+    '<w:tbl><w:tr><w:tc>' + p(r('Kopf 1')) + '</w:tc><w:tc>' + p(r('Kopf 2')) + '</w:tc></w:tr><w:tr><w:tc>' + p(r('a|b')) + '</w:tc><w:tc>' + p(r('c')) + '</w:tc></w:tr></w:tbl>',
+  ].join('')}</w:body></w:document>`;
+  const docx = writeZip([{ name: '[Content_Types].xml', data: Buffer.from('<Types/>') }, { name: 'word/document.xml', data: Buffer.from(xml) }]);
+  const md = extract.docxToText(docx);
+  assert.match(md, /^# Mein Titel$/m);
+  assert.match(md, /^# Einleitung$/m);
+  assert.match(md, /^Das ist \*\*wichtig\*\* und \*betont\* – nicht fett\.$/m);
+  assert.match(md, /^- Punkt A$/m);
+  assert.match(md, /^\| Kopf 1 \| Kopf 2 \|\n\| --- \| --- \|\n\| a\\\|b \| c \|$/m);
+});
+
+test('Einsortieren: Plan lesen und sicher ausführen', async () => {
+  const sortieren = require('../server/sortieren');
+  const parsed = sortieren.parsePlan('Fertig.\n\n```einsortieren\n[{"von":"uebernommen/x/a.md","nach":"02_expose_und_zeitplan/expose.md"},{"von":"","nach":"x"},]\n```\n```einsortieren\n{"dateien":[{"quelle":"anhaenge/b.txt","ziel":"01_themenfindung_und_mindmap/b.md","ersetzen":true}]}\n```');
+  assert.strictEqual(parsed.text, 'Fertig.');
+  assert.deepStrictEqual(parsed.plan, [
+    { von: 'uebernommen/x/a.md', nach: '02_expose_und_zeitplan/expose.md', ersetzen: false },
+    { von: 'anhaenge/b.txt', nach: '01_themenfindung_und_mindmap/b.md', ersetzen: true },
+  ]);
+  assert.strictEqual(sortieren.parsePlan('```einsortieren\n[kaputt\n```').invalid, true);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ws-'));
+  const p = await Project.create(dir, { name: 'Test' });
+  const src = path.join(dir, 'uebernommen', 'x');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'a.md'), '# A');
+  fs.writeFileSync(path.join(src, 'notiz.txt'), 'Idee');
+  fs.copyFileSync(path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx'), path.join(src, 'lt.docx'));
+  fs.writeFileSync(path.join(src, 'bild.png'), 'PNG');
+  fs.writeFileSync(path.join(dir, '02_expose_und_zeitplan', 'expose.md'), 'alt');
+  const res = await sortieren.applyPlan(p, [
+    { von: 'uebernommen/x/a.md', nach: '02_expose_und_zeitplan/expose.md' },
+    { von: 'uebernommen/x/a.md', nach: '02_expose_und_zeitplan/expose.md', ersetzen: true },
+    { von: 'uebernommen/x/lt.docx', nach: '06_lerntagebuch_und_konsultationen/lerntagebuch.md' },
+    { von: 'uebernommen/x/notiz.txt', nach: '01_themenfindung_und_mindmap/../../../notiz.md' },
+    { von: 'uebernommen/x/bild.png', nach: '01_themenfindung_und_mindmap/bild.jpg' },
+    { von: 'uebernommen/x/fehlt.md', nach: '01_themenfindung_und_mindmap/fehlt.md' },
+    { von: '02_expose_und_zeitplan/expose.md', nach: '01_themenfindung_und_mindmap/x.md' },
+    { von: 'uebernommen/x/a.md', nach: '.facharbeit/x.md' },
+  ]);
+  assert.strictEqual(res[0].nach, '02_expose_und_zeitplan/expose_v2.md', 'vorhandenes Ziel bleibt, neue Fassung');
+  assert.strictEqual(res[1].ersetzt, true, 'ersetzen sichert die alte Fassung');
+  assert.strictEqual(fs.readFileSync(path.join(dir, res[1].version), 'utf8'), 'alt');
+  assert.strictEqual(fs.readFileSync(path.join(dir, '02_expose_und_zeitplan/expose.md'), 'utf8'), '# A');
+  assert.strictEqual(res[2].aktion, 'umgewandelt');
+  assert.match(fs.readFileSync(path.join(dir, res[2].nach), 'utf8'), /Arbeitskopie von „lt\.docx“[\s\S]*Ziele des Lerntagebuchs/);
+  assert.match(res[3].fehler, /01_ bis 08_/, 'Pfadausbruch abgelehnt');
+  assert.match(res[4].fehler, /\.png lässt sich nicht als \.jpg/);
+  assert.match(res[5].fehler, /nicht gefunden/);
+  assert.match(res[6].fehler, /uebernommen\/ oder anhaenge\//);
+  assert.match(res[7].fehler, /01_ bis 08_/);
+  assert.ok(!fs.existsSync(path.join(dir, 'notiz.md')));
+});
+
+// ---------- Word-Dateien bearbeiten ----------
+
+const word = require('../server/word');
+const abgabe = require('../server/abgabe');
+const LT = path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx');
+
+// Kleines PNG (1×1) für Bildtests
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+function nummer(text, re) {
+  return +(new RegExp(`^\\[(\\d+)\\] ${re}`, 'm').exec(text) || [])[1];
+}
+
+test('Word: Vorlage wird unverändert gelesen und geschrieben', () => {
+  let xml = readZip(fs.readFileSync(LT)).read('word/document.xml').toString('utf8');
+  if (xml.charCodeAt(0) === 0xfeff) xml = xml.slice(1);
+  assert.strictEqual(word.serialize(word.parseXml(xml)), xml);
+  const t = word.nummeriert(fs.readFileSync(LT), { datei: 'abgabe/lt.docx' });
+  assert.match(t, /^Word-Datei: abgabe\/lt\.docx/);
+  assert.match(t, /^\[\d+\] Vorname, Nachname$/m);
+  assert.match(t, /^Tabelle 1 \(4 Zeilen × 3 Spalten/m);
+  assert.match(t, /^\[\d+\] T1 Z1 S2: Pro$/m);
+});
+
+test('Word: ersetzen, Teiltext, einfügen, Tabellenzeile, Bild, löschen', async () => {
+  const buf = fs.readFileSync(LT);
+  const t = word.nummeriert(buf);
+  const name = nummer(t, 'Vorname, Nachname');
+  const fach = nummer(t, 'im Fach');
+  const erf = nummer(t, 'Meine Erfahrungen');
+  const ziele = nummer(t, 'Das sind meine drei');
+  const r = await word.apply(buf, [
+    { ersetzen: name, text: 'Alex Beispiel' },
+    { ersetzen: fach, alt: '...', text: 'Kunst' },
+    { ersetzen: erf + 1, text: 'Erster Absatz mit **fett**.\n\nZweiter Absatz.' },
+    { nach: ziele, text: '1. Ziel eins\n- Punkt' },
+    { zeile: 1, zellen: ['4. Ethik', 'spannend', 'viel Lesen'] },
+    { bild: 'bild.png', nach: ziele, breite_cm: 5, unterschrift: 'Abb. 1: Test' },
+    { loeschen: erf + 2 },
+    { ersetzen: name, alt: 'gibt es nicht', text: 'x' },
+    { zeile: 99, zellen: ['x'] },
+  ], { bildLaden: async () => PNG });
+  assert.strictEqual(r.ok, 7);
+  assert.deepStrictEqual(r.results.filter((x) => x.fehler).map((x) => x.was), [`Absatz ${name} ersetzt`, 'Zeile in Tabelle 99']);
+  const neu = word.nummeriert(r.buffer);
+  assert.match(neu, /^\[\d+\] Alex Beispiel$/m);
+  assert.match(neu, /^\[\d+\] im Fach Kunst$/m);
+  assert.match(neu, /^\[\d+\] Erster Absatz mit fett\.$/m);
+  assert.match(neu, /^\[\d+\] Zweiter Absatz\.$/m);
+  assert.match(neu, /^\[\d+\] 1\. Ziel eins$/m);
+  assert.match(neu, /^\[\d+\] – Punkt$/m);
+  assert.match(neu, /^\[\d+\] T1 Z5 S3: viel Lesen$/m);
+  assert.match(neu, /^\[\d+\] Abb\. 1: Test$/m);
+  const z = readZip(r.buffer);
+  assert.ok(z.names().some((n) => /^word\/media\/mango_bild1\.png$/.test(n)));
+  assert.match(z.read('word/_rels/document.xml.rels').toString('utf8'), /Id="rIdMango1"[^>]*Target="media\/mango_bild1\.png"/);
+  // Fett bleibt als Formatierung erhalten, die Datei bleibt lesbar.
+  assert.match(extract.docxToText(r.buffer), /Erster Absatz mit \*\*fett\*\*\./);
+  // Unbekannte Änderung und ungültige Nummern ändern nichts.
+  const leer = await word.apply(buf, [{ ersetzen: 0, text: 'x' }, { foo: 1 }]);
+  assert.strictEqual(leer.buffer, null);
+});
+
+test('Word: Block in der Antwort wird gelesen und entfernt', () => {
+  const p = word.parseBlock('Fertig.\n\n```word\n{"datei":"abgabe\\\\lt.docx","aenderungen":[{"ersetzen":3,"text":"x"},]}\n```\n');
+  assert.strictEqual(p.text, 'Fertig.');
+  assert.deepStrictEqual(p.dateien, [{ datei: 'abgabe/lt.docx', neu: false, ersetzen: false, aus: '', text: '', ops: [{ ersetzen: 3, text: 'x' }] }]);
+  assert.strictEqual(word.parseBlock('```word\nkaputt\n```').invalid, true);
+  assert.deepStrictEqual(word.imageSize(PNG), { ext: 'png', w: 1, h: 1 });
+});
+
+test('Abgabe-Dateien: angelegt, vorausgefüllt, ältere Arbeitsräume übernommen', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-abgabe-'));
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel', klasse: 'FOS 12a', fach: 'Ethik', lehrkraft: 'Herr Lehrer' });
+    assert.deepStrictEqual(p.data.abgabe, { lerntagebuch: 'abgabe/Lerntagebuch_Beispiel_Alex.docx', facharbeit: 'abgabe/Facharbeit_Beispiel_Alex.docx' });
+    const lt = word.nummeriert(fs.readFileSync(path.join(p.workspace, 'abgabe', 'Lerntagebuch_Beispiel_Alex.docx')));
+    assert.match(lt, /^\[\d+\] Alex Beispiel$/m);
+    assert.match(lt, /^\[\d+\] Klasse: {2}FOS 12a$/m);
+    assert.match(lt, /Betreuende Lehrkraft: {2}Herr Lehrer$/m);
+    const fa = word.nummeriert(fs.readFileSync(path.join(p.workspace, 'abgabe', 'Facharbeit_Beispiel_Alex.docx')));
+    assert.match(fa, /^\[\d+\] # 1 Einleitung$/m);
+    assert.ok(!/\[Hier /.test(fa), 'Platzhalter der Kapitelvorlagen fehlen');
+    assert.ok(!fs.existsSync(path.join(p.workspace, '05_facharbeit_entwurf', '02_einleitung.md')));
+    // Original der Schule ist schreibgeschützt.
+    if (process.platform !== 'win32') assert.strictEqual(fs.statSync(path.join(p.workspace, '00_vorgaben', 'Lerntagebuch-Vorlage.docx')).mode & 0o222, 0);
+    // Gelöschte Abgabe-Datei wird nicht erneut angelegt.
+    fs.unlinkSync(path.join(p.workspace, 'abgabe', 'Facharbeit_Beispiel_Alex.docx'));
+    await Project.open(p.workspace);
+    assert.ok(!fs.existsSync(path.join(p.workspace, 'abgabe', 'Facharbeit_Beispiel_Alex.docx')));
+
+    // Älterer Arbeitsraum: ausgefülltes Lerntagebuch in 06_ und Kapitel in 05_ werden übernommen.
+    const alt = await Project.create(path.join(dir, 'alt'), { name: 'Kim' });
+    delete alt.data.abgabe;
+    await alt.saveProject();
+    fs.rmSync(path.join(alt.workspace, 'abgabe'), { recursive: true });
+    const eigenes = (await word.apply(fs.readFileSync(LT), [{ ersetzen: nummer(word.nummeriert(fs.readFileSync(LT)), 'Vorname, Nachname'), text: 'Kim' }])).buffer;
+    fs.writeFileSync(path.join(alt.workspace, '06_lerntagebuch_und_konsultationen', 'Lerntagebuch-Vorlage.docx'), eigenes);
+    fs.writeFileSync(path.join(alt.workspace, '05_facharbeit_entwurf', '02_einleitung.md'), '# 1 Einleitung\n\nMein eigener Anfang.');
+    const wieder = await Project.open(alt.workspace);
+    assert.deepStrictEqual(wieder.data.abgabe, { lerntagebuch: 'abgabe/Lerntagebuch_Kim.docx', facharbeit: 'abgabe/Facharbeit_Kim.docx' });
+    assert.ok(fs.readFileSync(path.join(alt.workspace, 'abgabe', 'Lerntagebuch_Kim.docx')).equals(eigenes));
+    assert.match(word.nummeriert(fs.readFileSync(path.join(alt.workspace, 'abgabe', 'Facharbeit_Kim.docx'))), /Mein eigener Anfang\./);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Abgabe-Dateien: Namensteil wie von der Schule empfohlen', () => {
+  assert.strictEqual(abgabe.namensteil('Max Muster'), 'Muster_Max');
+  assert.strictEqual(abgabe.namensteil('Anna Lena Beispiel'), 'Beispiel_Anna_Lena');
+  assert.strictEqual(abgabe.namensteil(''), '');
+});
+
+// ---------- Sprachprüfung (Schreib-Skills) ----------
+
+const stil = require('../server/stil');
+
+test('Sprachprüfung: Floskeln, Stilwörter, Geviertstrich, lange Sätze', () => {
+  const grund = (t) => stil.pruefen(t).map((x) => x.grund);
+  assert.deepStrictEqual(grund('In Klasse 11 habe ich eine Projektarbeit geschrieben. Ich habe zu spät angefangen.'), []);
+  assert.deepStrictEqual(grund('In der heutigen Zeit spielt Energie eine entscheidende Rolle.'), ['Aufwärm-Einstieg', 'aufgeblähte Bedeutung']);
+  assert.deepStrictEqual(grund('Das ist gut — sehr gut.'), ['Geviertstrich (—)']);
+  assert.deepStrictEqual(grund('Er sagte "ja" dazu.'), ['englische Anführungszeichen statt „…“']);
+  assert.match(grund(`${'Wort '.repeat(30)}Ende.`)[0], /Satz zu lang \(31 Wörter\)/);
+  // Ein einzelnes Stilwort ist in Ordnung, gehäuft nicht.
+  assert.deepStrictEqual(grund('Die Umfrage ist zudem anonym.'), []);
+  assert.deepStrictEqual(grund('Die Umfrage ist zudem anonym. Das ist maßgeblich.'), ['Stilwort „zudem“', 'Stilwort „maßgeblich“']);
+  // Direkte Zitate, Überschriften und Kennzeichnungen werden nicht bemängelt.
+  assert.deepStrictEqual(grund('Laut Autor ist das „in der heutigen Zeit von zentraler Bedeutung“ (Müller 2020, S. 3).'), []);
+  assert.deepStrictEqual(grund('# Darüber hinaus\n\n[KI-Entwurf, 24.10.2026, Claude – selbst überarbeiten]\n\nIch habe gelernt.'), []);
+  assert.deepStrictEqual(grund('Studien zeigen, dass Pausen helfen (Vgl. Meyer 2021, S. 4).'), []);
+  assert.deepStrictEqual(grund('Studien zeigen, dass Pausen helfen.'), ['vager Beleg ohne Kurzbeleg']);
+});
+
+test('Sprachprüfung: neuer Text aus Word-Block und Textdateien, Rückmeldung an den Assistenten', () => {
+  const t = stil.textAusWord([{ datei: 'abgabe/lt.docx', ops: [{ ersetzen: 3, text: 'A.' }, { ersetzen: 4, alt: '...', text: 'FOS' }, { nach: 5, text: 'B.' }, { zeile: 1, zellen: ['C', 'D'] }] }]);
+  assert.deepStrictEqual(t, [{ datei: 'abgabe/lt.docx', text: 'A.\n\nB.\n\nC. D' }]);
+  assert.strictEqual(stil.neueZeilen('a\nb', 'a\nb\nc\n\nd'), 'c\nd');
+  const p = stil.korrekturPrompt([{ datei: 'abgabe/lt.docx', stellen: [{ satz: 'X.', grund: 'Floskel' }] }], { 'abgabe/lt.docx': '.facharbeit/extrakte/abgabe/lt.docx.txt' });
+  assert.match(p, /^Automatische Sprachprüfung/);
+  assert.match(p, /abgabe\/lt\.docx \(Word: Block `word`, aktuelle Absatznummern in \.facharbeit\/extrakte\/abgabe\/lt\.docx\.txt\):\n- „X\.“ – Floskel/);
+});
+
+test('Regeln: Schreibregeln der Skills und „kurz und einfach“ werden immer mitgeschickt', () => {
+  const regeln = fs.readFileSync(path.join(ROOT, 'ressourcen/regeln.md'), 'utf8');
+  assert.match(regeln, /## Kurz und einfach/);
+  assert.match(regeln, /## Schreibregeln \(aus den Skills `wissenschaftlich-schreiben` und `sprachpruefung`, gelten immer\)/);
+  assert.match(regeln, /\*\*Pflicht:\*\* Bevor du einen Text schreibst/);
+  const p = ctx.buildPrompt({ context: '<projektkontext/>', text: 'Hallo', schreibaufgabe: true });
+  assert.match(p, /<schreibregeln>Ablauf bei jedem Text.*wissenschaftlich-schreiben.*sprachpruefung/);
+  assert.ok(!/<schreibregeln>/.test(ctx.buildPrompt({ context: '', text: 'Hallo' })));
+  assert.match(ctx.buildPrompt({ context: '', text: 'Hallo' }), /<antwortstil>.*höchstens drei kurze Sätze/, 'Antwortstil steht bei jeder Nachricht');
+});
+
+// ---------- Dateien erstellen: PDF, PowerPoint, Excel, Vorschau ----------
+
+const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+test('PDF: Markdown wird zu einer gültigen Datei mit Umlauten, Seiten und Tabelle', () => {
+  const { markdownToPdf } = require('../server/pdf');
+  const lang = 'Ein Satz über Käse und Straßen. '.repeat(400);
+  const buf = markdownToPdf(`# Größe der Umfrage\n\nText mit **fett** und „Zitat“ – ok.\n\n- Punkt\n1. Eins\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n${lang}`, { title: 'Titel ä', author: 'Max' });
+  assert.strictEqual(buf.subarray(0, 5).toString(), '%PDF-');
+  assert.match(buf.subarray(-8).toString(), /%%EOF/);
+  const text = buf.toString('latin1');
+  assert.match(text, /\/Type \/Pages/);
+  assert.ok(+/\/Count (\d+)/.exec(text)[1] >= 2, 'lange Texte laufen auf eine zweite Seite');
+  // Der Inhalt ist hexcodiert und deflate-komprimiert: Seitenstrom enthält die Wörter in Windows-1252.
+  const zlib = require('zlib');
+  const streams = [...buf.toString('latin1').matchAll(/stream\n([\s\S]*?)\nendstream/g)].map((m) => zlib.inflateSync(Buffer.from(m[1], 'latin1')).toString('latin1'));
+  const hex = streams.join('\n').match(/<([0-9a-f]+)> Tj/g).map((x) => Buffer.from(/<([0-9a-f]+)>/.exec(x)[1], 'hex').toString('latin1')).join(' ');
+  assert.match(hex, /Gr\xf6\xdfe/, 'ö und ß als Windows-1252');
+  assert.match(hex, /\x84Zitat\x93/, 'deutsche Anführungszeichen');
+});
+
+test('PowerPoint: Folien, Notizen, Tabelle, Bild; Vorschau liest sie wieder', async () => {
+  const { markdownToPptx } = require('../server/pptx');
+  const vorschau = require('../server/vorschau');
+  const buf = await markdownToPptx('# Titel der Arbeit\nMax · Fach\n\n---\n## Frage\n- Erster Punkt\n  - Unterpunkt\n> Das sage ich dazu.\n\n---\n## Ergebnis\n| A | B |\n|---|---|\n| 1 | 2 |\n\n---\n## Bild\n![Skizze](anhaenge/x.png)', {
+    title: 'T', author: 'Max', bildLaden: async (rel) => { assert.strictEqual(rel, 'anhaenge/x.png'); return PNG1; },
+  });
+  const z = readZip(buf);
+  for (const n of ['[Content_Types].xml', 'ppt/presentation.xml', 'ppt/slides/slide4.xml', 'ppt/notesSlides/notesSlide2.xml', 'ppt/media/image1.png', 'ppt/notesMasters/notesMaster1.xml']) assert.ok(z.names().includes(n), n);
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mango-pptx-')), 'a.pptx');
+  fs.writeFileSync(f, buf);
+  const v = await vorschau.erzeugen(f, 'a.pptx');
+  assert.strictEqual(v.typ, 'folien');
+  assert.strictEqual(v.folien.length, 4);
+  assert.strictEqual(v.folien[0].titel, 'Titel der Arbeit');
+  assert.strictEqual(v.folien[0].zeilen[0].text, 'Max · Fach');
+  assert.deepStrictEqual(v.folien[1].zeilen.map((x) => x.text), ['Erster Punkt', 'Unterpunkt']);
+  assert.strictEqual(v.folien[1].notizen, 'Das sage ich dazu.');
+  assert.deepStrictEqual(v.folien[2].tabellen[0], [['A', 'B'], ['1', '2']]);
+  assert.strictEqual(v.folien[3].bilder, 1);
+  await assert.rejects(markdownToPptx('![x](nicht.png)', { bildLaden: async () => { throw new Error('nicht gefunden'); } }), /Bild „nicht\.png“/);
+  await assert.rejects(markdownToPptx('   '), /Kein Inhalt/);
+});
+
+test('Excel: Tabellen werden Blätter, Zahlen bleiben Zahlen; Vorschau liest sie', async () => {
+  const { markdownToXlsx } = require('../server/xlsx');
+  const vorschau = require('../server/vorschau');
+  const buf = markdownToXlsx('## Auswertung\n\n| Frage | Ja |\n|---|---|\n| Apps? | 30 |\n| Dauer | 5,5 |\n\n## Zweite\n| a |\n|--|\n| x |', { title: 'T' });
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mango-xlsx-')), 'a.xlsx');
+  fs.writeFileSync(f, buf);
+  const v = await vorschau.erzeugen(f, 'a.xlsx');
+  assert.deepStrictEqual(v.blaetter.map((b) => b.name), ['Auswertung', 'Zweite']);
+  assert.deepStrictEqual(v.blaetter[0].rows, [['Frage', 'Ja'], ['Apps?', '30'], ['Dauer', '5.5']]);
+  assert.match(readZip(buf).read('xl/worksheets/sheet1.xml').toString(), /<c r="B2"[^>]*><v>30<\/v>/);
+  assert.throws(() => markdownToXlsx('Nur Text'), /Keine Tabelle/);
+});
+
+test('Vorschau: Word, Text und Markdown', async () => {
+  const vorschau = require('../server/vorschau');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-vs-'));
+  fs.writeFileSync(path.join(dir, 'a.docx'), markdownToDocx('# Titel\n\nAbsatz.\n\n| a | b |\n|--|--|\n| 1 | 2 |', { title: 'x' }));
+  fs.writeFileSync(path.join(dir, 'n.md'), '# Notiz\n\nText');
+  fs.writeFileSync(path.join(dir, 'x.bin'), 'zzz');
+  const w = await vorschau.erzeugen(path.join(dir, 'a.docx'), 'a.docx');
+  assert.deepStrictEqual(w.bloecke, [{ t: 'h', n: 1, text: 'Titel' }, { t: 'p', text: 'Absatz.' }, { t: 'tabelle', rows: [['a', 'b'], ['1', '2']] }]);
+  const n = await vorschau.erzeugen(path.join(dir, 'n.md'), 'n.md');
+  assert.strictEqual(n.typ, 'text');
+  assert.strictEqual(n.markdown, true);
+  assert.strictEqual((await vorschau.erzeugen(path.join(dir, 'x.bin'), 'x.bin')).typ, 'keine');
+  // Word → Markdown (für PDF aus einer vorhandenen Datei)
+  assert.strictEqual(word.alsMarkdown(fs.readFileSync(path.join(dir, 'a.docx'))), '# Titel\n\nAbsatz.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |');
+});
+
+test('Block erstellen: Datei, Quelle und Ersetzen werden gelesen und entfernt', () => {
+  const p = word.parseBlock('Fertig.\n\n```erstellen\n[{"datei":"abgabe/p.pptx","text":"# T"},{"datei":"abgabe/f.pdf","aus":"abgabe/f.docx","ersetzen":true}]\n```');
+  assert.strictEqual(p.text, 'Fertig.');
+  assert.deepStrictEqual(p.dateien.map((d) => [d.datei, d.neu, d.ersetzen, d.aus, d.text]), [['abgabe/p.pptx', true, false, '', '# T'], ['abgabe/f.pdf', true, true, 'abgabe/f.docx', '']]);
+});
+
+test('Abgabe: PDF, PowerPoint und Excel anlegen, ersetzen mit Sicherung, Pfade begrenzt', async () => {
+  const abgabeMod = require('../server/abgabe');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-erst-'));
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel' });
+    const lt = p.data.abgabe.lerntagebuch;
+    const r = await abgabeMod.anwenden(p, [
+      { datei: 'abgabe/Folien.pptx', neu: true, text: '# T\n\n---\n## F\n- a', ops: [] },
+      { datei: 'abgabe/Info.pdf', neu: true, text: '# Info\n\nText', ops: [] },
+      { datei: 'abgabe/Info_Lerntagebuch.pdf', neu: true, aus: lt, text: '', ops: [] },
+      { datei: 'abgabe/Daten.xlsx', neu: true, text: '| a |\n|---|\n| 1 |', ops: [] },
+      { datei: 'abgabe/Folien.pptx', neu: true, text: '# anders', ops: [] },
+      { datei: 'abgabe/Folien.pptx', neu: true, ersetzen: true, text: '# Neu', ops: [] },
+      { datei: lt, neu: true, ersetzen: true, text: '# x', ops: [] },
+      { datei: '00_vorgaben/x.pdf', neu: true, text: '# x', ops: [] },
+      { datei: 'abgabe/Quelle.pdf', neu: true, aus: 'abgabe/gibtsnicht.docx', text: '', ops: [] },
+    ]);
+    assert.deepStrictEqual(r.map((x) => x.ok), [1, 1, 1, 1, 0, 1, 0, 0, 0]);
+    assert.match(r[4].hinweis, /gibt es schon/);
+    assert.ok(r[5].version, 'alte Fassung gesichert');
+    assert.match(r[6].hinweis, /gibt es schon/, 'Word-Abgabe wird nie ersetzt');
+    assert.match(r[7].hinweis, /nur in abgabe\//);
+    assert.match(r[8].hinweis, /Quelle|nicht gefunden/);
+    assert.strictEqual(fs.readFileSync(path.join(p.workspace, 'abgabe', 'Info_Lerntagebuch.pdf')).subarray(0, 5).toString(), '%PDF-');
+    assert.strictEqual(fs.existsSync(path.join(p.workspace, 'abgabe', 'Daten.xlsx')), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- Ordnung ----------
+
+test('Ordnung: Unordnung wird erkannt, Aufräum-Plan sicher ausgeführt und rückgängig gemacht', async () => {
+  const ordnung = require('../server/ordnung');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ordnung-'));
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel' });
+    const w = p.workspace;
+    const put = (rel, text = 'x') => { fs.mkdirSync(path.dirname(path.join(w, rel)), { recursive: true }); fs.writeFileSync(path.join(w, rel), text); };
+    put('notizen.md');
+    put('abgabe/entwurf.md');
+    put('02_expose_und_zeitplan/expose.md');
+    put('02_expose_und_zeitplan/expose_v2.md');
+    put('03_literatur_und_quellen/none.md');
+    put('03_literatur_und_quellen/~$lock.docx');
+    put('01_themenfindung_und_mindmap/leer/unter/.keep-nicht');
+    fs.mkdirSync(path.join(w, '01_themenfindung_und_mindmap', 'wirklich', 'leer'), { recursive: true });
+    const ws = require('../server/workspace');
+    const funde = await ordnung.pruefen(p, await ws.listFiles(w));
+    const nach = (pfad) => funde.find((f) => f.path === pfad);
+    assert.match(nach('notizen.md').grund, /lose im Hauptordner/);
+    assert.match(nach('abgabe/entwurf.md').grund, /in abgabe\//);
+    assert.match(nach('02_expose_und_zeitplan/expose.md').grund, /ältere Fassung/);
+    assert.strictEqual(nach('02_expose_und_zeitplan/expose_v2.md'), undefined, 'neueste Fassung bleibt');
+    assert.match(nach('03_literatur_und_quellen/none.md').grund, /Platzhalter/);
+    assert.ok(!funde.some((f) => f.path.startsWith('00_vorgaben/') || f.path === p.data.abgabe.lerntagebuch), 'Originale und Abgabe-Dateien sind nie dabei');
+    assert.match(ordnung.kontextText(funde), /^Aufräumen nötig/);
+    // Eigene Dateien, die schon vor dem Projekt da waren, bleiben unberührt.
+    put('privat.md');
+    const alt = new Date('2020-01-01');
+    fs.utimesSync(path.join(w, 'privat.md'), alt, alt);
+    assert.ok(!(await ordnung.pruefen(p, await ws.listFiles(w))).some((f) => f.path === 'privat.md'), 'ältere Dateien werden nicht angefasst');
+    fs.rmSync(path.join(w, 'privat.md'));
+    assert.strictEqual(ordnung.kontextText([]), '');
+
+    // Plan lesen
+    const plan = ordnung.parsePlan('Aufgeräumt.\n\n```aufraeumen\n[{"verschieben":"notizen.md","nach":"01_themenfindung_und_mindmap/notizen.md"},{"archivieren":"02_expose_und_zeitplan/expose.md"},{"verschieben":"abgabe/entwurf.md","nach":"../aussen.md"},{"archivieren":"00_vorgaben/anforderungen.md"},{"archivieren":"' + p.data.abgabe.lerntagebuch + '"},{"verschieben":"abgabe/entwurf.md","nach":"01_themenfindung_und_mindmap/entwurf.txt"}]\n```');
+    assert.strictEqual(plan.text, 'Aufgeräumt.');
+    assert.strictEqual(plan.plan.length, 6);
+    const r = await ordnung.anwenden(p, plan.plan);
+    assert.deepStrictEqual(r.map((x) => x.ok), [true, true, false, false, false, false]);
+    assert.match(r[2].fehler, /Ziel muss/);
+    assert.match(r[3].fehler, /Originale/);
+    assert.match(r[4].fehler, /Abgabe-Dateien/);
+    assert.match(r[5].fehler, /Dateiendung/);
+    assert.ok(fs.existsSync(path.join(w, '01_themenfindung_und_mindmap', 'notizen.md')));
+    assert.ok(!fs.existsSync(path.join(w, 'notizen.md')));
+    assert.ok(fs.existsSync(path.join(w, ...r[1].nach.split('/'))), 'archiviert, nicht gelöscht');
+    assert.match(r[1].nach, /^\.facharbeit\/papierkorb\/.+\/02_expose_und_zeitplan\/expose\.md$/);
+    // Rückgängig
+    const z = await ordnung.rueckgaengig(p, r);
+    assert.strictEqual(z.zurueck, 2);
+    assert.ok(fs.existsSync(path.join(w, 'notizen.md')));
+    assert.ok(fs.existsSync(path.join(w, '02_expose_und_zeitplan', 'expose.md')));
+    // Mechanisches Aufräumen: Reste und leere Ordner, nichts anderes
+    const auto = await ordnung.autoAufraeumen(p);
+    assert.strictEqual(auto.reste, 1);
+    assert.ok(!fs.existsSync(path.join(w, '03_literatur_und_quellen', '~$lock.docx')));
+    assert.ok(!fs.existsSync(path.join(w, '01_themenfindung_und_mindmap', 'wirklich')));
+    assert.ok(fs.existsSync(path.join(w, '01_themenfindung_und_mindmap')), 'Arbeitsordner selbst bleiben');
+    assert.ok(fs.existsSync(path.join(w, '00_vorgaben', 'anforderungen.md')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Aktivität: Skills werden erkannt (Skill-Werkzeug und SKILL.md lesen)', () => {
+  assert.strictEqual(describeTool('Skill', { skill: 'wissenschaftlich-schreiben' }, '/w').skill, 'wissenschaftlich-schreiben');
+  assert.strictEqual(describeTool('Skill', { skill: 'plugin:sprachpruefung' }, '/w').skill, 'sprachpruefung');
+  assert.strictEqual(describeTool('Read', { file_path: '/w/.agents/skills/sprachpruefung/SKILL.md' }, '/w').skill, 'sprachpruefung');
+  assert.strictEqual(describeTool('Read', { file_path: '/w/notiz.md' }, '/w').skill, undefined);
+});
+
+test('Folien zeichnen: Titel, Aufzählung, Tabelle, Bild, Farben, Platzhalter aus dem Layout', async () => {
+  const { folienAlsHtml } = require('../server/pptxrender');
+  const { markdownToPptx } = require('../server/pptx');
+  const buf = await markdownToPptx('# Titel <b>x</b>\nUntertitel\n\n---\n## Frage\n- Punkt A\n  - Unterpunkt\n\n---\n## Tabelle\n| A | B |\n|---|---|\n| 1 | 2 |\n![Bild](x.png)', { bildLaden: async () => PNG1 });
+  const o = folienAlsHtml(buf);
+  assert.strictEqual(o.folien.length, 3);
+  assert.strictEqual(o.breite, 960);
+  assert.strictEqual(o.hoehe, 540);
+  assert.match(o.folien[0], /Titel &lt;b&gt;x&lt;\/b&gt;/, 'Text ist maskiert');
+  assert.ok(!/<b>x/.test(o.folien[0]));
+  assert.match(o.folien[0], /background:#5b5fb8/i, 'Akzentfläche');
+  assert.match(o.folien[1], /Punkt A/);
+  assert.match(o.folien[1], />•<\/span>/, 'Aufzählungszeichen');
+  assert.match(o.folien[2], /<table[\s\S]*>A<[\s\S]*>2</);
+  assert.match(o.folien[2], /<img[^>]*src="data:image\/png;base64,/);
+  // Fremde Datei: Platzhalter erben Lage und Stil vom Layout (python-pptx-Vorlage, falls vorhanden)
+  const fremd = process.env.MANGO_TEST_PPTX;
+  if (fremd && fs.existsSync(fremd)) assert.ok(folienAlsHtml(fs.readFileSync(fremd)).folien.length > 0);
+});
+
+test('Umwandlung in PDF: ohne Office oder LibreOffice kein Ergebnis, mit LibreOffice ein PDF (gespeichert)', async () => {
+  const konv = require('../server/konvertieren');
+  const { markdownToPptx } = require('../server/pptx');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-konv-'));
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel' });
+    fs.writeFileSync(path.join(p.workspace, 'abgabe', 'F.pptx'), await markdownToPptx('# T\n\n---\n## A\n- b'));
+    process.env.MANGO_OHNE_KONVERTIERUNG = '1';
+    assert.strictEqual(await konv.nachPdf(p.workspace, 'abgabe/F.pptx'), null);
+    delete process.env.MANGO_OHNE_KONVERTIERUNG;
+    const { which } = require('../server/providers/proc');
+    if (!which('soffice') && !which('libreoffice')) return; // kein LibreOffice: nichts zu prüfen
+    const r = await konv.nachPdf(p.workspace, 'abgabe/F.pptx');
+    assert.strictEqual(r.quelle, 'LibreOffice');
+    assert.strictEqual(fs.readFileSync(r.pdf).subarray(0, 5).toString(), '%PDF-');
+    assert.ok((await konv.vorhanden(p.workspace, 'abgabe/F.pptx')).pdf === r.pdf, 'zweiter Aufruf nutzt den gespeicherten Stand');
+    fs.writeFileSync(path.join(p.workspace, 'abgabe', 'F.pptx'), await markdownToPptx('# Neu'));
+    assert.strictEqual(await konv.vorhanden(p.workspace, 'abgabe/F.pptx'), null, 'geänderte Datei braucht eine neue Umwandlung');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Streaming: Steuerblöcke und angefangene Blöcke erscheinen nie im Chat', async () => {
+  const { stripUpdateBlock } = await import('../public/js/markdown.js');
+  assert.strictEqual(stripUpdateBlock('Fertig.\n\n```erstellen\n[{"datei":'), 'Fertig.');
+  assert.strictEqual(stripUpdateBlock('Fertig.\n\n```aufraeumen\n[]\n```\n\nDanach.'), 'Fertig.\n\nDanach.');
+  for (const teil of ['`', '``', '```', '```e', '```erst', '```erstellen', '```word', '```aufr']) assert.strictEqual(stripUpdateBlock(`Text\n${teil}`), 'Text', teil);
+  // normale Codeblöcke bleiben, auch mit schließendem Zaun am Ende
+  assert.strictEqual(stripUpdateBlock('Code:\n```js\nx\n```'), 'Code:\n```js\nx\n```');
+  assert.strictEqual(stripUpdateBlock('Code:\n```js'), 'Code:\n```js');
+});
+
+// ---------- Updates ----------
+
+test('Update: Versionsvergleich und Auswahl der neuesten Veröffentlichung', () => {
+  const { vergleiche, parseVersion, neuesteVersion } = require('../server/update');
+  assert.deepStrictEqual(parseVersion('v0.2.8-beta'), { nums: [0, 2, 8], pre: 'beta' });
+  assert.strictEqual(parseVersion('kaputt'), null);
+  assert.ok(vergleiche('0.2.9-beta', '0.2.8-beta') > 0);
+  assert.ok(vergleiche('0.10.0-beta', '0.9.9-beta') > 0, 'Zahlen, nicht Text');
+  assert.ok(vergleiche('1.0.0', '1.0.0-beta') > 0, 'Fassung ohne Zusatz ist neuer');
+  assert.strictEqual(vergleiche('0.2.8-beta', '0.2.8-beta'), 0);
+  assert.ok(vergleiche('0.2.7-beta', '0.2.8-beta') < 0);
+  const asset = (name, tag) => ({ name, size: 1000, browser_download_url: `https://github.com/Spackle01/Mango-Facharbeit/releases/download/${tag}/${name}` });
+  const rel = (tag, extra = {}) => ({ tag_name: tag, draft: false, html_url: `https://github.com/Spackle01/Mango-Facharbeit/releases/tag/${tag}`, body: `Kurztext zu ${tag}\n\n## Mehr`, assets: [asset(`Mango-Facharbeit-Setup-${tag.slice(1)}.exe`, tag), asset(`Mango-Facharbeit-Setup-${tag.slice(1)}.exe.sha256`, tag)], ...extra });
+  const n = neuesteVersion([rel('v0.2.7-beta'), rel('v0.2.9-beta'), rel('v0.3.0-beta', { draft: true }), { ...rel('v0.4.0-beta'), assets: [] }]);
+  assert.strictEqual(n.version, '0.2.9-beta');
+  assert.strictEqual(n.notizen, 'Kurztext zu v0.2.9-beta');
+  assert.match(n.shaUrl, /\.exe\.sha256$/);
+  // Mac: das Image passend zum Prozessor, nicht das Windows-Setup
+  const mac = (tag) => ({ ...rel(tag), assets: ['arm64', 'x64'].map((a) => asset(`Mango-Facharbeit-${tag.slice(1)}-Mac-${a}.dmg`, tag)) });
+  assert.strictEqual(neuesteVersion([mac('v0.4.0-beta'), rel('v0.3.0-beta')], { plattform: 'darwin', arch: 'arm64' }).name, 'Mango-Facharbeit-0.4.0-beta-Mac-arm64.dmg');
+  assert.strictEqual(neuesteVersion([mac('v0.4.0-beta')], { plattform: 'darwin', arch: 'x64' }).name, 'Mango-Facharbeit-0.4.0-beta-Mac-x64.dmg');
+  assert.strictEqual(neuesteVersion([rel('v0.4.0-beta')], { plattform: 'darwin', arch: 'arm64' }), null, 'ohne Mac-Datei kein Update für den Mac');
+  assert.strictEqual(neuesteVersion([mac('v0.4.0-beta')], { plattform: 'win32' }), null, 'Windows nimmt kein Mac-Image');
+  // Fremde Download-Adressen werden nicht akzeptiert
+  const boese = rel('v0.5.0-beta');
+  boese.assets[0].browser_download_url = 'https://evil.example/Mango-Facharbeit-Setup-0.5.0-beta.exe';
+  assert.strictEqual(neuesteVersion([boese]), null);
+});
+
+test('Update: laden, Prüfsumme prüfen, Installer starten', async () => {
+  const http = require('http');
+  const crypto = require('crypto');
+  const { Updater } = require('../server/update');
+  const exe = Buffer.alloc(300000, 7);
+  const sha = crypto.createHash('sha256').update(exe).digest('hex');
+  let falsch = false;
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/releases') {
+      const base = `http://127.0.0.1:${srv.address().port}`;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify([{ tag_name: 'v9.0.0-beta', draft: false, html_url: `${base}/seite`, body: 'Neu.', assets: [
+        { name: 'Mango-Facharbeit-Setup-9.0.0-beta.exe', size: exe.length, browser_download_url: `${base}/dl/Mango-Facharbeit-Setup-9.0.0-beta.exe` },
+        { name: 'Mango-Facharbeit-Setup-9.0.0-beta.exe.sha256', size: 100, browser_download_url: `${base}/dl/Mango-Facharbeit-Setup-9.0.0-beta.exe.sha256` }] }]));
+    } else if (req.url.endsWith('.exe')) { res.setHeader('Content-Length', exe.length); res.end(exe); } else res.end(`${falsch ? 'a'.repeat(64) : sha}  Mango-Facharbeit-Setup-9.0.0-beta.exe`);
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  process.env.MANGO_UPDATE_API = `http://127.0.0.1:${port}/releases`;
+  delete require.cache[require.resolve('../server/update')];
+  const { Updater: U } = require('../server/update');
+  void Updater;
+  try {
+    const gestartet = [];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-upd-'));
+    const host = { kannAktualisieren: true, updateAnwenden: async (f) => { gestartet.push([f, fs.statSync(f).size]); } };
+    const u = new U({ version: '0.2.8-beta', host, dir });
+    let st = await u.pruefen();
+    assert.strictEqual(st.neu.version, '9.0.0-beta');
+    assert.strictEqual(st.direkt, true);
+    // Nichts Neueres: kein Knopf
+    const gleich = new U({ version: '9.0.0-beta', host, dir });
+    assert.strictEqual((await gleich.pruefen()).neu, null);
+    // Arbeit läuft: kein Update
+    assert.throws(() => u.starten({ laeuftArbeit: () => true }), /arbeitet gerade/);
+    // Falsche Prüfsumme: nichts wird gestartet
+    falsch = true;
+    u.starten();
+    for (let i = 0; i < 100 && u.status.phase === 'laedt'; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(u.status.phase, 'fehler');
+    assert.match(u.status.fehler, /Prüfsumme/);
+    assert.strictEqual(gestartet.length, 0);
+    assert.ok(!fs.existsSync(path.join(dir, 'Mango-Facharbeit-Setup-9.0.0-beta.exe')), 'fehlerhafte Datei wird gelöscht');
+    // Richtige Prüfsumme: Setup wird gestartet
+    falsch = false;
+    u.zuruecksetzen();
+    u.starten();
+    for (let i = 0; i < 100 && u.status.phase !== 'startet'; i++) await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 20 && !gestartet.length; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(u.status.phase, 'startet');
+    assert.strictEqual(gestartet.length, 1);
+    assert.strictEqual(gestartet[0][1], exe.length);
+    // Ohne Desktop-App (Browser, Linux, Mac): nur Hinweis auf die Release-Seite
+    assert.throws(() => new U({ version: '0.2.8-beta', host: null, dir }).starten(), /installierten Windows-App/);
+    // GitHub nicht erreichbar: kein Absturz, Fehler wird gemerkt
+    const kaputt = new U({ version: '0.2.8-beta', host, dir, fetchFn: async () => { throw new Error('offline'); } });
+    const r = await kaputt.pruefen();
+    assert.strictEqual(r.neu, null);
+    assert.match(r.fehler, /offline/);
+  } finally {
+    delete process.env.MANGO_UPDATE_API;
+    delete require.cache[require.resolve('../server/update')];
+    srv.close();
+  }
+});
+
+// ---------- DeepSeek: Werkzeuge, Schlüsselspeicher, Agent-Schleife ----------
+
+test('Werkzeuge: lesen, schreiben, bearbeiten, suchen, Skills; Originale und Office-Dateien geschützt', async () => {
+  const { Werkzeuge } = require('../server/providers/werkzeuge');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-wz-'));
+  try {
+    const put = (rel, t) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), t); };
+    put('00_vorgaben/regel.md', 'Original');
+    put('.claude/skills/sprachpruefung/SKILL.md', '# Skill\nPrüfen');
+    put('02_expose_und_zeitplan/expose.md', 'Zeile eins\nZeile zwei\nZeile drei');
+    put('.facharbeit/extrakte/abgabe/x.docx.txt', '[1] Absatz');
+    const w = new Werkzeuge(dir);
+    const run = (n, a) => w.ausfuehren(n, a);
+    assert.match(await run('Read', { file_path: '02_expose_und_zeitplan/expose.md', offset: 2, limit: 1 }), /^\s+2\tZeile zwei/);
+    assert.match(await run('Read', { file_path: `${dir}/02_expose_und_zeitplan/expose.md` }), /Zeile drei/, 'absolute Pfade im Arbeitsraum gehen');
+    assert.match(await run('Read', { file_path: '../geheim.txt' }), /^Fehler: .*außerhalb/);
+    assert.match(await run('Read', { file_path: '.facharbeit/extrakte/abgabe/x.docx.txt' }), /\[1\] Absatz/);
+    assert.match(await run('Write', { file_path: '04_forschung_und_eigenanteil/notiz.md', content: 'A\nB' }), /Geschrieben/);
+    assert.strictEqual(fs.readFileSync(path.join(dir, '04_forschung_und_eigenanteil', 'notiz.md'), 'utf8'), 'A\nB');
+    assert.match(await run('Write', { file_path: '00_vorgaben/neu.md', content: 'x' }), /Originale/);
+    assert.match(await run('Write', { file_path: 'abgabe/x.docx', content: 'x' }), /Blöcke `word`/);
+    assert.match(await run('Write', { file_path: '.facharbeit/x.md', content: 'x' }), /Interne Dateien/);
+    assert.match(await run('Edit', { file_path: '02_expose_und_zeitplan/expose.md', old_string: 'Zeile', new_string: 'Satz' }), /kommt 3-mal vor/);
+    assert.match(await run('Edit', { file_path: '02_expose_und_zeitplan/expose.md', old_string: 'Zeile zwei', new_string: 'Satz zwei' }), /Bearbeitet/);
+    assert.match(fs.readFileSync(path.join(dir, '02_expose_und_zeitplan', 'expose.md'), 'utf8'), /Satz zwei/);
+    assert.match(await run('Edit', { file_path: '00_vorgaben/regel.md', old_string: 'Original', new_string: 'x' }), /Originale/);
+    assert.match(await run('Glob', { pattern: '**/*.md' }), /02_expose_und_zeitplan\/expose\.md/);
+    assert.match(await run('Glob', { pattern: '0*_*/*.md' }), /04_forschung_und_eigenanteil\/notiz\.md/);
+    assert.match(await run('Grep', { pattern: 'satz', '-i': true }), /expose\.md:2: Satz zwei/);
+    assert.match(await run('Skill', { skill: 'sprachpruefung' }), /Skill „sprachpruefung“ geladen[\s\S]*Prüfen/);
+    assert.match(await run('Skill', { skill: '../x' }), /Ungültiger Skill-Name/);
+    assert.match(await run('Skill', { skill: 'gibtsnicht' }), /Vorhanden: sprachpruefung/);
+    assert.match(await run('Gibtsnicht', {}), /gibt es nicht/);
+    // Webadressen: keine lokalen Ziele
+    for (const u of ['http://127.0.0.1/x', 'http://localhost/x', 'http://192.168.1.5/', 'file:///etc/passwd', 'http://[::1]/', 'ftp://example.com/x', 'http://user:pw@example.com/']) {
+      assert.match(await run('WebFetch', { url: u }), /^Fehler:/, u);
+    }
+    const web = new Werkzeuge(dir, { fetchFn: async () => ({ status: 200, ok: true, headers: new Map([['content-type', 'text/html; charset=utf-8']]), arrayBuffer: async () => Buffer.from('<html><head><title>x</title><script>böse()</script></head><body><h1>Titel</h1><p>Text &amp; mehr</p></body></html>') }) });
+    web.fetch = web.fetch; // eslint-disable-line no-self-assign
+    // Für den Test die DNS-Prüfung mit einer öffentlichen IP umgehen
+    assert.match(await web.ausfuehren('WebFetch', { url: 'http://93.184.216.34/' }), /Titel\s+Text & mehr/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Zugangsdaten: Speicher, Verschlüsselung über den Host, nie im Klartext in den Einstellungen', async () => {
+  const { Geheim } = require('../server/geheim');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-geheim-'));
+  try {
+    const g = new Geheim(dir);
+    assert.strictEqual(await g.get('deepseek'), '');
+    await g.set('deepseek', 'sk-abcdefghijklmnop1234');
+    assert.strictEqual(await g.get('deepseek'), 'sk-abcdefghijklmnop1234');
+    assert.strictEqual(await g.hinweis('deepseek'), '…1234');
+    assert.strictEqual(new Geheim(dir).cache, null);
+    assert.strictEqual(await new Geheim(dir).get('deepseek'), 'sk-abcdefghijklmnop1234', 'bleibt nach Neustart erhalten');
+    if (process.platform !== 'win32') assert.strictEqual(fs.statSync(path.join(dir, 'zugang.json')).mode & 0o777, 0o600);
+    // Mit Schlüsselbund des Systems (hier nachgebaut): in der Datei steht nichts Lesbares
+    const host = { verschluesselnMoeglich: () => true, verschluesseln: (t) => Buffer.from(t).reverse().toString('base64'), entschluesseln: (b) => Buffer.from(b, 'base64').reverse().toString() };
+    const g2 = new Geheim(path.join(dir, 'sicher'), host);
+    await g2.set('deepseek', 'sk-geheimgeheimgeheim99');
+    assert.ok(!fs.readFileSync(path.join(dir, 'sicher', 'zugang.json'), 'utf8').includes('sk-geheim'));
+    assert.strictEqual(await new Geheim(path.join(dir, 'sicher'), host).get('deepseek'), 'sk-geheimgeheimgeheim99');
+    await g.entfernen('deepseek');
+    assert.strictEqual(await g.get('deepseek'), '');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DeepSeek: Agent-Schleife mit Werkzeugen, Verlauf, Fehler und Abbruch', async () => {
+  const fake = require('./fixtures/fake-deepseek');
+  const { Geheim } = require('../server/geheim');
+  const f = await fake.start({ skript: (req) => {
+    const letzte = req.messages[req.messages.length - 1];
+    if (/FEHLER401/.test(letzte.content || '')) return { status: 401, meldung: 'Authentication Fails' };
+    if (/FEHLER402/.test(letzte.content || '')) return { status: 402, meldung: 'Insufficient Balance' };
+    if (/FEHLER500/.test(letzte.content || '')) return { status: 500 };
+    if (/DENKEN/.test(JSON.stringify(req.messages.slice(-1)))) return { reasoning: 'Ich überlege.', text: 'Ergebnis nach Nachdenken.' };
+    const tools = req.messages.filter((m) => m.role === 'tool').length;
+    if (letzte.role === 'user' && /NOTIZ/.test(letzte.content)) return { tools: [{ name: 'Skill', args: { skill: 'wissenschaftlich-schreiben' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/notiz.md', content: 'Hallo\nWelt' } }] };
+    if (letzte.role === 'tool' && tools === 2) return { text: 'Notiz gespeichert.' };
+    return { text: `Antwort ${req.messages.length}` };
+  } });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ds-'));
+  process.env.MANGO_DEEPSEEK_URL = f.url;
+  delete require.cache[require.resolve('../server/providers/deepseek')];
+  const ds = require('../server/providers/deepseek');
+  try {
+    const g = new Geheim(dir);
+    await g.set('deepseek', f.key);
+    ds.init({ geheim: g });
+    const ws = path.join(dir, 'ws');
+    fs.mkdirSync(path.join(ws, '.claude', 'skills', 'wissenschaftlich-schreiben'), { recursive: true });
+    fs.mkdirSync(path.join(ws, '01_themenfindung_und_mindmap'), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.claude', 'skills', 'wissenschaftlich-schreiben', 'SKILL.md'), '# Skill\nKurz schreiben');
+    // Erkennung
+    assert.strictEqual((await ds.detect()).status, 'bereit');
+    assert.strictEqual((await ds.pruefeSchluessel(f.key)).ok, true);
+    assert.strictEqual((await ds.pruefeSchluessel('sk-falsch-falsch-falsch')).ok, false);
+    // Lauf mit Werkzeugen
+    const ev = [];
+    const r = await ds.run({}, { cwd: ws, prompt: 'Mach eine NOTIZ', rulesText: 'Regeln', onEvent: (e) => ev.push(e) }).done;
+    assert.strictEqual(r.error, null);
+    assert.strictEqual(r.text, 'Notiz gespeichert.');
+    assert.deepStrictEqual(ev.filter((e) => e.type === 'activity').map((e) => e.item.kind), ['skill', 'schreiben']);
+    assert.strictEqual(ev.find((e) => e.type === 'activity').item.skill, 'wissenschaftlich-schreiben');
+    assert.strictEqual(fs.readFileSync(path.join(ws, '01_themenfindung_und_mindmap', 'notiz.md'), 'utf8'), 'Hallo\nWelt');
+    assert.deepStrictEqual(f.calls[0].tools.map((t) => t.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch']);
+    assert.deepStrictEqual(f.calls[0].thinking, { type: 'disabled' });
+    assert.match(f.calls[0].messages[0].content, /^Regeln[\s\S]*Werkzeuge in dieser Umgebung/);
+    assert.deepStrictEqual(f.calls[1].messages.map((m) => m.role), ['system', 'user', 'assistant', 'tool', 'tool']);
+    assert.strictEqual(f.calls[1].messages[3].tool_call_id, f.calls[1].messages[2].tool_calls[0].id);
+    assert.match(f.calls[1].messages[3].content, /Skill „wissenschaftlich-schreiben“ geladen/);
+    // Verlauf wird fortgesetzt
+    const r2 = await ds.run({}, { cwd: ws, prompt: 'Und weiter', sessionId: r.sessionId, resume: true, rulesText: 'Regeln', onEvent: () => {} }).done;
+    assert.strictEqual(r2.text, 'Antwort 7');
+    assert.strictEqual(ds.run({}, { cwd: ws, prompt: 'x', sessionId: 'gibtsnicht', resume: true, onEvent: () => {} }) && (await ds.run({}, { cwd: ws, prompt: 'x', sessionId: 'gibtsnicht', resume: true, onEvent: () => {} }).done).errorKind, 'sitzung');
+    // Nachdenken (Gründlichkeit hoch) schickt reasoning_effort und gibt reasoning_content mit zurück
+    const r3 = await ds.run({}, { cwd: ws, prompt: 'DENKEN', effort: 'high', onEvent: () => {} }).done;
+    assert.strictEqual(r3.text, 'Ergebnis nach Nachdenken.');
+    const letzte = f.calls[f.calls.length - 1];
+    assert.deepStrictEqual([letzte.thinking, letzte.reasoning_effort], [{ type: 'enabled' }, 'high']);
+    const r4 = await ds.run({}, { cwd: ws, prompt: 'noch DENKEN', sessionId: r3.sessionId, resume: true, effort: 'high', onEvent: () => {} }).done;
+    const vorletzte = f.calls[f.calls.length - 1].messages.find((m) => m.role === 'assistant' && m.reasoning_content);
+    assert.strictEqual(vorletzte.reasoning_content, 'Ich überlege.', 'reasoning_content wird zurückgeschickt');
+    assert.strictEqual(r4.error, null);
+    // Fehler
+    const e401 = await ds.run({}, { cwd: ws, prompt: 'FEHLER401', onEvent: () => {} }).done;
+    assert.deepStrictEqual([e401.errorKind, e401.retryable], ['anmeldung', false]);
+    assert.match(e401.error, /Schlüssel wurde abgelehnt/);
+    const e402 = await ds.run({}, { cwd: ws, prompt: 'FEHLER402', onEvent: () => {} }).done;
+    assert.deepStrictEqual([e402.errorKind, e402.retryable], ['limit', false]);
+    assert.match(e402.error, /Guthaben/);
+    const e500 = await ds.run({}, { cwd: ws, prompt: 'FEHLER500', onEvent: () => {} }).done;
+    assert.deepStrictEqual([e500.errorKind, e500.retryable], ['netz', true]);
+    // Kein Schlüssel
+    await g.entfernen('deepseek');
+    assert.strictEqual((await ds.run({}, { cwd: ws, prompt: 'x', onEvent: () => {} }).done).errorKind, 'anmeldung');
+    assert.strictEqual((await ds.detect()).status, 'anmeldung_noetig');
+    assert.strictEqual((await ds.detect()).hint.aktion, 'schluessel');
+    // Abbruch
+    await g.set('deepseek', f.key);
+    const h = ds.run({}, { cwd: ws, prompt: 'lang', onEvent: () => {} });
+    h.cancel();
+    const rc = await h.done;
+    assert.strictEqual(rc.canceled, true);
+    assert.strictEqual(rc.error, null);
+  } finally {
+    delete process.env.MANGO_DEEPSEEK_URL;
+    delete require.cache[require.resolve('../server/providers/deepseek')];
+    f.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mango-Facharbeit – dein Assistent für die Facharbeit</title>
+<meta name="description" content="Mango-Facharbeit begleitet dich durch die Facharbeit: Lerntagebuch und Facharbeit direkt in Word, PDF und PowerPoint erstellen, Ordner aufräumen. Kostenloser Download für Windows und Mac.">
+<meta name="theme-color" content="#f2ead7">
+<meta property="og:title" content="Mango-Facharbeit">
+<meta property="og:description" content="Dein Assistent für die Facharbeit. Download für Windows und Mac.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('inter.woff2') format('woff2'); }
+
+:root {
+  --paper: #f2ead7;
+  --paper-2: #e9dfc6;
+  --ink: #221d17;
+  --ink-soft: #52483b;
+  --orange: #e5502b;
+  --mustard: #e9b13a;
+  --teal: #1f7a85;
+  --lake: #2b5f88;
+  --radius: 4px;
+  --wrap: 1080px;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; overflow-x: hidden; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; font-size: 18px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased; overflow-x: hidden;
+}
+
+/* Siebdruck-Körnung über der ganzen Seite */
+body::after {
+  content: ''; position: fixed; inset: 0; z-index: 50; pointer-events: none; opacity: .55; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'><filter id='n' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .13  0 0 0 0 .1  0 0 0 0 .07  0 0 0 .5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--lake); outline-offset: 3px; }
+.wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; width: 100%; }
+
+/* ---------- Kopf ---------- */
+.hero { position: relative; overflow: hidden; padding: 28px 0 72px; min-height: min(92vh, 860px); display: flex; flex-direction: column; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; position: relative; z-index: 2; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: .02em; text-decoration: none; }
+.brand img { width: 30px; height: 30px; }
+.tag {
+  font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  border: 2px solid var(--ink); padding: 4px 11px; border-radius: 999px; background: var(--mustard);
+}
+
+.poster { position: absolute; right: -6vw; top: 40px; width: min(66vw, 700px); aspect-ratio: 1; z-index: 0; }
+.poster svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.poster .m { mix-blend-mode: multiply; }
+
+.hero-body { position: relative; z-index: 2; margin-top: auto; padding-top: 140px; }
+h1 {
+  margin: 0; font-weight: 900; text-transform: uppercase; letter-spacing: -.045em; line-height: .86;
+  font-size: clamp(3.1rem, 14.2vw, 10.6rem);
+}
+h1 span { display: block; }
+h1 .zwei { margin-left: .04em; }
+.unter { max-width: 560px; margin: 28px 0 0; font-size: clamp(1.15rem, 2.4vw, 1.5rem); line-height: 1.35; font-weight: 600; }
+
+.dl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 18px 26px; margin-top: 34px; }
+.dl {
+  display: inline-flex; align-items: center; gap: 14px; text-decoration: none; cursor: pointer;
+  background: var(--orange); color: #fff7ea; border: 3px solid var(--ink); border-radius: var(--radius);
+  padding: 18px 28px; font-size: clamp(1.15rem, 3vw, 1.5rem); font-weight: 800; letter-spacing: -.01em;
+  box-shadow: 7px 7px 0 var(--ink); transition: transform .12s ease, box-shadow .12s ease;
+}
+.dl:hover { transform: translate(3px, 3px); box-shadow: 4px 4px 0 var(--ink); }
+.dl:active { transform: translate(7px, 7px); box-shadow: 0 0 0 var(--ink); }
+.dl svg { width: 28px; height: 28px; flex: none; }
+.meta { font-size: 15px; color: var(--ink-soft); line-height: 1.4; }
+.meta b { color: var(--ink); }
+.meta a { color: var(--ink); text-underline-offset: 3px; }
+.dl.zweit { background: var(--mustard); color: var(--ink); }
+.dl small { display: block; font-size: .62em; font-weight: 700; opacity: .85; letter-spacing: 0; margin-top: 2px; }
+.dl .t { line-height: 1.1; }
+.dl-row.zwei { align-items: stretch; gap: 18px 22px; }
+.dl-row.zwei .dl { padding: 16px 26px; }
+.meta { margin-top: 22px; }
+.macnote { display: none; }
+.ist-mac .macnote { display: block; }
+.ist-mac .winnote { display: none; }
+
+/* ---------- Abschnitte ---------- */
+section { position: relative; z-index: 2; }
+h2 { margin: 0 0 36px; font-size: clamp(1.9rem, 5vw, 3.2rem); font-weight: 900; letter-spacing: -.03em; line-height: 1; text-transform: uppercase; }
+.band { border-top: 3px solid var(--ink); padding: 64px 0 72px; }
+
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 30px 28px; list-style: none; margin: 0; padding: 0; counter-reset: s; }
+.steps li { position: relative; padding-top: 86px; }
+.steps li::before {
+  content: counter(s); counter-increment: s; position: absolute; left: 0; top: 0; width: 66px; height: 66px;
+  display: grid; place-items: center; font-weight: 900; font-size: 30px; color: var(--ink); border: 3px solid var(--ink);
+}
+.steps li:nth-child(1)::before { background: var(--mustard); border-radius: 50%; }
+.steps li:nth-child(2)::before { background: var(--teal); color: #fff7ea; border-radius: 0; }
+.steps li:nth-child(3)::before { background: var(--orange); color: #fff7ea; border-radius: 50% 50% 0 0; }
+.steps li:nth-child(4)::before { background: var(--lake); color: #fff7ea; border-radius: 0 50% 50% 0; }
+.steps h3 { margin: 0 0 6px; font-size: 1.2rem; font-weight: 800; letter-spacing: -.01em; }
+.steps p { margin: 0; font-size: 1rem; color: var(--ink-soft); }
+.steps code { font: inherit; font-weight: 700; color: var(--ink); background: var(--paper-2); padding: 1px 5px; border-radius: 3px; }
+
+.kann { background: var(--ink); color: var(--paper); padding: 56px 0 64px; position: relative; z-index: 2; }
+.kann h2 { color: var(--paper); }
+.kann ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 26px 32px; }
+.kann li { display: grid; grid-template-columns: 34px 1fr; gap: 14px; align-items: start; font-size: 1.02rem; line-height: 1.4; }
+.kann li strong { display: block; font-size: 1.12rem; font-weight: 800; margin-bottom: 2px; }
+.kann li span { color: #cfc4ad; }
+.kann i { display: block; width: 34px; height: 34px; margin-top: 2px; }
+.f1 { background: var(--orange); border-radius: 50%; }
+.f2 { background: var(--mustard); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.f3 { background: var(--teal); }
+.f4 { background: var(--lake); border-radius: 100% 0 0 0; }
+
+.hinweis { padding: 56px 0 24px; }
+.hinweis .box { border: 3px solid var(--ink); border-radius: var(--radius); padding: 24px 26px; background: var(--paper-2); display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; }
+.hinweis .stamp { width: 58px; height: 58px; border-radius: 50%; background: var(--mustard); border: 3px solid var(--ink); display: grid; place-items: center; font-weight: 900; font-size: 30px; }
+.hinweis p { margin: 0; font-size: 1.02rem; }
+.hinweis p + p { margin-top: 8px; color: var(--ink-soft); font-size: .95rem; }
+
+footer { position: relative; z-index: 2; padding: 36px 0 54px; font-size: 15px; color: var(--ink-soft); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: space-between; align-items: center; }
+footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
+.leiste { height: 14px; background: linear-gradient(90deg, var(--orange) 0 25%, var(--mustard) 25% 50%, var(--teal) 50% 75%, var(--lake) 75%); }
+
+@media (max-width: 720px) {
+  body { font-size: 17px; }
+  .poster { top: 56px; width: 84vw; right: -20vw; opacity: .85; }
+  .hero-body { padding-top: 150px; }
+  .dl { box-shadow: 5px 5px 0 var(--ink); width: 100%; justify-content: center; }
+  .hinweis .box { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .dl { transition: none; } }
+@media print { body::after { display: none; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap top">
+    <a class="brand" href="#"><img src="logo.png" alt="" width="30" height="30"> Mango</a>
+    <span class="tag">Beta · Windows &amp; Mac</span>
+  </div>
+
+  <div class="poster" aria-hidden="true">
+    <svg viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
+      <g class="m">
+        <circle cx="360" cy="230" r="178" fill="#e5502b"/>
+        <path d="M60 470a150 150 0 0 1 300 0z" fill="#e9b13a"/>
+        <path d="M330 560V330a105 105 0 0 1 210 0v230z" fill="#1f7a85"/>
+        <path d="M430 600V440a160 160 0 0 1 160 160z" fill="#2b5f88" opacity=".92"/>
+        <path d="M120 250l86 -150l86 150z" fill="#2b5f88" opacity=".9"/>
+      </g>
+      <g fill="none" stroke="#221d17" stroke-width="3">
+        <circle cx="366" cy="224" r="178"/>
+        <path d="M66 476a150 150 0 0 1 300 0z"/>
+        <path d="M336 566V336a105 105 0 0 1 210 0v230z"/>
+      </g>
+      <g stroke="#221d17" stroke-width="5" stroke-linecap="round">
+        <path d="M40 40h150M40 60h150M40 80h150" opacity=".85"/>
+      </g>
+      <g fill="#221d17">
+        <circle cx="500" cy="60" r="5"/><circle cx="530" cy="60" r="5"/><circle cx="560" cy="60" r="5"/>
+        <circle cx="500" cy="90" r="5"/><circle cx="530" cy="90" r="5"/><circle cx="560" cy="90" r="5"/>
+        <circle cx="500" cy="120" r="5"/><circle cx="530" cy="120" r="5"/><circle cx="560" cy="120" r="5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="wrap hero-body">
+    <h1><span>Mango-</span><span class="zwei">Facharbeit</span></h1>
+    <p class="unter">Dein Assistent für die Facharbeit. Er arbeitet direkt in deinem Lerntagebuch und deiner Facharbeit.</p>
+
+    <div class="dl-row zwei">
+      <a class="dl" id="dl-win" href="https://github.com/Spackle01/Mango-Facharbeit/releases">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+        <span class="t">Für Windows<small>Windows 10 und 11</small></span>
+      </a>
+      <a class="dl zweit" id="dl-mac" href="https://github.com/Spackle01/Mango-Facharbeit/releases">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+        <span class="t">Für Mac<small>Apple-Chip (M1 und neuer)</small></span>
+      </a>
+    </div>
+    <p class="meta" id="meta">Kostenlos · <a href="https://github.com/Spackle01/Mango-Facharbeit/releases">Alle Versionen</a></p>
+  </div>
+</header>
+
+<section class="band" id="so-gehts">
+  <div class="wrap">
+    <h2>So geht’s</h2>
+    <ol class="steps">
+      <li>
+        <h3>Installieren</h3>
+        <p class="winnote">Setup herunterladen und starten. Bei der Windows-Warnung: <code>Weitere Informationen</code> → <code>Trotzdem ausführen</code>.</p>
+        <p class="macnote">Die <code>.dmg</code> öffnen und Mango in den Ordner „Programme“ ziehen. Beim ersten Start: Rechtsklick auf Mango → <code>Öffnen</code>. Falls das nicht reicht: <code>Systemeinstellungen</code> → <code>Datenschutz &amp; Sicherheit</code> → <code>Trotzdem öffnen</code>.</p>
+      </li>
+      <li>
+        <h3>KI verbinden</h3>
+        <p class="winnote">Installiere einmal <b>Claude Code</b> oder <b>Antigravity</b> und melde dich an. Oder nimm einen <b>DeepSeek-Schlüssel</b>: einfügen, fertig. Mango zeigt dir alles dafür.</p>
+        <p class="macnote">Auf dem Mac arbeitet Mango mit der <b>DeepSeek-API</b>. Erstelle auf platform.deepseek.com einen Schlüssel, füge ihn in Mango ein, fertig. Er bleibt verschlüsselt auf deinem Mac.</p>
+      </li>
+      <li>
+        <h3>Projekt anlegen</h3>
+        <p>Name, Thema und Abgabedatum eintragen. Schon angefangen? Ziehe deine Dateien einfach ins Fenster.</p>
+      </li>
+      <li>
+        <h3>Losschreiben</h3>
+        <p>Sag der KI, was du gemacht hast. Sie trägt es ins Lerntagebuch ein, in kurzen, einfachen Sätzen.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="kann">
+  <div class="wrap">
+    <h2>Das kann Mango</h2>
+    <ul>
+      <li><i class="f1"></i><div><strong>Arbeitet in Word</strong><span>Lerntagebuch und Facharbeit bleiben echte Word-Dateien in deinem Schulformat.</span></div></li>
+      <li><i class="f2"></i><div><strong>PDF und PowerPoint</strong><span>Mit Vorschau in der App und Sprechernotizen für die Verteidigung.</span></div></li>
+      <li><i class="f3"></i><div><strong>Originale geschützt</strong><span>Die Unterlagen der Schule bleiben unverändert. Gearbeitet wird in Kopien.</span></div></li>
+      <li><i class="f4"></i><div><strong>Ordnung im Ordner</strong><span>Mango räumt auf, nichts geht verloren. Alles lässt sich zurückholen.</span></div></li>
+    </ul>
+  </div>
+</section>
+
+<section class="hinweis">
+  <div class="wrap">
+    <div class="box">
+      <div class="stamp" aria-hidden="true">!</div>
+      <div>
+        <p><b>Die Arbeit bleibt deine.</b> KI-Nutzung musst du nach den Regeln deiner Schule kennzeichnen. Mango exportiert dafür die Gesprächsverläufe für den Anhang.</p>
+        <p>Mango ist ein privates Projekt und gehört nicht zur Schule. Die Beta ist nicht signiert, deshalb zeigen Windows und macOS eine Warnung. Die Mac-Version ist neu und noch nicht auf vielen Geräten getestet. DeepSeek wird nach Verbrauch abgerechnet, das zahlst du selbst.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Mango-Facharbeit · Beta</span>
+    <span><a href="https://github.com/Spackle01/Mango-Facharbeit">Quellcode auf GitHub</a> · <a href="https://github.com/Spackle01/Mango-Facharbeit/releases">Alle Versionen</a></span>
+  </div>
+</footer>
+<div class="leiste" aria-hidden="true"></div>
+
+<script>
+// Die Buttons zeigen immer auf die neueste Datei. Ohne JavaScript führen sie zur Release-Seite.
+(function () {
+  var repo = 'Spackle01/Mango-Facharbeit';
+  var seite = 'https://github.com/' + repo + '/releases';
+  var ua = navigator.userAgent || '';
+  var istMac = /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad|iPod/.test(ua);
+  var win = document.getElementById('dl-win');
+  var mac = document.getElementById('dl-mac');
+  var meta = document.getElementById('meta');
+
+  if (istMac) {
+    document.documentElement.classList.add('ist-mac');
+    mac.classList.remove('zweit');
+    win.classList.add('zweit');
+    mac.parentNode.insertBefore(mac, win); // das eigene System steht vorn
+  }
+
+  // Safari meldet immer "Intel". Die Grafikkarte verrät den Apple-Chip.
+  function appleChip() {
+    try {
+      var gl = document.createElement('canvas').getContext('webgl');
+      var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      if (/Apple (M|GPU)/i.test(r)) return true;
+      if (/Intel|AMD|Radeon/i.test(r)) return false;
+    } catch (e) { /* egal */ }
+    return true;
+  }
+
+  var muster = { win: /\.exe$/i, arm: /-Mac-arm64\.dmg$/i, intel: /-Mac-x64\.dmg$/i };
+  function finde(rel, art) { return rel.assets.find(function (a) { return muster[art].test(a.name); }); }
+
+  fetch('https://api.github.com/repos/' + repo + '/releases?per_page=15', { headers: { Accept: 'application/vnd.github+json' } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+    .then(function (list) {
+      var offen = list.filter(function (r) { return !r.draft; });
+      function neueste(art) { var rel = offen.find(function (r) { return !!finde(r, art); }); return rel && { rel: rel, a: finde(rel, art) }; }
+      var w = neueste('win'), arm = neueste('arm'), intel = neueste('intel');
+      if (w) win.href = w.a.browser_download_url;
+
+      var macArt = (istMac && !appleChip() && intel) ? intel : (arm || intel);
+      if (macArt) {
+        mac.href = macArt.a.browser_download_url;
+        mac.querySelector('small').textContent = macArt === intel ? 'Intel-Chip' : 'Apple-Chip (M1 und neuer)';
+      }
+
+      var ref = istMac ? macArt : w;
+      var teile = [];
+      if (ref) {
+        teile.push('<b>Version ' + (ref.rel.tag_name || '').replace(/^v/, '').replace(/[<>&"]/g, '') + '</b>');
+        teile.push(Math.round(ref.a.size / 1000000) + ' MB');
+      }
+      teile.push('kostenlos');
+      var html = teile.join(' · ');
+      if (arm && intel) {
+        var anderer = macArt === intel ? arm : intel;
+        html += '<br>Mac mit ' + (macArt === intel ? 'Apple-Chip' : 'Intel-Chip') + '? <a href="' + anderer.a.browser_download_url + '">Hier herunterladen</a>';
+      }
+      html += '<br><a href="' + seite + '">Alle Versionen</a>';
+      meta.innerHTML = html;
+    })
+    .catch(function () { /* bleibt bei der Release-Seite */ });
+})();
+</script>
+</body>
+</html>

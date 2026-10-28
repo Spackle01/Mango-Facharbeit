@@ -1,0 +1,702 @@
+'use strict';
+// Integrationstest der HTTP-API. Statt der echten CLIs laufen Test-Doubles aus
+// test/fixtures/bin, damit der Test ohne Konto und ohne Netz reproduzierbar ist.
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const ROOT = path.join(__dirname, '..');
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-api-'));
+const HOME = path.join(TMP, 'home');
+const WS = path.join(HOME, 'Dokumente', 'Facharbeit Test');
+const LOG = path.join(TMP, 'claude-calls.ndjson');
+const AGY_LOG = path.join(TMP, 'agy-calls.ndjson');
+fs.mkdirSync(path.join(HOME, 'Dokumente'), { recursive: true });
+
+let server;
+let base;
+let token;
+
+function startServer() {
+  return new Promise((resolve, reject) => {
+    const port = 4800 + Math.floor(Math.random() * 400);
+    server = spawn(process.execPath, [path.join(ROOT, 'server/index.js'), '--no-open', '--port', String(port)], {
+      env: {
+        ...process.env,
+        HOME, USERPROFILE: HOME, MANGO_DATA_DIR: path.join(TMP, 'data'), MANGO_OHNE_KONVERTIERUNG: '1', MANGO_UPDATE_API: 'http://127.0.0.1:9/releases', FAKE_LOG: LOG, FAKE_AGY_LOG: AGY_LOG,
+        PATH: `${path.join(__dirname, 'fixtures', 'bin')}${path.delimiter}${process.env.PATH}`,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    server.stdout.on('data', (d) => {
+      out += d;
+      const m = /läuft: (http:\/\/127\.0\.0\.1:\d+)\//.exec(out);
+      if (m && !base) { base = m[1]; resolve(); }
+    });
+    server.stderr.on('data', (d) => process.stderr.write(d));
+    server.on('exit', (code) => { if (!base) reject(new Error(`Server beendet (${code})`)); });
+  });
+}
+
+async function call(method, url, body, { raw = false } = {}) {
+  const res = await fetch(base + url, {
+    method,
+    headers: { 'x-mango-token': token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (raw) return res;
+  const data = await res.json();
+  if (!res.ok) throw Object.assign(new Error(data.error), { status: res.status, data });
+  return data;
+}
+
+async function send(chatId, text, attachments) {
+  const res = await call('POST', `/api/chats/${chatId}/messages`, { text, attachments }, { raw: true });
+  if (!res.ok) { const d = await res.json(); throw Object.assign(new Error(d.error), { status: res.status, data: d }); }
+  const events = (await res.text()).trim().split('\n').map((l) => JSON.parse(l));
+  return { events, done: events.find((e) => e.type === 'done') };
+}
+
+async function waitFor(fn, ms = 10000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error('Zeitüberschreitung');
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
+test.before(async () => {
+  await startServer();
+  const html = await (await fetch(`${base}/`)).text();
+  token = /name="mango-token" content="([a-f0-9]+)"/.exec(html)[1];
+});
+
+test.after(() => { if (server) server.kill(); });
+
+test('Sicherheit: Token, Host und Ursprung werden geprüft', async () => {
+  assert.strictEqual((await fetch(`${base}/api/state`)).status, 403);
+  assert.strictEqual((await fetch(`${base}/api/state`, { headers: { 'x-mango-token': token, Origin: 'http://evil.example' } })).status, 403);
+  const res = await call('GET', `/api/files/raw?path=${encodeURIComponent('../../etc/passwd')}`, null, { raw: true });
+  assert.ok([404, 409].includes(res.status));
+});
+
+let importId = null;
+let importOrdner = null;
+let anhangPfad = null;
+
+test('Kompletter Ablauf', async (t) => {
+  let state = await call('GET', '/api/state');
+  assert.strictEqual(state.project, null);
+  assert.strictEqual(state.projectError, null);
+
+  await t.test('Anbieter werden erkannt', async () => {
+    state = await waitFor(async () => { const s = await call('GET', '/api/state'); return !s.pruefung && s.providers.every((p) => p.status !== 'pruefe') && s; });
+    const claude = state.providers.find((p) => p.id === 'claude');
+    const agy = state.providers.find((p) => p.id === 'antigravity');
+    assert.strictEqual(claude.status, 'bereit');
+    assert.strictEqual(claude.label, 'Angemeldet');
+    assert.strictEqual(agy.status, 'ungeprueft');
+    assert.strictEqual(state.settings.provider, 'claude', 'Claude hat Vorrang, wenn es bereit ist');
+    assert.deepStrictEqual(state.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high', deepseek: '' }, 'neuestes Sonnet und bestes Gemini-Modell');
+  });
+
+  await t.test('Erster Start: Vorschlag und Einrichtung', async () => {
+    const s = await call('GET', '/api/suggest-workspace?titel=Test');
+    assert.ok(s.path.startsWith(path.join(HOME, 'Dokumente')));
+    state = await call('POST', '/api/setup', { workspace: WS, angaben: { name: 'Alex Beispiel', titel: 'Testthema', abgabedatum: '2026-12-07' } });
+    assert.strictEqual(state.project.angaben.name, 'Alex Beispiel');
+    assert.strictEqual(state.project.aufgaben.length, 27);
+    assert.ok(fs.existsSync(path.join(WS, '00_vorgaben', 'anforderungen.md')));
+    assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', 'quellenrecherche', 'SKILL.md')));
+    assert.ok(fs.existsSync(path.join(WS, '.agents', 'skills', 'sprachpruefung', 'scripts', 'ai_tell_scan.py')));
+    assert.ok(fs.existsSync(path.join(WS, '.agents', 'rules', 'mango-facharbeit.md')));
+    assert.ok(fs.existsSync(path.join(WS, 'FACHARBEIT.md')));
+    assert.strictEqual(state.chats.length, 1);
+  });
+
+  await t.test('Projektangaben bearbeiten', async () => {
+    const p = await call('PUT', '/api/project', { angaben: { lehrkraft: 'Frau Muster', abgabedatum: 'kein datum' } });
+    assert.strictEqual(p.angaben.lehrkraft, 'Frau Muster');
+    assert.strictEqual(p.angaben.abgabedatum, '2026-12-07');
+  });
+
+  const chatId = state.chats[0].id;
+  await t.test('Chatten, Streaming und Sitzung fortsetzen', async () => {
+    const r1 = await send(chatId, 'Hallo, hilf mir beim Exposé');
+    assert.strictEqual(r1.events[0].type, 'start');
+    assert.ok(r1.events.filter((e) => e.type === 'text').length > 1, 'Antwort wird gestreamt');
+    assert.strictEqual(r1.done.message.status, 'fertig');
+    assert.match(r1.done.message.text, /^Echo: Hallo, hilf mir beim Exposé/);
+    assert.strictEqual(r1.done.chat.title, 'Beim Exposé');
+    const r2 = await send(chatId, 'Zweite Frage');
+    assert.strictEqual(r2.done.message.status, 'fertig');
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(calls[0].args.includes('--session-id'));
+    assert.ok(calls[0].input.includes('<projektkontext stand='));
+    assert.ok(calls[1].args.includes('--resume'));
+    assert.ok(calls[1].input.includes('<projektkontext>unverändert'));
+    assert.ok(calls[0].args.includes('--append-system-prompt'));
+  });
+
+  await t.test('Dateien: neue Datei, gesicherte Fassung, Arbeitsstand-Regeln', async () => {
+    const { done } = await send(chatId, 'Bitte DATEI anlegen');
+    const m = done.message;
+    const neu = m.files.find((f) => f.path === '02_expose_und_zeitplan/expose_v1.md');
+    const geaendert = m.files.find((f) => f.path === '02_expose_und_zeitplan/expose_vorlage.md');
+    assert.strictEqual(neu.aktion, 'neu');
+    assert.strictEqual(geaendert.aktion, 'geaendert');
+    assert.ok(geaendert.version.startsWith('.facharbeit/versionen/02_expose_und_zeitplan/expose_vorlage.md/'));
+    assert.ok(!fs.readFileSync(path.join(WS, geaendert.version), 'utf8').includes('Geändert vom Test'), 'vorherige Fassung gesichert');
+    assert.ok(!m.text.includes('```arbeitsstand'));
+    const byId = Object.fromEntries(m.updates.aufgaben.map((a) => [a.id, a]));
+    assert.strictEqual(byId.expose.nach, 'erledigt');
+    assert.strictEqual(byId.gliederung.nach, 'in_arbeit');
+    assert.strictEqual(m.updates.vorschlaege[0].id, 'thema');
+    assert.strictEqual(m.updates.projekt[0].feld, 'forschungsfrage');
+    const s = await call('GET', '/api/state');
+    assert.strictEqual(s.project.aufgaben.find((a) => a.id === 'thema').status, 'offen');
+    assert.strictEqual(s.project.merken[0].text, 'Methode: Bildanalyse');
+    const info = await call('GET', `/api/files/info?path=${encodeURIComponent('02_expose_und_zeitplan/expose_vorlage.md')}`);
+    assert.strictEqual(info.versions.length, 1);
+    const restored = await call('POST', '/api/files/restore', { path: '02_expose_und_zeitplan/expose_vorlage.md', version: info.versions[0].path });
+    assert.match(restored.path, /expose_vorlage_wiederhergestellt_/);
+  });
+
+  await t.test('Arbeitsstand: Status durch den Nutzer ändern', async () => {
+    const p = await call('PATCH', '/api/aufgaben/thema', { status: 'erledigt' });
+    assert.strictEqual(p.aufgaben.find((a) => a.id === 'thema').status, 'erledigt');
+    await assert.rejects(call('PATCH', '/api/aufgaben/thema', { status: 'fertig' }), (e) => e.status === 400);
+  });
+
+  await t.test('Anhänge: hochladen, verschieben, Textauszug', async () => {
+    const docx = fs.readFileSync(path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx'));
+    const up = await (await fetch(`${base}/api/uploads`, { method: 'POST', headers: { 'x-mango-token': token, 'x-filename': encodeURIComponent('Mein Lerntagebuch.docx') }, body: docx })).json();
+    assert.strictEqual(up.lesbar, 'ja');
+    assert.strictEqual(up.kindLabel, 'Word');
+    const bad = await (await fetch(`${base}/api/uploads`, { method: 'POST', headers: { 'x-mango-token': token, 'x-filename': 'archiv.zip' }, body: 'PK' })).json();
+    assert.strictEqual(bad.lesbar, 'nein');
+    const { done, events } = await send(chatId, 'Lies den Anhang', [{ staged: up.id }, { staged: bad.id }, { path: '02_expose_und_zeitplan/expose_v1.md' }]);
+    const user = events.find((e) => e.type === 'start').userMessage;
+    assert.strictEqual(user.attachments.length, 3);
+    assert.match(user.attachments[0].path, /^anhaenge\/\d{4}-\d{2}-\d{2}\/Mein Lerntagebuch\.docx$/);
+    assert.ok(fs.existsSync(path.join(WS, user.attachments[0].path)));
+    assert.ok(fs.existsSync(path.join(WS, user.attachments[0].extrakt)));
+    anhangPfad = user.attachments[0].path;
+    assert.strictEqual(user.attachments[1].lesbar, 'nein');
+    assert.strictEqual(done.message.status, 'fertig');
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = calls[calls.length - 1].input;
+    assert.match(last, /<anhaenge/);
+    assert.match(last, /Textauszug: \.facharbeit\/extrakte\/anhaenge\//);
+    assert.match(last, /archiv\.zip \(Archiv.*NICHT LESBAR/);
+    await assert.rejects(send(chatId, 'x', [{ staged: up.id }]), (e) => e.status === 410);
+  });
+
+  await t.test('Antwort stoppen', async () => {
+    const pending = send(chatId, 'LANGSAM bitte');
+    await waitFor(async () => (await call('GET', '/api/state')).running.includes(chatId));
+    await call('POST', `/api/chats/${chatId}/stop`);
+    const { done } = await pending;
+    assert.strictEqual(done.message.status, 'abgebrochen');
+  });
+
+  await t.test('Anmeldefehler wird verständlich gemeldet', async () => {
+    const { done } = await send(chatId, 'AUTHFEHLER');
+    assert.strictEqual(done.message.status, 'fehler');
+    assert.strictEqual(done.message.errorKind, 'anmeldung');
+    assert.strictEqual(done.message.hinweis.befehl, 'claude auth login');
+    const claude = done.providers.find((p) => p.id === 'claude');
+    assert.strictEqual(claude.status, 'anmeldung_noetig');
+    await assert.rejects(send(chatId, 'Hallo'), (e) => e.status === 409 && e.data.code === 'anbieter');
+    const prov = await call('POST', '/api/providers/claude/check');
+    assert.strictEqual(prov.find((p) => p.id === 'claude').status, 'bereit');
+  });
+
+  await t.test('Anbieterwechsel zu Antigravity erhält den Projektstand', async () => {
+    const r = await call('PUT', '/api/settings', { provider: 'antigravity' });
+    assert.strictEqual(r.settings.provider, 'antigravity');
+    const prov = await call('POST', '/api/providers/antigravity/check');
+    assert.strictEqual(prov.find((p) => p.id === 'antigravity').status, 'verbunden');
+    const { done, events } = await send(chatId, 'Und jetzt mit Antigravity?');
+    assert.strictEqual(done.message.status, 'fertig');
+    assert.strictEqual(done.message.provider, 'antigravity');
+    assert.strictEqual(done.message.model, 'gemini-3.1-pro-high');
+    assert.match(done.message.text, /Hallo von Antigravity/);
+    assert.match(done.message.activity[0].label, /Liest 00_vorgaben\/anforderungen\.md/);
+    assert.ok(events.some((e) => e.type === 'activity'));
+    const chat = await call('GET', `/api/chats/${chatId}`);
+    assert.strictEqual(chat.sessions.antigravity.id, '055a398f-db14-4c5f-abbb-1bf03f8120a7');
+    assert.ok(chat.sessions.claude.id);
+    await call('PUT', '/api/settings', { provider: 'claude', theme: 'dark' });
+  });
+
+  await t.test('Modellauswahl für beide Anbieter', async () => {
+    let s = await call('GET', '/api/state');
+    assert.deepStrictEqual(s.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high', deepseek: '' }, 'sparsame Voreinstellung');
+    assert.strictEqual(s.settings.gruendlichkeit, 'ausgewogen');
+    const first = JSON.parse(fs.readFileSync(LOG, 'utf8').trim().split('\n')[0]);
+    assert.strictEqual(first.args[first.args.indexOf('--model') + 1], 'sonnet');
+    assert.strictEqual(first.args[first.args.indexOf('--effort') + 1], 'medium');
+    const claude = s.providers.find((p) => p.id === 'claude');
+    const agy = s.providers.find((p) => p.id === 'antigravity');
+    assert.strictEqual(claude.modelWahl, true);
+    assert.deepStrictEqual(claude.models.filter((m) => m.gruppe === 'familie').map((m) => m.id), ['fable', 'opus', 'sonnet', 'haiku']);
+    assert.ok(claude.models.some((m) => m.id === 'claude-opus-5-5' && m.name === 'Opus 5.5'));
+    assert.deepStrictEqual(agy.models.map((m) => m.id), ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.1-pro-high'], 'Liste aus „agy models“');
+    assert.strictEqual(agy.models[2].name, 'Gemini 3.1 Pro (High)');
+
+    await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus & calc' } }), (e) => e.status === 400);
+    await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus"; rm -rf /' } }), (e) => e.status === 400);
+    let r = await call('PUT', '/api/settings', { modelle: { claude: 'opus' }, gruendlichkeit: 'gruendlich' });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: 'gemini-3.1-pro-high', deepseek: '' });
+    assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich');
+    r = await call('PUT', '/api/settings', { gruendlichkeit: 'egal' });
+    assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich', 'ungültige Werte werden ignoriert');
+
+    const chat = await call('POST', '/api/chats');
+    let res = await send(chat.id, 'Mit Opus bitte');
+    let calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    let args = calls[calls.length - 1].args;
+    assert.strictEqual(args[args.indexOf('--model') + 1], 'opus');
+    assert.strictEqual(args[args.indexOf('--effort') + 1], 'high');
+    assert.strictEqual(res.done.message.model, 'fake-opus');
+    assert.strictEqual(res.done.message.modelWahl, 'opus');
+
+    // Nicht verfügbares Modell: Antwort mit der Voreinstellung, Hinweis, eigene Wahl bleibt.
+    await call('PUT', '/api/settings', { modelle: { claude: 'claude-gibtsnicht-9' } });
+    res = await send(chat.id, 'Und jetzt?');
+    assert.strictEqual(res.done.message.status, 'fertig');
+    assert.strictEqual(res.done.message.modellErsatz, 'claude-gibtsnicht-9');
+    assert.strictEqual(res.done.message.modellSelbst, true);
+    assert.ok(!/issue with the selected model/.test(res.done.message.text), 'Fehlertext des ersten Versuchs entfernt');
+    calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    args = calls[calls.length - 1].args;
+    assert.ok(!args.includes('--model') && !args.includes('--effort'), 'zweiter Versuch wie im Terminal');
+    assert.ok(args.includes('--resume'), 'bestehende Sitzung läuft weiter');
+    s = await call('GET', '/api/state');
+    assert.strictEqual(s.settings.modelle.claude, 'claude-gibtsnicht-9', 'eigene Wahl wird nicht verändert');
+    assert.strictEqual(s.providers.find((p) => p.id === 'claude').usable, true);
+
+    // Standard: kein --model, Sitzung läuft weiter.
+    await call('PUT', '/api/settings', { modelle: { claude: '' } });
+    res = await send(chat.id, 'Wieder Standard');
+    assert.strictEqual(res.done.message.status, 'fertig');
+    calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    args = calls[calls.length - 1].args;
+    assert.ok(!args.includes('--model'));
+    assert.ok(args.includes('--resume'), 'Modellwechsel behält die Sitzung');
+
+    // Antigravity bekommt das gewählte Modell ebenfalls.
+    await call('PUT', '/api/settings', { provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } });
+    res = await send(chat.id, 'Mit Gemini Pro');
+    assert.strictEqual(res.done.message.model, 'gemini-3.1-pro-high');
+    const agyCalls = fs.readFileSync(AGY_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const agyArgs = agyCalls[agyCalls.length - 1].args;
+    assert.strictEqual(agyArgs[agyArgs.indexOf('--model') + 1], 'gemini-3.1-pro-high');
+    assert.ok(!agyArgs.includes('--effort'), 'Denkstufe steht im Modellnamen');
+    assert.strictEqual(agyArgs[agyArgs.length - 2], '-p', 'Prompt bleibt das letzte Argument');
+    // Modell ohne Stufe im Namen: Gründlichkeit wird als --effort übergeben.
+    await call('PUT', '/api/settings', { modelle: { antigravity: 'gemini-3.8-flash' } });
+    res = await send(chat.id, 'Mit Flash');
+    const lastAgy = fs.readFileSync(AGY_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).pop().args;
+    assert.strictEqual(lastAgy[lastAgy.indexOf('--model') + 1], 'gemini-3.8-flash');
+    assert.strictEqual(lastAgy[lastAgy.indexOf('--effort') + 1], 'high');
+    r = await call('PUT', '/api/settings', { provider: 'claude', modelle: { claude: 'sonnet', antigravity: '' }, gruendlichkeit: 'ausgewogen' });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '' });
+  });
+
+  await t.test('Abgabe-Dateien: Originale geschützt, KI arbeitet in der Word-Kopie', async () => {
+    const files = await call('GET', '/api/files');
+    const liste = (files.files || files).map((f) => f.path);
+    const lt = liste.find((p) => /^abgabe\/Lerntagebuch_.*\.docx$/.test(p));
+    assert.ok(lt, 'Lerntagebuch liegt in abgabe/');
+    assert.ok(liste.some((p) => /^abgabe\/Facharbeit_.*\.docx$/.test(p)), 'Facharbeit liegt in abgabe/');
+    assert.ok(liste.includes('00_vorgaben/Lerntagebuch-Vorlage.docx'), 'Original der Schule in 00_vorgaben/');
+    assert.ok(!liste.some((p) => p.startsWith('06_') && p.endsWith('.docx')), 'keine zweite Vorlage in 06_');
+    const original = fs.readFileSync(path.join(WS, '00_vorgaben', 'Lerntagebuch-Vorlage.docx'));
+    const chat = await call('POST', '/api/chats');
+    const { done } = await send(chat.id, 'Trag das bitte ins LERNTAGEBUCH ein');
+    const m = done.message;
+    assert.ok(!/```word/.test(m.text), 'Block wird nicht angezeigt');
+    assert.strictEqual(m.word.length, 1);
+    assert.strictEqual(m.word[0].datei, lt);
+    assert.strictEqual(m.word[0].ok, 2);
+    assert.strictEqual(m.word[0].fehler.length, 1);
+    assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['wissenschaftlich-schreiben', 'sprachpruefung'], nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, Skills waren geladen');
+    // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
+    const extract = require('../server/extract');
+    const info = await extract.analyse(path.join(WS, ...lt.split('/')));
+    assert.strictEqual(info.lesbar, 'ja');
+    assert.match(info.text, /Projektarbeit über \*\*Solarenergie\*\*/);
+    assert.match(info.text, /4\. Kunst \| kreativ \| zeitaufwendig/);
+    assert.match(info.text, /Lerntagebuch zur/, 'Vorlage bleibt erhalten');
+    assert.ok(original.equals(fs.readFileSync(path.join(WS, '00_vorgaben', 'Lerntagebuch-Vorlage.docx'))), 'Original unverändert');
+    const nummern = fs.readFileSync(path.join(WS, '.facharbeit', 'extrakte', ...`${lt}.txt`.split('/')), 'utf8');
+    assert.match(nummern, /^\[\d+\] Ich habe in Klasse 11/m, 'Fassung mit Absatznummern ist aktuell');
+    // Neue Word-Datei ja, Originale nie.
+    const r2 = (await send(chat.id, 'LERNTAGEBUCH NEU')).done.message;
+    const neu = r2.word.find((x) => x.datei === 'abgabe/Expose.docx');
+    assert.strictEqual(neu.ok, 1);
+    assert.ok(fs.existsSync(path.join(WS, 'abgabe', 'Expose.docx')));
+    const orig = r2.word.find((x) => x.datei.startsWith('00_vorgaben/'));
+    assert.strictEqual(orig.ok, 0);
+    assert.match(orig.hinweis, /Originale/);
+  });
+
+  await t.test('Sprachprüfung: Floskeln im eingetragenen Text werden einmal überarbeitet', async () => {
+    const chat = await call('POST', '/api/chats');
+    const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
+    const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
+    assert.strictEqual(m.text, 'Eingetragen.', 'Text der Überarbeitung wird nicht angezeigt');
+    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ['wissenschaftlich-schreiben', 'sprachpruefung'], nachgeholt: false });
+    assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen/.test(a.label)));
+    const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
+    assert.strictEqual(w.ok, 2);
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
+    assert.strictEqual(calls.length, 2, 'ein Überarbeitungsdurchlauf');
+    assert.match(calls[0].input, /<schreibregeln>.*wissenschaftlich-schreiben/);
+    assert.ok(calls[1].args.includes('--resume'), 'Überarbeitung in derselben Sitzung');
+    assert.match(calls[1].input, /„In der heutigen Zeit spielt Zeitmanagement eine entscheidende Rolle\.“ – Aufwärm-Einstieg/);
+    const text = require('../server/extract').docxToText(fs.readFileSync(path.join(WS, ...w.datei.split('/'))));
+    assert.match(text, /Ich habe über Windkraft geschrieben\./);
+    assert.ok(!/heutigen Zeit/.test(text));
+  });
+
+  await t.test('Schreib-Skills: nicht geladen → die App lässt sie nachholen', async () => {
+    const chat = await call('POST', '/api/chats');
+    const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
+    const m = (await send(chat.id, 'OHNESKILL LERNTAGEBUCH Ergänzung')).done.message;
+    assert.strictEqual(m.stil.nachgeholt, true);
+    assert.deepStrictEqual(m.stil.skills, ['wissenschaftlich-schreiben', 'sprachpruefung']);
+    assert.ok(m.activity.some((a) => /Schreib-Skills nachholen/.test(a.label)));
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
+    assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
+    assert.match(calls[1].input, /Pflicht-Skills nicht geladen \(`wissenschaftlich-schreiben`, `sprachpruefung`\)/);
+    assert.match(calls[1].input, /aktuelle Absatznummern in \.facharbeit\/extrakte\/abgabe\//);
+  });
+
+  await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {
+    const chat = await call('POST', '/api/chats');
+    const m = (await send(chat.id, 'ERSTELLE eine Präsentation und ein PDF')).done.message;
+    assert.ok(!/```erstellen/.test(m.text), 'Block wird nicht angezeigt');
+    assert.deepStrictEqual(m.word.map((x) => [x.datei, x.aktion, x.ok]), [['abgabe/Praesentation.pptx', 'neu', 1], ['abgabe/Info.pdf', 'neu', 1]]);
+    assert.ok(m.files.some((f) => f.path === 'abgabe/Praesentation.pptx' && f.aktion === 'neu' && f.kind === 'praesentation'));
+    assert.strictEqual(m.stil.nachgeholt, false, 'Skills waren geladen');
+    const v = await call('GET', '/api/files/vorschau?path=abgabe/Praesentation.pptx');
+    assert.strictEqual(v.typ, 'folien');
+    assert.strictEqual(v.folien[1].notizen, 'Das sage ich dazu.');
+    assert.strictEqual(v.seiten.folien.length, 2, 'Folien werden gezeichnet');
+    assert.match(v.seiten.folien[0], /Titel der Arbeit/);
+    assert.deepStrictEqual(await call('POST', '/api/files/vorschau/echt', { path: 'abgabe/Praesentation.pptx' }), { ok: false }, 'ohne Umwandlung bleibt es bei der eigenen Ansicht');
+    await assert.rejects(call('GET', '/api/files/vorschau-pdf?path=abgabe/Praesentation.pptx'), /Keine Vorschau/);
+    assert.strictEqual((await call('GET', '/api/files/vorschau?path=abgabe/Info.pdf')).typ, 'pdf');
+    const pdf = await call('GET', '/api/files/raw?path=abgabe/Info.pdf', null, { raw: true });
+    assert.strictEqual(pdf.headers.get('content-type'), 'application/pdf');
+    assert.ok(!/sandbox/.test(pdf.headers.get('content-security-policy') || ''), 'PDF darf im Viewer angezeigt werden');
+    assert.match(pdf.headers.get('content-disposition'), /^inline/);
+    const word = await call('GET', '/api/files/raw?path=abgabe/Praesentation.pptx', null, { raw: true });
+    assert.match(word.headers.get('content-disposition'), /^attachment/);
+    await assert.rejects(call('GET', '/api/files/vorschau?path=abgabe/gibtsnicht.pdf'), /nicht gefunden/);
+    await assert.rejects(call('GET', '/api/files/vorschau?path=../x.pdf'), /nicht gefunden/);
+  });
+
+  await t.test('Aufräumen: Fundstellen im Kontext, Plan wird ausgeführt und lässt sich zurücknehmen', async () => {
+    fs.writeFileSync(path.join(WS, 'lose_notiz.md'), 'Notiz');
+    fs.writeFileSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md'), 'Alt');
+    fs.writeFileSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v2.md'), 'Neu');
+    fs.writeFileSync(path.join(WS, '02_expose_und_zeitplan', '~$sperre.docx'), 'x');
+    const o = await call('GET', '/api/ordnung');
+    assert.ok(o.funde.some((f) => f.path === 'lose_notiz.md' && /lose/.test(f.grund)));
+    assert.ok(o.funde.some((f) => f.path === '02_expose_und_zeitplan/umfrage_v1.md' && f.vorschlag === 'archivieren'));
+    const chat = await call('POST', '/api/chats');
+    const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
+    const m = (await send(chat.id, 'RAEUME auf')).done.message;
+    const call1 = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l))[0];
+    assert.match(call1.input, /Aufräumen nötig \(Block `aufraeumen`/);
+    assert.match(call1.input, /- lose_notiz\.md: liegt lose im Hauptordner/);
+    assert.ok(!/```aufraeumen/.test(m.text));
+    assert.deepStrictEqual(m.aufgeraeumt.map((x) => x.ok), [true, true]);
+    assert.ok(fs.existsSync(path.join(WS, '01_themenfindung_und_mindmap', 'lose_notiz.md')));
+    assert.ok(!fs.existsSync(path.join(WS, 'lose_notiz.md')));
+    assert.ok(!fs.existsSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md')));
+    assert.ok(!fs.existsSync(path.join(WS, '02_expose_und_zeitplan', '~$sperre.docx')), 'Reste räumt die App selbst weg');
+    assert.deepStrictEqual(m.aufgeraeumtAuto, { reste: 1, leereOrdner: 0 });
+    assert.strictEqual((await call('GET', '/api/ordnung')).anzahl, 0, 'danach ist alles aufgeräumt');
+    const z = (await call('POST', `/api/chats/${chat.id}/messages/${m.id}/aufraeumen/rueckgaengig`, {})).message;
+    assert.ok(z.aufgeraeumt.every((x) => x.zurueck));
+    assert.ok(fs.existsSync(path.join(WS, 'lose_notiz.md')));
+    assert.ok(fs.existsSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md')));
+    await assert.rejects(call('POST', `/api/chats/${chat.id}/messages/${m.id}/aufraeumen/rueckgaengig`, {}), /nichts rückgängig/);
+    // wieder weglegen, damit spätere Tests unberührt bleiben
+    fs.rmSync(path.join(WS, 'lose_notiz.md'));
+    fs.rmSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v1.md'));
+    fs.rmSync(path.join(WS, '02_expose_und_zeitplan', 'umfrage_v2.md'));
+  });
+
+  await t.test('Update: ohne neuere Version kein Knopf, Einstellung zum Abschalten', async () => {
+    const u = await call('GET', '/api/update?neu=1');
+    assert.strictEqual(u.neu, null, 'ohne erreichbares GitHub gibt es kein Update');
+    assert.strictEqual(u.direkt, false, 'im Browser-Modus nur Hinweis auf die Release-Seite');
+    await assert.rejects(call('POST', '/api/update/installieren', {}), /(installierten Windows-App|kein neueres)/);
+    await call('PUT', '/api/settings', { updatePruefen: false });
+    assert.strictEqual((await call('GET', '/api/update')).aus, true);
+    await call('PUT', '/api/settings', { updatePruefen: true });
+  });
+
+  await t.test('Exporte: Gesprächsverläufe, Word, Gesamtarbeit, Sicherung', async () => {
+    const tr = await call('POST', '/api/export/transcripts');
+    const md = fs.readFileSync(path.join(WS, tr.path), 'utf8');
+    assert.match(md, /# Anlage: Vollständige Verläufe der KI-Gespräche/);
+    assert.match(md, /### Prompt 1 /);
+    assert.match(md, /Antigravity/);
+    assert.ok(fs.existsSync(path.join(WS, tr.docx)));
+    const d = await call('POST', '/api/export/docx', { path: '02_expose_und_zeitplan/expose_v1.md' });
+    assert.ok(fs.existsSync(path.join(WS, d.path)));
+    // Neue Arbeitsräume: die Facharbeit liegt als Word-Datei in abgabe/.
+    await assert.rejects(call('POST', '/api/export/facharbeit'), /abgabe\//);
+    fs.writeFileSync(path.join(WS, '05_facharbeit_entwurf', '02_einleitung.md'), '# 1 Einleitung\n\nText.');
+    const fa = await call('POST', '/api/export/facharbeit');
+    assert.ok(fa.path.startsWith('exporte/'));
+    assert.ok(fa.teile.includes('02_einleitung.md'));
+    const zip = await call('GET', '/api/export/backup', null, { raw: true });
+    assert.strictEqual(zip.headers.get('content-type'), 'application/zip');
+    assert.ok((await zip.arrayBuffer()).byteLength > 1000);
+  });
+
+  await t.test('Chats umbenennen, exportieren, löschen', async () => {
+    const r = await call('PATCH', `/api/chats/${chatId}`, { title: 'Exposé-Planung' });
+    assert.strictEqual(r.title, 'Exposé-Planung');
+    const ex = await call('GET', `/api/chats/${chatId}/export`, null, { raw: true });
+    assert.match(await ex.text(), /# KI-Gesprächsverlauf: Exposé-Planung/);
+    const c2 = await call('POST', '/api/chats');
+    const c3 = await call('POST', '/api/chats');
+    assert.strictEqual(c2.id, c3.id, 'leerer Chat wird wiederverwendet');
+    await call('DELETE', `/api/chats/${c2.id}`);
+    const list = await call('GET', '/api/chats');
+    assert.ok(!list.some((c) => c.id === c2.id));
+  });
+
+  await t.test('Übernahme: Dateien und Ordner hochladen und prüfen', async () => {
+    const imp = await call('POST', '/api/import');
+    assert.match(imp.id, /^\d{4}-\d{2}-\d{2}_\d{4}$/);
+    assert.strictEqual(imp.ordner, `uebernommen/${imp.id}`);
+    const up = async (rel, body, lastModified) => {
+      const res = await fetch(`${base}/api/import/${imp.id}/dateien`, {
+        method: 'POST', body,
+        headers: { 'x-mango-token': token, 'x-relpath': encodeURIComponent(rel), ...(lastModified ? { 'x-last-modified': String(lastModified) } : {}) },
+      });
+      const data = await res.json();
+      if (!res.ok) throw Object.assign(new Error(data.error), { status: res.status });
+      return data;
+    };
+    const vorlage = fs.readFileSync(path.join(ROOT, 'ressourcen/vorgaben/Lerntagebuch-Vorlage.docx'));
+    await up('Meine Facharbeit/Facharbeit/Expose_v1.md', '# Exposé\n\nErste Fassung.', Date.UTC(2026, 8, 1));
+    await up('Meine Facharbeit/Facharbeit/Expose_v2.md', '# Exposé\n\nZweite, längere Fassung mit Zeitplan.', Date.UTC(2026, 8, 20));
+    await up('Meine Facharbeit/Notizen.md', 'Ideen zum Goldenen Schnitt');
+    await up('Meine Facharbeit/Notizen - Kopie.md', 'Ideen zum Goldenen Schnitt');
+    const zweite = await up('Meine Facharbeit/Notizen.md', 'Andere Notizen');
+    assert.strictEqual(zweite.pfad, `${imp.ordner}/Meine Facharbeit/Notizen (2).md`, 'nichts wird überschrieben');
+    await up('Meine Facharbeit/Lerntagebuch.docx', vorlage);
+    await up('Meine Facharbeit/alt/kaputt.docx', 'PK kaputt');
+    const junk = await up('Meine Facharbeit/.DS_Store', 'x');
+    assert.strictEqual(junk.uebersprungen, true);
+    const ausbruch = await up('../../ausbruch.md', 'x');
+    assert.strictEqual(ausbruch.pfad, `${imp.ordner}/ausbruch.md`);
+    const mtime = fs.statSync(path.join(WS, imp.ordner, 'Meine Facharbeit/Facharbeit/Expose_v1.md')).mtimeMs;
+    assert.strictEqual(Math.round(mtime), Date.UTC(2026, 8, 1), 'Änderungsdatum bleibt erhalten');
+
+    const res = await call('POST', `/api/import/${imp.id}/analyse`, { fehlgeschlagen: [{ rel: 'Meine Facharbeit/gesperrt.docx', error: 'Datei konnte nicht gelesen werden' }] }, { raw: true });
+    const events = (await res.text()).trim().split('\n').map((l) => JSON.parse(l));
+    assert.ok(events.some((e) => e.type === 'fortschritt' && e.gesamt === 8));
+    const inv = events.find((e) => e.type === 'fertig').inventar;
+    assert.strictEqual(inv.anzahl, 8);
+    assert.strictEqual(inv.ordnerListe.length, 3);
+    assert.strictEqual(inv.uebersprungen.length, 1);
+    assert.deepStrictEqual(inv.nichtUebernommen, [{ pfad: 'Meine Facharbeit/gesperrt.docx', grund: 'Datei konnte nicht gelesen werden' }]);
+    assert.deepStrictEqual(inv.unlesbar.map((u) => u.pfad), [`${imp.ordner}/Meine Facharbeit/alt/kaputt.docx`]);
+    assert.deepStrictEqual(inv.duplikate, [[`${imp.ordner}/Meine Facharbeit/Notizen - Kopie.md`, `${imp.ordner}/Meine Facharbeit/Notizen.md`]]);
+    const expose = inv.versionen.find((v) => v.familie === 'expose');
+    assert.deepStrictEqual(expose.dateien.map((d) => d.pfad.split('/').pop()), ['Expose_v1.md', 'Expose_v2.md'], 'älteste Fassung zuerst');
+    assert.ok(inv.versionen.some((v) => v.familie === 'notizen'), 'Notizen (2) ist ein anderer Stand');
+    assert.strictEqual(inv.bereitsVorhanden.length, 1);
+    assert.match(inv.bereitsVorhanden[0].gleichWie, /^0\d_[a-z_]+\/Lerntagebuch-Vorlage\.docx$/);
+    assert.strictEqual(inv.kategorien['Lerntagebuch'], 1);
+    assert.strictEqual(inv.kategorien['Exposé'], 2);
+    const md = fs.readFileSync(path.join(WS, '.facharbeit', 'import', imp.id, 'inventar.md'), 'utf8');
+    assert.match(md, /NICHT LESBAR/);
+    assert.match(md, /Nicht übernommen, weil .*\n  - Meine Facharbeit\/gesperrt\.docx/);
+    assert.match(md, /Expose_v1\.md/);
+    assert.deepStrictEqual(await call('GET', `/api/import/${imp.id}`), inv);
+    await assert.rejects(call('GET', '/api/import/..%2F..'), (e) => e.status === 404);
+    importId = imp.id;
+    importOrdner = imp.ordner;
+  });
+
+  await t.test('Drop-in: Assistent sortiert ein, App kopiert und wandelt um, Originale bleiben', async () => {
+    const notizenVorher = fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Notizen.md'), 'utf8');
+    const chat = await call('POST', '/api/chats');
+    await assert.rejects(call('POST', `/api/chats/${chat.id}/messages`, { importId: '2020-01-01_0000' }), (e) => e.status === 400);
+    const res = await call('POST', `/api/chats/${chat.id}/messages`, { importId }, { raw: true });
+    const events = (await res.text()).trim().split('\n').map((l) => JSON.parse(l));
+    const start = events.find((e) => e.type === 'start');
+    assert.strictEqual(start.userMessage.import.anzahl, 8);
+    assert.strictEqual(start.userMessage.import.unlesbar, 1);
+    assert.strictEqual(start.userMessage.import.nichtUebernommen, 1);
+    assert.strictEqual(start.message.mode, 'import');
+    const { message: m, chat: c } = events.find((e) => e.type === 'done');
+    assert.strictEqual(c.title, 'Bisherige Arbeit einsortiert');
+    assert.strictEqual(m.status, 'fertig', m.error);
+
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = calls[calls.length - 1];
+    assert.match(last.args[last.args.indexOf('--allowedTools') + 1], /Write,Edit/, 'Arbeitsdateien dürfen ergänzt werden');
+    assert.ok(!last.args.includes('--disallowedTools'));
+    assert.match(last.input, new RegExp(`<einsortieren id="${importId}"`));
+    assert.match(last.input, /inventar\.md/);
+    assert.match(fs.readFileSync(path.join(WS, '.facharbeit', 'import', importId, 'inventar.md'), 'utf8'), /\| Lerntagebuch \| 06_lerntagebuch_und_konsultationen\/ \|/, 'Ordnervorschlag im Inventar');
+
+    // Originale bleiben unverändert, der Versuch wird zurückgesetzt und angezeigt.
+    assert.strictEqual(fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Notizen.md'), 'utf8'), notizenVorher);
+    assert.strictEqual(m.files.find((f) => f.path.endsWith('Meine Facharbeit/Notizen.md')).aktion, 'zurueckgesetzt');
+    if (process.platform !== 'win32') {
+      assert.strictEqual(fs.statSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md')).mode & 0o222, 0, 'Originale sind schreibgeschützt');
+      assert.strictEqual(fs.statSync(path.join(WS, importOrdner, 'Meine Facharbeit/Notizen.md')).mode & 0o222, 0, 'nach dem Zurücksetzen wieder schreibgeschützt');
+    }
+
+    // Einsortiert: kopiert, umgewandelt, abgelehnt.
+    assert.ok(!/```(uebernahme|arbeitsstand|einsortieren)/.test(m.text));
+    assert.match(m.text, /Welches Fach ist dein Bezugsfach\?/);
+    const r = m.importErgebnis;
+    const byTarget = Object.fromEntries(r.einsortiert.filter((x) => !x.fehler).map((x) => [x.nach, x]));
+    assert.strictEqual(byTarget['02_expose_und_zeitplan/expose.md'].aktion, 'kopiert');
+    assert.strictEqual(fs.readFileSync(path.join(WS, '02_expose_und_zeitplan/expose.md'), 'utf8'), fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md'), 'utf8'));
+    assert.strictEqual(byTarget['06_lerntagebuch_und_konsultationen/lerntagebuch.md'].aktion, 'umgewandelt');
+    const lt = fs.readFileSync(path.join(WS, '06_lerntagebuch_und_konsultationen/lerntagebuch.md'), 'utf8');
+    assert.match(lt, /^<!-- Arbeitskopie von „Lerntagebuch\.docx“/);
+    assert.match(lt, /Ziele des Lerntagebuchs/, 'Word-Text wortgetreu übernommen');
+    assert.strictEqual(fs.readFileSync(path.join(WS, '01_themenfindung_und_mindmap/Notizen zum Thema.md'), 'utf8'), notizenVorher, 'Kopie vom unveränderten Original');
+    const fehler = r.einsortiert.filter((x) => x.fehler).map((x) => x.fehler);
+    assert.strictEqual(fehler.length, 3);
+    assert.ok(fehler.some((f) => /01_ bis 08_/.test(f)), 'Ziel außerhalb der Arbeitsordner abgelehnt');
+    assert.ok(fehler.some((f) => /uebernommen\/ oder anhaenge\//.test(f)), 'Quelle außerhalb der Originale abgelehnt');
+    assert.ok(m.files.some((f) => f.path === '02_expose_und_zeitplan/expose.md' && f.aktion === 'neu'));
+    assert.strictEqual(r.analysiert, true);
+    assert.strictEqual(r.anzahl, 8);
+    assert.deepStrictEqual(r.fehlt, ['Zeitplan', 'Literaturverzeichnis']);
+    assert.strictEqual(r.naechsterSchritt, 'Zeitplan nach Vorgabe ergänzen.');
+    assert.strictEqual(r.versionen.length, 1);
+    assert.strictEqual(r.unlesbar.length, 1);
+    assert.strictEqual(r.nichtUebernommen[0].pfad, 'Meine Facharbeit/gesperrt.docx');
+    assert.strictEqual(r.duplikate.length, 1);
+
+    // Projektangaben: leere Felder werden gefüllt, Abweichungen nur angeboten.
+    const byId = Object.fromEntries(m.updates.aufgaben.map((a) => [a.id, a]));
+    assert.strictEqual(byId.fragestellung.nach, 'erledigt');
+    assert.strictEqual(byId.recherche.nach, 'in_arbeit', 'ohne Nachweis nicht erledigt');
+    assert.deepStrictEqual(m.updates.projekt.map((x) => x.feld), ['fach']);
+    assert.deepStrictEqual(m.updates.konflikte, [{ feld: 'titel', label: 'Titel', bisher: 'Testthema', gefunden: 'Der Goldene Schnitt in der Kunst' }]);
+    const s = await call('GET', '/api/state');
+    assert.strictEqual(s.project.angaben.titel, 'Testthema');
+    assert.strictEqual(s.project.angaben.fach, 'Mathematik');
+    assert.match(s.project.uebernahme.zusammenfassung, /Goldener Schnitt/);
+    assert.match(fs.readFileSync(path.join(WS, '.facharbeit', 'uebernahme.md'), 'utf8'), /## Das fehlt noch\n\n- Zeitplan/);
+    assert.match(fs.readFileSync(path.join(WS, 'FACHARBEIT.md'), 'utf8'), /## Übernommener Stand/);
+  });
+
+  await t.test('Übernahme: Zusammenfassung in späteren Chats, Fassung festlegen', async () => {
+    const chat = await call('POST', '/api/chats');
+    await send(chat.id, 'Wie geht es weiter?');
+    let calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    let input = calls[calls.length - 1].input;
+    assert.match(input, /Übernommener Stand \(mitgebrachte Arbeit/);
+    assert.match(input, /Goldener Schnitt/);
+    assert.match(input, /Offene Fragen zu Entwurfsständen: Welche Exposé-Fassung ist aktuell\?/);
+    const v = (await call('GET', '/api/state')).project.uebernahme.versionen[0];
+    await assert.rejects(call('POST', '/api/uebernahme/fassung', { dateien: v.dateien, gewaehlt: 'irgendwas.md' }), (e) => e.status === 400);
+    const p = await call('POST', '/api/uebernahme/fassung', { dateien: v.dateien, gewaehlt: v.dateien[1] });
+    assert.strictEqual(p.uebernahme.versionen.length, 0);
+    assert.strictEqual(p.uebernahme.entscheidungen[0].gewaehlt, v.dateien[1]);
+    assert.ok(p.merken.some((x) => x.text.startsWith('Aktuelle Fassung: `') && x.text.includes('Expose_v2.md')));
+    const chat2 = await call('POST', '/api/chats');
+    await send(chat2.id, 'Und jetzt?');
+    calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    input = calls[calls.length - 1].input;
+    assert.ok(!input.includes('Offene Fragen zu Entwurfsständen'));
+    assert.match(input, /Aktuelle Fassung: `uebernommen\//);
+  });
+
+  await t.test('Übernahme: weiteres Material ergänzt den Stand', async () => {
+    const imp = await call('POST', '/api/import');
+    assert.notStrictEqual(imp.id, importId);
+    const r1 = await fetch(`${base}/api/import/${imp.id}/dateien`, { method: 'POST', body: '# Gliederung', headers: { 'x-mango-token': token, 'x-relpath': 'Gliederung.md' } });
+    assert.ok(r1.ok);
+    await (await call('POST', `/api/import/${imp.id}/analyse`, {}, { raw: true })).text();
+    const chat = await call('POST', '/api/chats');
+    const res = await call('POST', `/api/chats/${chat.id}/messages`, { importId: imp.id }, { raw: true });
+    const done = (await res.text()).trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.type === 'done');
+    assert.strictEqual(done.chat.title, 'Neues Material einsortiert');
+    const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.match(calls[calls.length - 1].input, /Es gibt schon einen übernommenen Stand/);
+    const u = (await call('GET', '/api/state')).project.uebernahme;
+    assert.deepStrictEqual(u.importe.map((i) => i.id), [importId, imp.id]);
+    assert.strictEqual(u.anzahl, 9);
+    assert.strictEqual(u.entscheidungen.length, 1, 'getroffene Entscheidung bleibt');
+    assert.strictEqual(u.unlesbar.length, 1, 'Befunde der ersten Übernahme bleiben');
+    const md = fs.readFileSync(path.join(WS, '.facharbeit', 'uebernahme.md'), 'utf8');
+    assert.match(md, /9 Dateien aus 2 Übernahmen/);
+
+    // Auch Chat-Anhänge lassen sich einsortieren; „ersetzen“ sichert die vorige Fassung.
+    const vorher = fs.readFileSync(path.join(WS, '06_lerntagebuch_und_konsultationen/lerntagebuch.md'), 'utf8');
+    const r2 = await send(chat.id, `SORTIERE: ${anhangPfad}`);
+    const e = r2.done.message.einsortiert[0];
+    assert.strictEqual(e.nach, '06_lerntagebuch_und_konsultationen/lerntagebuch.md');
+    assert.strictEqual(e.ersetzt, true);
+    assert.strictEqual(fs.readFileSync(path.join(WS, e.version), 'utf8'), vorher, 'vorige Fassung gesichert');
+    assert.ok(r2.done.message.files.some((f) => f.path === e.nach && f.aktion === 'geaendert'));
+    assert.strictEqual(r2.done.message.text, 'Erledigt.');
+    assert.match(md, /## Festgelegte aktuelle Fassungen/);
+  });
+
+  await t.test('Fehlende Dateien werden gemeldet', async () => {
+    await assert.rejects(call('POST', '/api/files/open', { path: 'gibt/es/nicht.md' }), (e) => e.status === 404 && /nicht gefunden/.test(e.message));
+    const info = await call('GET', `/api/files/info?path=${encodeURIComponent('gibt/es/nicht.md')}`);
+    assert.strictEqual(info.exists, false);
+  });
+});
+
+test('Neustart: Arbeitsstand bleibt erhalten, verschobener Arbeitsraum wird erkannt', async () => {
+  server.kill();
+  await new Promise((r) => server.once('exit', r));
+  base = null;
+  await startServer();
+  token = /name="mango-token" content="([a-f0-9]+)"/.exec(await (await fetch(`${base}/`)).text())[1];
+  let s = await call('GET', '/api/state');
+  assert.strictEqual(s.project.angaben.lehrkraft, 'Frau Muster');
+  assert.strictEqual(s.settings.theme, 'dark');
+  assert.strictEqual(s.settings.modelle.claude, 'sonnet', 'Modellwahl bleibt gespeichert');
+  s = await waitFor(async () => { const x = await call('GET', '/api/settings'); return !x.pruefung && x.providers.every((p) => p.status !== 'pruefe') && x; });
+  assert.strictEqual(s.settings.modelle.antigravity, '', 'selbst gewählte Voreinstellung wird nicht automatisch ersetzt');
+  assert.strictEqual(s.settings.provider, 'claude');
+  s = await call('GET', '/api/state');
+  assert.strictEqual(s.project.aufgaben.find((a) => a.id === 'expose').status, 'erledigt');
+  assert.ok(s.chats.some((c) => c.title === 'Exposé-Planung'));
+  assert.match(s.project.uebernahme.zusammenfassung, /Goldener Schnitt/);
+  server.kill();
+  await new Promise((r) => server.once('exit', r));
+  fs.renameSync(WS, `${WS} verschoben`);
+  base = null;
+  await startServer();
+  token = /name="mango-token" content="([a-f0-9]+)"/.exec(await (await fetch(`${base}/`)).text())[1];
+  s = await call('GET', '/api/state');
+  assert.strictEqual(s.project, null);
+  assert.match(s.projectError.message, /nicht gefunden/);
+  s = await call('POST', '/api/projects/open', { workspace: `${WS} verschoben` });
+  assert.strictEqual(s.project.angaben.name, 'Alex Beispiel');
+});
