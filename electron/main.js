@@ -221,7 +221,8 @@ if (!SMOKE_FILE && !app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
-    Menu.setApplicationMenu(null);
+    // Auf dem Mac braucht die App ein Menü, sonst funktionieren Kopieren, Einfügen und Beenden (Cmd+C/V/Q) nicht.
+    Menu.setApplicationMenu(IS_MAC ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
     // Nur Kopieren in die Zwischenablage erlauben, sonst keine Berechtigungen.
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => cb(['clipboard-sanitized-write', 'fullscreen'].includes(permission)));
     if (!IS_MAC) {

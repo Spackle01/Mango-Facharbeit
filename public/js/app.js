@@ -354,17 +354,22 @@ export function openUpdateDialog() {
   const body = h('div', {});
   const foot = h('div', { style: { display: 'contents' } });
   const d = dialog({ title: 'Update verfügbar', body, footer: foot, small: true });
+  const mac = S.state.platform === 'darwin';
   const seite = () => window.open(neu.seite, '_blank', 'noopener');
+  const laden = () => window.open(neu.url || neu.seite, '_blank', 'noopener');
   const zeigeStart = () => {
     body.replaceChildren(
       h('p', {}, h('b', {}, `Version ${neu.version}`), ` ist da. Du hast Version ${u.aktuell}.`),
       neu.notizen ? h('p', { class: 'upd-notiz' }, neu.notizen) : null,
       h('p', { class: 'upd-klein' }, u.direkt
         ? `Mango lädt das Update (${mb(neu.groesse)}), installiert es und startet neu. Deine Projekte und Einstellungen bleiben erhalten.`
-        : 'Lade die neue Version von der Release-Seite und installiere sie über die alte.'));
+        : mac ? 'Lade die neue Version herunter, öffne sie und ziehe Mango Facharbeit in den Ordner Programme. Ersetze die alte Version.'
+          : 'Lade die neue Version von der Release-Seite und installiere sie über die alte.'));
     foot.replaceChildren(
       btn('Später', { cls: 'btn', onClick: () => d.close() }),
-      u.direkt ? btn('Jetzt aktualisieren', { iconName: 'update', cls: 'btn btn-primary', onClick: loslegen }) : btn('Zur Release-Seite', { iconName: 'external', cls: 'btn btn-primary', onClick: seite }));
+      u.direkt ? btn('Jetzt aktualisieren', { iconName: 'update', cls: 'btn btn-primary', onClick: loslegen })
+        : mac ? btn('Herunterladen', { iconName: 'download', cls: 'btn btn-primary', onClick: laden })
+          : btn('Zur Release-Seite', { iconName: 'external', cls: 'btn btn-primary', onClick: seite }));
   };
   const loslegen = async () => {
     const bar = h('div', { class: 'ip-bar upd-bar' }, h('i', { style: { width: '0%' } }));

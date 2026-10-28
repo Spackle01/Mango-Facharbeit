@@ -746,6 +746,12 @@ test('Update: Versionsvergleich und Auswahl der neuesten Veröffentlichung', () 
   assert.strictEqual(n.version, '0.2.9-beta');
   assert.strictEqual(n.notizen, 'Kurztext zu v0.2.9-beta');
   assert.match(n.shaUrl, /\.exe\.sha256$/);
+  // Mac: das Image passend zum Prozessor, nicht das Windows-Setup
+  const mac = (tag) => ({ ...rel(tag), assets: ['arm64', 'x64'].map((a) => asset(`Mango-Facharbeit-${tag.slice(1)}-Mac-${a}.dmg`, tag)) });
+  assert.strictEqual(neuesteVersion([mac('v0.4.0-beta'), rel('v0.3.0-beta')], { plattform: 'darwin', arch: 'arm64' }).name, 'Mango-Facharbeit-0.4.0-beta-Mac-arm64.dmg');
+  assert.strictEqual(neuesteVersion([mac('v0.4.0-beta')], { plattform: 'darwin', arch: 'x64' }).name, 'Mango-Facharbeit-0.4.0-beta-Mac-x64.dmg');
+  assert.strictEqual(neuesteVersion([rel('v0.4.0-beta')], { plattform: 'darwin', arch: 'arm64' }), null, 'ohne Mac-Datei kein Update für den Mac');
+  assert.strictEqual(neuesteVersion([mac('v0.4.0-beta')], { plattform: 'win32' }), null, 'Windows nimmt kein Mac-Image');
   // Fremde Download-Adressen werden nicht akzeptiert
   const boese = rel('v0.5.0-beta');
   boese.assets[0].browser_download_url = 'https://evil.example/Mango-Facharbeit-Setup-0.5.0-beta.exe';

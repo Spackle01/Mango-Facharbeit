@@ -85,15 +85,70 @@ jobs:
             dist/Mango-Facharbeit-Setup-*.exe.sha256
           if-no-files-found: error
 
+  mac:
+    name: Mac-App bauen und prüfen
+    needs: test
+    runs-on: macos-latest
+    # Ein Fehler beim Mac-Bau blockiert das Windows-Release nicht.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Abhängigkeiten für den Build
+        run: npm ci --no-audit --no-fund
+      - name: Mac-Images bauen (Apple-Chip und Intel)
+        run: npx electron-builder --mac dmg --arm64 --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Starttest der gebauten App
+        run: |
+          APP="dist/mac-arm64/Mango Facharbeit.app"
+          OUT="$RUNNER_TEMP/start-mac.json"
+          "$APP/Contents/MacOS/Mango Facharbeit" --smoke-test="$OUT" &
+          PID=$!
+          for i in $(seq 1 120); do kill -0 $PID 2>/dev/null || break; sleep 1; done
+          if kill -0 $PID 2>/dev/null; then kill $PID; echo "Zeitüberschreitung beim Starttest"; exit 1; fi
+          cat "$OUT"
+          grep -q '"ok": true' "$OUT"
+          grep -q '"platform": "darwin"' "$OUT"
+        env:
+          MANGO_NUR_API: ''
+      - name: Prüfsumme
+        run: |
+          cd dist
+          for f in Mango-Facharbeit-*-Mac-*.dmg; do
+            H=$(shasum -a 256 "$f" | cut -d' ' -f1)
+            printf "%s  %s" "$H" "$f" > "$f.sha256"
+            ls -lh "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mango-facharbeit-mac
+          path: |
+            dist/Mango-Facharbeit-*-Mac-*.dmg
+            dist/Mango-Facharbeit-*-Mac-*.dmg.sha256
+          if-no-files-found: error
+
   release:
     name: Release veröffentlichen
-    needs: build
+    needs: [build, mac]
+    # Windows entscheidet über das Release; die Mac-Dateien kommen dazu, wenn ihr Bau gelungen ist.
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: mango-facharbeit-windows
+          path: dist
+      - uses: actions/download-artifact@v4
+        # Fehlt das Mac-Artefakt (Bau fehlgeschlagen), geht das Release trotzdem raus.
+        continue-on-error: true
+        with:
+          name: mango-facharbeit-mac
           path: dist
       - name: GitHub-Release anlegen
         env:

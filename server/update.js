@@ -31,13 +31,20 @@ function vergleiche(a, b) {
   return x.pre < y.pre ? -1 : 1;
 }
 
-// Neueste Veröffentlichung mit Windows-Setup aus der Liste der Releases
-function neuesteVersion(releases) {
+// Welche Datei einer Veröffentlichung zu diesem System passt: Windows-Setup oder Mac-Image (nach Prozessor).
+function assetMuster(plattform, arch) {
+  if (plattform === 'darwin') return new RegExp(`^Mango-Facharbeit-.*-Mac-${arch === 'arm64' ? 'arm64' : 'x64'}\\.dmg$`, 'i');
+  return /^Mango-Facharbeit-Setup-.*\.exe$/i;
+}
+
+// Neueste Veröffentlichung mit passender Datei aus der Liste der Releases
+function neuesteVersion(releases, { plattform = process.platform, arch = process.arch } = {}) {
+  const muster = assetMuster(plattform, arch);
   let best = null;
   for (const r of Array.isArray(releases) ? releases : []) {
     if (!r || r.draft || !parseVersion(r.tag_name)) continue;
     const assets = Array.isArray(r.assets) ? r.assets : [];
-    const exe = assets.find((a) => /^Mango-Facharbeit-Setup-.*\.exe$/i.test(a.name) && ERLAUBT.test(String(a.browser_download_url || '')));
+    const exe = assets.find((a) => muster.test(a.name) && ERLAUBT.test(String(a.browser_download_url || '')));
     if (!exe) continue;
     if (best && vergleiche(r.tag_name, best.tag_name) <= 0) continue;
     const sha = assets.find((a) => a.name === `${exe.name}.sha256` && ERLAUBT.test(String(a.browser_download_url || '')));
@@ -152,4 +159,4 @@ class Updater {
   }
 }
 
-module.exports = { Updater, parseVersion, vergleiche, neuesteVersion, REPO };
+module.exports = { Updater, parseVersion, vergleiche, neuesteVersion, assetMuster, REPO };
