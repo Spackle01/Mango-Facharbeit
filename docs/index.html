@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mango-Facharbeit – dein Assistent für die Facharbeit</title>
-<meta name="description" content="Mango-Facharbeit begleitet dich durch die Facharbeit: Lerntagebuch und Facharbeit direkt in Word, PDF und PowerPoint erstellen, Ordner aufräumen. Kostenloser Download für Windows.">
+<meta name="description" content="Mango-Facharbeit begleitet dich durch die Facharbeit: Lerntagebuch und Facharbeit direkt in Word, PDF und PowerPoint erstellen, Ordner aufräumen. Kostenloser Download für Windows und Mac.">
 <meta name="theme-color" content="#f2ead7">
 <meta property="og:title" content="Mango-Facharbeit">
-<meta property="og:description" content="Dein Assistent für die Facharbeit. Download für Windows.">
+<meta property="og:description" content="Dein Assistent für die Facharbeit. Download für Windows und Mac.">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="favicon.png">
 <style>
@@ -80,6 +80,13 @@ h1 .zwei { margin-left: .04em; }
 .meta { font-size: 15px; color: var(--ink-soft); line-height: 1.4; }
 .meta b { color: var(--ink); }
 .meta a { color: var(--ink); text-underline-offset: 3px; }
+.alle { margin-top: 22px; font-size: 15px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.alle a { color: var(--ink); font-weight: 700; text-decoration: none; border: 2px solid var(--ink); border-radius: 999px; padding: 4px 13px; background: var(--paper-2); }
+.alle a:hover { background: var(--mustard); }
+.alle a[aria-current="true"] { background: var(--mustard); }
+.macnote { display: none; }
+.ist-mac .macnote { display: block; }
+.ist-mac .winnote { display: none; }
 
 /* ---------- Abschnitte ---------- */
 section { position: relative; z-index: 2; }
@@ -139,7 +146,7 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
 <header class="hero">
   <div class="wrap top">
     <a class="brand" href="#"><img src="logo.png" alt="" width="30" height="30"> Mango</a>
-    <span class="tag">Beta · Windows</span>
+    <span class="tag">Beta · Windows &amp; Mac</span>
   </div>
 
   <div class="poster" aria-hidden="true">
@@ -178,6 +185,12 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
       </a>
       <p class="meta" id="meta">Für Windows 10 und 11<br><a href="https://github.com/Spackle01/Mango-Facharbeit/releases">Alle Versionen</a></p>
     </div>
+    <div class="alle" id="alle">
+      <span>Alle Downloads:</span>
+      <a id="dl-win" href="https://github.com/Spackle01/Mango-Facharbeit/releases">Windows</a>
+      <a id="dl-arm" href="https://github.com/Spackle01/Mango-Facharbeit/releases">Mac · Apple-Chip (M1 und neuer)</a>
+      <a id="dl-intel" href="https://github.com/Spackle01/Mango-Facharbeit/releases">Mac · Intel</a>
+    </div>
   </div>
 </header>
 
@@ -187,11 +200,13 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
     <ol class="steps">
       <li>
         <h3>Installieren</h3>
-        <p>Setup herunterladen und starten. Bei der Windows-Warnung: <code>Weitere Informationen</code> → <code>Trotzdem ausführen</code>.</p>
+        <p class="winnote">Setup herunterladen und starten. Bei der Windows-Warnung: <code>Weitere Informationen</code> → <code>Trotzdem ausführen</code>.</p>
+        <p class="macnote">Die <code>.dmg</code> öffnen und Mango in den Ordner „Programme“ ziehen. Beim ersten Start: Rechtsklick auf Mango → <code>Öffnen</code>. Falls das nicht reicht: <code>Systemeinstellungen</code> → <code>Datenschutz &amp; Sicherheit</code> → <code>Trotzdem öffnen</code>.</p>
       </li>
       <li>
         <h3>KI verbinden</h3>
-        <p>Installiere einmal <b>Claude Code</b> oder <b>Antigravity</b> und melde dich an. Mango zeigt dir den Befehl dafür.</p>
+        <p class="winnote">Installiere einmal <b>Claude Code</b> oder <b>Antigravity</b> und melde dich an. Oder nimm einen <b>DeepSeek-Schlüssel</b>: einfügen, fertig. Mango zeigt dir alles dafür.</p>
+        <p class="macnote">Auf dem Mac arbeitet Mango mit der <b>DeepSeek-API</b>. Erstelle auf platform.deepseek.com einen Schlüssel, füge ihn in Mango ein, fertig. Er bleibt verschlüsselt auf deinem Mac.</p>
       </li>
       <li>
         <h3>Projekt anlegen</h3>
@@ -223,7 +238,7 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
       <div class="stamp" aria-hidden="true">!</div>
       <div>
         <p><b>Die Arbeit bleibt deine.</b> KI-Nutzung musst du nach den Regeln deiner Schule kennzeichnen. Mango exportiert dafür die Gesprächsverläufe für den Anhang.</p>
-        <p>Mango ist ein privates Projekt und gehört nicht zur Schule. Die Beta ist nicht signiert, deshalb zeigt Windows eine Warnung.</p>
+        <p>Mango ist ein privates Projekt und gehört nicht zur Schule. Die Beta ist nicht signiert, deshalb zeigen Windows und macOS eine Warnung. Die Mac-Version ist neu und noch nicht auf vielen Geräten getestet. DeepSeek wird nach Verbrauch abgerechnet, das zahlst du selbst.</p>
       </div>
     </div>
   </div>
@@ -238,26 +253,58 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
 <div class="leiste" aria-hidden="true"></div>
 
 <script>
-// Der Button zeigt immer auf die neueste Windows-Datei. Ohne JavaScript führt er zur Release-Seite.
+// Die Buttons zeigen immer auf die neueste Datei. Ohne JavaScript führen sie zur Release-Seite.
 (function () {
   var repo = 'Spackle01/Mango-Facharbeit';
+  var seite = 'https://github.com/' + repo + '/releases';
+  var ua = navigator.userAgent || '';
+  var istMac = /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad|iPod/.test(ua);
+  if (istMac) document.documentElement.classList.add('ist-mac');
+
   var btn = document.getElementById('download');
   var meta = document.getElementById('meta');
+  var links = { win: document.getElementById('dl-win'), arm: document.getElementById('dl-arm'), intel: document.getElementById('dl-intel') };
+  var muster = { win: /\.exe$/i, arm: /-Mac-arm64\.dmg$/i, intel: /-Mac-x64\.dmg$/i };
+
+  // Safari meldet immer "Intel". Wer WebGL-Grafik von Apple sieht, hat meist einen Apple-Chip.
+  function appleChip() {
+    try {
+      var gl = document.createElement('canvas').getContext('webgl');
+      var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      var r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      if (/Apple (M|GPU)/i.test(r)) return true;
+      if (/Intel|AMD|Radeon/i.test(r)) return false;
+    } catch (e) { /* egal */ }
+    return true; // neue Macs haben fast alle den Apple-Chip
+  }
+
+  function finde(rel, art) { return rel.assets.find(function (a) { return muster[art].test(a.name); }); }
+
   fetch('https://api.github.com/repos/' + repo + '/releases?per_page=15', { headers: { Accept: 'application/vnd.github+json' } })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
     .then(function (list) {
-      var rel = list.filter(function (r) { return !r.draft; }).find(function (r) {
-        return r.assets.some(function (a) { return /\.exe$/i.test(a.name); });
+      var offen = list.filter(function (r) { return !r.draft; });
+      var hat = function (art) { return function (r) { return !!finde(r, art); }; };
+      var rel = { win: offen.find(hat('win')), arm: offen.find(hat('arm')), intel: offen.find(hat('intel')) };
+      var asset = {};
+      Object.keys(rel).forEach(function (k) {
+        if (rel[k]) { asset[k] = finde(rel[k], k); links[k].href = asset[k].browser_download_url; }
       });
-      if (!rel) return;
-      var asset = rel.assets.find(function (a) { return /\.exe$/i.test(a.name); });
-      btn.href = asset.browser_download_url;
-      var mb = Math.round(asset.size / 1000000);
-      var version = (rel.tag_name || '').replace(/^v/, '');
-      var datum = rel.published_at ? new Date(rel.published_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
-      meta.innerHTML = '<b>Version ' + version.replace(/[<>&"]/g, '') + '</b> · ' + mb + ' MB · Windows 10 und 11' + (datum ? '<br>Veröffentlicht am ' + datum : '') + '<br><a href="https://github.com/' + repo + '/releases">Alle Versionen</a>';
+
+      var art = istMac ? (appleChip() ? 'arm' : 'intel') : 'win';
+      if (istMac && !asset[art]) art = asset.arm ? 'arm' : (asset.intel ? 'intel' : 'win');
+      if (!asset[art]) return;
+      links[art].setAttribute('aria-current', 'true');
+      btn.href = asset[art].browser_download_url;
+      var mb = Math.round(asset[art].size / 1000000);
+      var version = (rel[art].tag_name || '').replace(/^v/, '').replace(/[<>&"]/g, '');
+      var datum = rel[art].published_at ? new Date(rel[art].published_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+      var fuer = art === 'win' ? 'Windows 10 und 11' : (art === 'arm' ? 'Mac mit Apple-Chip' : 'Mac mit Intel-Chip');
+      meta.innerHTML = '<b>Version ' + version + '</b> · ' + mb + ' MB · ' + fuer + (datum ? '<br>Veröffentlicht am ' + datum : '') + '<br><a href="' + seite + '">Alle Versionen</a>';
     })
     .catch(function () { /* bleibt bei der Release-Seite */ });
+
+  if (istMac) meta.innerHTML = 'Für Mac · <a href="#alle">Intel-Mac? Hier wählen</a><br><a href="' + seite + '">Alle Versionen</a>';
 })();
 </script>
 </body>
