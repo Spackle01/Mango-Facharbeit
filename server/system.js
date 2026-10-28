@@ -29,6 +29,10 @@ function setHost(h) {
 }
 
 // Die installierte Desktop-App kann sich selbst aktualisieren (Windows); sonst nur Hinweis auf die Release-Seite.
+function getHost() {
+  return host;
+}
+
 function updateHost() {
   return host && host.updateAnwenden ? host : null;
 }
@@ -135,4 +139,4 @@ async function openAppWindow(url) {
   return false;
 }
 
-module.exports = { setHost, updateHost, openPath, revealPath, pickFolder, openAppWindow, antigravityAppAvailable, openInAntigravity };
+module.exports = { setHost, getHost, updateHost, openPath, revealPath, pickFolder, openAppWindow, antigravityAppAvailable, openInAntigravity };

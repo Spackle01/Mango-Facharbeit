@@ -17,6 +17,8 @@ const vorschau = require('./vorschau');
 const ordnung = require('./ordnung');
 const konvertieren = require('./konvertieren');
 const { Updater } = require('./update');
+const { Geheim } = require('./geheim');
+const deepseek = require('./providers/deepseek');
 const system = require('./system');
 const { STATUS_INFO, PHASEN } = require('./aufgaben');
 const { kindLabel } = require('./extract');
@@ -31,6 +33,7 @@ if (argValue('--data-dir')) process.env.MANGO_DATA_DIR = argValue('--data-dir');
 const TOKEN = crypto.randomBytes(24).toString('hex');
 const app = new AppStore();
 const providers = new Providers();
+let geheim = null;
 let project = null;
 let projectError = null;
 const runs = new RunManager({
@@ -54,14 +57,19 @@ async function autoSelect() {
   const s = app.settings;
   const st = providers.state;
   const installiert = (id) => !!(st[id] && st[id].installed);
+  const bereit = (id) => installiert(id) && ['bereit', 'verbunden'].includes(st[id].status);
   let ziel = s.provider;
-  if (!s.anbieterGewaehlt) {
-    if (installiert('claude') && ['bereit', 'verbunden'].includes(st.claude.status)) ziel = 'claude';
-    else if (installiert('antigravity')) ziel = 'antigravity';
-    else if (installiert('claude')) ziel = 'claude';
+  if (!st[ziel]) {
+    // Der gewählte Anbieter gibt es auf diesem System nicht (z. B. auf dem Mac nur DeepSeek).
+    ziel = ['claude', 'antigravity', 'deepseek'].find((id) => st[id]) || ziel;
+  } else if (!s.anbieterGewaehlt) {
+    if (bereit('claude')) ziel = 'claude';
+    else if (installiert('antigravity') && st.antigravity.api !== true) ziel = 'antigravity';
+    else if (st.claude && installiert('claude')) ziel = 'claude';
+    else if (bereit('deepseek')) ziel = 'deepseek';
   } else if (!installiert(ziel)) {
-    const anderer = ziel === 'claude' ? 'antigravity' : 'claude';
-    if (installiert(anderer)) ziel = anderer;
+    const anderer = ['claude', 'antigravity', 'deepseek'].find((id) => id !== ziel && installiert(id));
+    if (anderer) ziel = anderer;
   }
   const patch = {};
   if (ziel !== s.provider) patch.provider = ziel;
@@ -338,9 +346,35 @@ route('POST', /^\/api\/providers\/pruefen$/, async () => {
   return { settings: app.settings, providers: providers.publicState(), pruefung: false };
 });
 
-route('POST', /^\/api\/providers\/(claude|antigravity)\/check$/, async (req, url, m) => {
+// DeepSeek: API-Schlüssel verbinden (wird geprüft, dann gespeichert) oder entfernen. Der Schlüssel
+// wird nie an die Oberfläche zurückgegeben.
+route('POST', /^\/api\/providers\/deepseek\/schluessel$/, async (req) => {
+  if (!providers.state.deepseek) throw new HttpError(404, 'DeepSeek ist hier nicht verfügbar.');
+  const body = await readBody(req);
+  const key = String(body.schluessel || '').trim();
+  if (!/^sk-[A-Za-z0-9_-]{16,200}$/.test(key)) throw new HttpError(400, 'Das sieht nicht wie ein DeepSeek-Schlüssel aus. Er beginnt mit „sk-“.');
+  const r = await deepseek.pruefeSchluessel(key);
+  if (!r.ok) throw new HttpError(r.netz ? 502 : 400, r.fehler);
+  await geheim.set('deepseek', key);
+  await providers.detect('deepseek');
+  // Wer einen Schlüssel verbindet, will ihn nutzen.
+  await app.updateSettings({ provider: 'deepseek' });
+  await autoSelect();
+  return { settings: app.settings, providers: providers.publicState() };
+});
+
+route('DELETE', /^\/api\/providers\/deepseek\/schluessel$/, async () => {
+  if (!providers.state.deepseek) throw new HttpError(404, 'DeepSeek ist hier nicht verfügbar.');
+  await geheim.entfernen('deepseek');
+  await providers.detect('deepseek');
+  await autoSelect();
+  return { settings: app.settings, providers: providers.publicState() };
+});
+
+route('POST', /^\/api\/providers\/(claude|antigravity|deepseek)\/check$/, async (req, url, m) => {
+  if (!providers.state[m[1]]) throw new HttpError(404, 'Diesen Anbieter gibt es hier nicht.');
   if (m[1] === 'antigravity') await providers.verify('antigravity', arbeitsordner());
-  else await providers.detect('claude');
+  else await providers.detect(m[1]);
   await autoSelect();
   return providers.publicState();
 });
@@ -651,6 +685,8 @@ async function listen(server, start) {
 async function start({ port, open = false, host = null, log = console.log } = {}) {
   if (host) system.setHost(host);
   await app.load();
+  geheim = new Geheim(app.dir, system.getHost());
+  deepseek.init({ geheim });
   const last = app.data.projects.find((p) => p.id === app.data.lastProjectId) || app.data.projects[0];
   if (last) {
     try {

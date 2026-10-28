@@ -5,6 +5,7 @@ import { S, checkUpdate, openUpdateDialog, applyTheme, chooseProvider, checkProv
 import { showOnboarding, chooseFolder } from './onboarding.js';
 import { openModelDialog, selectedModel, selectedModelLabel, gruendlichkeitEl } from './modelle.js';
 import { modelLabel } from './modelname.js';
+import { schluesselFormular, schluesselEntfernen } from './schluessel.js';
 
 export function openSettings(focusSection) {
   const body = h('div');
@@ -34,9 +35,13 @@ export function openSettings(focusSection) {
       const card = h('div', { class: 'provider-card', role: 'radio', tabindex: '0', 'aria-checked': active ? 'true' : 'false' },
         h('span', { class: 'radio', 'aria-hidden': 'true' }),
         h('div', { class: 'pc-main' },
-          h('div', { class: 'pc-name' }, p.id === 'claude' ? 'Claude Code CLI' : 'Antigravity CLI (agy)'),
+          h('div', { class: 'pc-name' }, { claude: 'Claude Code CLI', antigravity: 'Antigravity CLI (agy)', deepseek: 'DeepSeek (API-Schlüssel)' }[p.id] || p.name),
           h('div', { class: 'pc-state' }, h('span', { class: 'status-dot', 'data-s': p.status }), h('span', {}, [p.label, p.version ? `Version ${p.version}` : '', p.status === 'verbunden' && p.model ? `zuletzt ${modelLabel(p.model, p.models)}` : ''].filter(Boolean).join(' · '))),
-          p.hint ? hintEl(p.hint) : (p.status === 'fehler' && p.detail ? h('div', { class: 'hint-box' }, p.detail) : null),
+          p.hint && p.hint.aktion === 'schluessel' ? h('div', { class: 'hint-box' }, h('div', {}, p.hint.text), schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); } }))
+            : p.hint ? hintEl(p.hint) : (p.status === 'fehler' && p.detail ? h('div', { class: 'hint-box' }, p.detail) : null),
+          p.api && !p.hint ? h('div', { class: 'pc-model' }, h('span', {}, 'Schlüssel:'),
+            btn('Neu eingeben', { cls: 'btn btn-sm', onClick: () => { const f = h('div', { class: 'hint-box' }, schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); } })); card.querySelector('.pc-main').append(f); } }),
+            btn('Entfernen', { cls: 'btn btn-sm', onClick: async () => { try { const r = await schluesselEntfernen(); Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); toast('Schlüssel entfernt.'); } catch (err) { toast(err.message, { error: true }); } } })) : null,
           p.modelWahl !== false ? h('div', { class: 'pc-model' },
             h('span', {}, 'Modell:'), h('b', { title: selectedModel(p.id) || 'Voreinstellung der CLI' }, selectedModelLabel(p.id)),
             btn('Ändern', { cls: 'btn btn-sm', attrs: { 'aria-label': `Modell für ${p.name} ändern` }, onClick: () => openModelDialog(p.id, { onClose: render }) })) : null));

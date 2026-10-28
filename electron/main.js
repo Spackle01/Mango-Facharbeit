@@ -5,7 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme, session, safeStorage } = require('electron');
 
 const IS_MAC = process.platform === 'darwin';
 const TITLEBAR_HEIGHT = 48;
@@ -166,6 +166,10 @@ if (!SMOKE_FILE && !app.requestSingleInstanceLock()) {
       shell.showItemInFolder(target);
       return true;
     },
+    // Zugangsdaten mit dem Schlüsselbund des Systems verschlüsseln (Windows DPAPI, macOS Keychain).
+    verschluesselnMoeglich: () => { try { return safeStorage.isEncryptionAvailable(); } catch { return false; } },
+    verschluesseln: (text) => safeStorage.encryptString(String(text)).toString('base64'),
+    entschluesseln: (b64) => safeStorage.decryptString(Buffer.from(String(b64), 'base64')),
     // Selbstaktualisierung (nur die installierte Windows-App): Setup still starten, App beenden.
     kannAktualisieren: process.platform === 'win32' && app.isPackaged,
     async updateAnwenden(datei) {

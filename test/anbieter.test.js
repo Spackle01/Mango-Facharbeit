@@ -108,7 +108,7 @@ test('Nur Antigravity installiert: App wechselt zu Antigravity mit dem besten Ge
 test('Kein Anbieter installiert: Hinweise mit Anleitung und Installationsbefehl', { skip: SYSTEMWEIT && 'CLI systemweit installiert' }, async () => {
   const srv = await starte('keiner', []);
   let s = await fertig(srv.call);
-  assert.deepStrictEqual(s.providers.map((p) => p.status), ['nicht_installiert', 'nicht_installiert']);
+  assert.deepStrictEqual(s.providers.map((p) => p.status), ['nicht_installiert', 'nicht_installiert', 'anmeldung_noetig'], 'DeepSeek wartet auf den Schlüssel');
   assert.strictEqual(s.settings.provider, 'claude', 'Voreinstellung bleibt');
   const [claude, agy] = s.providers;
   assert.strictEqual(claude.hint.link, 'https://code.claude.com/docs/en/setup');
@@ -117,7 +117,7 @@ test('Kein Anbieter installiert: Hinweise mit Anleitung und Installationsbefehl'
   assert.match(agy.hint.befehl, /antigravity\.google\/cli\/install/);
   s = await srv.call('POST', '/api/providers/pruefen');
   assert.strictEqual(s.pruefung, false);
-  assert.ok(s.providers.every((p) => p.status === 'nicht_installiert'));
+  assert.ok(s.providers.filter((p) => !p.api).every((p) => p.status === 'nicht_installiert'));
 
   // Danach installiert und „Erneut prüfen“ geklickt: Antigravity wird sofort eingerichtet.
   fs.symlinkSync(path.join(FIXTURES, 'agy'), path.join(TMP, 'keiner', 'bin', 'agy'));
@@ -198,4 +198,56 @@ test('Antigravity: verweigerte Aktionen und Text am Schrittende', { skip: SYSTEM
   r = await einmalSenden('volltext', { FAKE_AGY_FULLTEXT: '1' });
   assert.strictEqual(r.done.message.status, 'fertig');
   assert.strictEqual(r.done.message.text, 'Vollständige Antwort am Schrittende.');
+});
+
+test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
+  const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
+    const letzte = req.messages[req.messages.length - 1];
+    if (letzte.role === 'user') return { tools: [{ name: 'Skill', args: { skill: 'wissenschaftlich-schreiben' } }, { name: 'Skill', args: { skill: 'sprachpruefung' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/dsnotiz.md', content: 'Meine Notiz.' } }] };
+    return { text: 'Notiz angelegt.' };
+  } });
+  try {
+    const srv = await starte('nur-deepseek', [], { MANGO_NUR_API: '1', MANGO_DEEPSEEK_URL: fake.url });
+    let s = await fertig(srv.call);
+    assert.deepStrictEqual(s.providers.map((p) => p.id), ['deepseek'], 'auf dem Mac nur DeepSeek');
+    assert.strictEqual(s.settings.provider, 'deepseek', 'Voreinstellung wechselt von selbst');
+    const ds = s.providers[0];
+    assert.strictEqual(ds.status, 'anmeldung_noetig');
+    assert.strictEqual(ds.hint.aktion, 'schluessel');
+    assert.deepStrictEqual(ds.models.map((m) => m.id), ['deepseek-flash', 'deepseek-v4-pro']);
+    // Schlüssel prüfen
+    await assert.rejects(srv.call('POST', '/api/providers/deepseek/schluessel', { schluessel: 'kein-schluessel' }), /sk-/);
+    await assert.rejects(srv.call('POST', '/api/providers/deepseek/schluessel', { schluessel: 'sk-falsch-falsch-falsch-0000' }), /lehnt diesen Schlüssel ab/);
+    const r = await srv.call('POST', '/api/providers/deepseek/schluessel', { schluessel: fake.key });
+    assert.strictEqual(r.providers[0].status, 'bereit');
+    assert.strictEqual(r.settings.provider, 'deepseek');
+    // Der Schlüssel taucht nirgends in den Antworten der App auf
+    const alles = JSON.stringify([await srv.call('GET', '/api/state'), await srv.call('GET', '/api/settings'), await srv.call('GET', '/api/providers')]);
+    assert.ok(!alles.includes(fake.key) && !alles.includes('sk-test'), 'kein Schlüssel in Zustand und Einstellungen');
+    // Projekt und Antwort
+    fs.mkdirSync(path.join(srv.home, 'Dokumente'), { recursive: true });
+    await srv.call('POST', '/api/setup', { workspace: path.join(srv.home, 'Dokumente', 'DS Test'), angaben: { name: 'Alex Beispiel', titel: 'Test' } });
+    const chat = await srv.call('POST', '/api/chats');
+    const done = await srv.send(chat.id, 'Lege bitte eine Notiz an.');
+    const m = done.message;
+    assert.strictEqual(m.provider, 'deepseek');
+    assert.strictEqual(m.status, 'fertig');
+    assert.strictEqual(m.text, 'Notiz angelegt.');
+    assert.ok(m.files.some((f) => f.path === '01_themenfindung_und_mindmap/dsnotiz.md' && f.aktion === 'neu'));
+    assert.deepStrictEqual(m.stil.skills, ['wissenschaftlich-schreiben', 'sprachpruefung']);
+    assert.strictEqual(m.stil.nachgeholt, false);
+    assert.ok(m.activity.some((a) => a.skill === 'sprachpruefung'));
+    assert.match(fake.calls[0].messages[0].content, /Arbeitsregeln/, 'Regeln der App gehen als Systemnachricht mit');
+    assert.match(fake.calls[0].messages[1].content, /<antwortstil>/);
+    // Zweite Nachricht setzt den Verlauf fort (nur eine neue Nachricht, kein neuer System-Verlauf)
+    const done2 = await srv.send(chat.id, 'Danke.');
+    assert.strictEqual(done2.message.status, 'fertig');
+    assert.ok(fake.calls[fake.calls.length - 1].messages.length > 5, 'Verlauf der ersten Nachricht ist dabei');
+    // Schlüssel entfernen
+    const d = await srv.call('DELETE', '/api/providers/deepseek/schluessel');
+    assert.strictEqual(d.providers[0].status, 'anmeldung_noetig');
+    await srv.stop();
+  } finally {
+    fake.close();
+  }
 });

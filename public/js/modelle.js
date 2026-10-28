@@ -46,6 +46,7 @@ export function gruendlichkeitEl({ onChange } = {}) {
 }
 
 function standardInfo(pid) {
+  if (pid === 'deepseek') return 'Das neueste Modell von DeepSeek (V4.1 Flash).';
   return pid === 'claude' ? 'Das Modell, das in Claude Code voreingestellt ist.' : 'Das Modell, das in Antigravity voreingestellt ist.';
 }
 
@@ -104,6 +105,8 @@ export function openModelDialog(pid, { onClose } = {}) {
     body.append(
       group('Immer die neueste Version', models.filter((m) => m.gruppe === 'familie')),
       group('Bestimmte Version', models.filter((m) => m.gruppe === 'version'), 'Bleibt fest, auch wenn neuere Versionen erscheinen.'));
+  } else if (pid === 'deepseek') {
+    body.append(group('Modelle von DeepSeek', models, 'Bei „Gründlich“ denkt das Modell länger nach. Das dauert länger und kostet mehr.'));
   } else {
     const g = group('Verfügbare Modelle', models.filter((m) => m.gruppe === 'verfuegbar'), 'Liste aus „agy models“. Steht eine Denkstufe im Namen (Low, Medium, High), gilt sie statt der Gründlichkeit.');
     body.append(g || h('p', { class: 'mg-note' }, 'Die Modellliste von Antigravity konnte nicht gelesen werden. Prüfe den Anbieter in den Einstellungen oder trage die Modell-ID selbst ein.'));
@@ -111,7 +114,7 @@ export function openModelDialog(pid, { onClose } = {}) {
 
   // Eigene Modell-ID
   const known = [{ id: '' }, ...models].some((m) => m.id === current);
-  const input = h('input', { class: 'input', id: 'model-own', spellcheck: 'false', autocomplete: 'off', value: known ? '' : current, placeholder: pid === 'claude' ? 'z. B. claude-opus-4-7' : 'z. B. gemini-3.1-pro-high' });
+  const input = h('input', { class: 'input', id: 'model-own', spellcheck: 'false', autocomplete: 'off', value: known ? '' : current, placeholder: pid === 'claude' ? 'z. B. claude-opus-4-7' : pid === 'deepseek' ? 'z. B. deepseek-v4-pro' : 'z. B. gemini-3.1-pro-high' });
   const use = btn('Verwenden', { cls: 'btn btn-soft' });
   const err = h('div', { class: 'field-note err', 'aria-live': 'polite' });
   const submit = () => {
@@ -126,7 +129,8 @@ export function openModelDialog(pid, { onClose } = {}) {
     h('div', { class: 'path-field' }, input, use), err));
   body.append(h('p', { class: 'mg-note foot' }, pid === 'claude'
     ? 'Welche Modelle du nutzen kannst, hängt von deinem Claude-Konto ab. Die Auswahl gilt ab der nächsten Nachricht, auch in laufenden Chats.'
-    : 'Welche Modelle du nutzen kannst, hängt von deinem Google-Konto ab. Die Auswahl gilt ab der nächsten Nachricht.'));
+    : pid === 'deepseek' ? 'Die Abrechnung läuft über dein DeepSeek-Guthaben. Die Auswahl gilt ab der nächsten Nachricht.'
+      : 'Welche Modelle du nutzen kannst, hängt von deinem Google-Konto ab. Die Auswahl gilt ab der nächsten Nachricht.'));
 
   d = dialog({ title: `Modell für ${p.name}`, body, onClose });
   setTimeout(() => { const el = body.querySelector('.model-row[aria-checked="true"]') || body.querySelector('.model-row'); if (el) el.focus(); });

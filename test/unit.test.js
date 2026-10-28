@@ -209,7 +209,7 @@ test('Einstellungen: automatische Wahl überschreibt keine eigene Wahl', async (
     let st = new AppStore();
     await st.load();
     assert.strictEqual(st.settings.provider, 'claude');
-    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '' });
+    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '' });
     assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt);
     await st.updateSettings({ provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } }, { auto: true });
     assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt, 'automatisch heißt nicht gewählt');
@@ -815,5 +815,162 @@ test('Update: laden, Prüfsumme prüfen, Installer starten', async () => {
     delete process.env.MANGO_UPDATE_API;
     delete require.cache[require.resolve('../server/update')];
     srv.close();
+  }
+});
+
+// ---------- DeepSeek: Werkzeuge, Schlüsselspeicher, Agent-Schleife ----------
+
+test('Werkzeuge: lesen, schreiben, bearbeiten, suchen, Skills; Originale und Office-Dateien geschützt', async () => {
+  const { Werkzeuge } = require('../server/providers/werkzeuge');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-wz-'));
+  try {
+    const put = (rel, t) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), t); };
+    put('00_vorgaben/regel.md', 'Original');
+    put('.claude/skills/sprachpruefung/SKILL.md', '# Skill\nPrüfen');
+    put('02_expose_und_zeitplan/expose.md', 'Zeile eins\nZeile zwei\nZeile drei');
+    put('.facharbeit/extrakte/abgabe/x.docx.txt', '[1] Absatz');
+    const w = new Werkzeuge(dir);
+    const run = (n, a) => w.ausfuehren(n, a);
+    assert.match(await run('Read', { file_path: '02_expose_und_zeitplan/expose.md', offset: 2, limit: 1 }), /^\s+2\tZeile zwei/);
+    assert.match(await run('Read', { file_path: `${dir}/02_expose_und_zeitplan/expose.md` }), /Zeile drei/, 'absolute Pfade im Arbeitsraum gehen');
+    assert.match(await run('Read', { file_path: '../geheim.txt' }), /^Fehler: .*außerhalb/);
+    assert.match(await run('Read', { file_path: '.facharbeit/extrakte/abgabe/x.docx.txt' }), /\[1\] Absatz/);
+    assert.match(await run('Write', { file_path: '04_forschung_und_eigenanteil/notiz.md', content: 'A\nB' }), /Geschrieben/);
+    assert.strictEqual(fs.readFileSync(path.join(dir, '04_forschung_und_eigenanteil', 'notiz.md'), 'utf8'), 'A\nB');
+    assert.match(await run('Write', { file_path: '00_vorgaben/neu.md', content: 'x' }), /Originale/);
+    assert.match(await run('Write', { file_path: 'abgabe/x.docx', content: 'x' }), /Blöcke `word`/);
+    assert.match(await run('Write', { file_path: '.facharbeit/x.md', content: 'x' }), /Interne Dateien/);
+    assert.match(await run('Edit', { file_path: '02_expose_und_zeitplan/expose.md', old_string: 'Zeile', new_string: 'Satz' }), /kommt 3-mal vor/);
+    assert.match(await run('Edit', { file_path: '02_expose_und_zeitplan/expose.md', old_string: 'Zeile zwei', new_string: 'Satz zwei' }), /Bearbeitet/);
+    assert.match(fs.readFileSync(path.join(dir, '02_expose_und_zeitplan', 'expose.md'), 'utf8'), /Satz zwei/);
+    assert.match(await run('Edit', { file_path: '00_vorgaben/regel.md', old_string: 'Original', new_string: 'x' }), /Originale/);
+    assert.match(await run('Glob', { pattern: '**/*.md' }), /02_expose_und_zeitplan\/expose\.md/);
+    assert.match(await run('Glob', { pattern: '0*_*/*.md' }), /04_forschung_und_eigenanteil\/notiz\.md/);
+    assert.match(await run('Grep', { pattern: 'satz', '-i': true }), /expose\.md:2: Satz zwei/);
+    assert.match(await run('Skill', { skill: 'sprachpruefung' }), /Skill „sprachpruefung“ geladen[\s\S]*Prüfen/);
+    assert.match(await run('Skill', { skill: '../x' }), /Ungültiger Skill-Name/);
+    assert.match(await run('Skill', { skill: 'gibtsnicht' }), /Vorhanden: sprachpruefung/);
+    assert.match(await run('Gibtsnicht', {}), /gibt es nicht/);
+    // Webadressen: keine lokalen Ziele
+    for (const u of ['http://127.0.0.1/x', 'http://localhost/x', 'http://192.168.1.5/', 'file:///etc/passwd', 'http://[::1]/', 'ftp://example.com/x', 'http://user:pw@example.com/']) {
+      assert.match(await run('WebFetch', { url: u }), /^Fehler:/, u);
+    }
+    const web = new Werkzeuge(dir, { fetchFn: async () => ({ status: 200, ok: true, headers: new Map([['content-type', 'text/html; charset=utf-8']]), arrayBuffer: async () => Buffer.from('<html><head><title>x</title><script>böse()</script></head><body><h1>Titel</h1><p>Text &amp; mehr</p></body></html>') }) });
+    web.fetch = web.fetch; // eslint-disable-line no-self-assign
+    // Für den Test die DNS-Prüfung mit einer öffentlichen IP umgehen
+    assert.match(await web.ausfuehren('WebFetch', { url: 'http://93.184.216.34/' }), /Titel\s+Text & mehr/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Zugangsdaten: Speicher, Verschlüsselung über den Host, nie im Klartext in den Einstellungen', async () => {
+  const { Geheim } = require('../server/geheim');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-geheim-'));
+  try {
+    const g = new Geheim(dir);
+    assert.strictEqual(await g.get('deepseek'), '');
+    await g.set('deepseek', 'sk-abcdefghijklmnop1234');
+    assert.strictEqual(await g.get('deepseek'), 'sk-abcdefghijklmnop1234');
+    assert.strictEqual(await g.hinweis('deepseek'), '…1234');
+    assert.strictEqual(new Geheim(dir).cache, null);
+    assert.strictEqual(await new Geheim(dir).get('deepseek'), 'sk-abcdefghijklmnop1234', 'bleibt nach Neustart erhalten');
+    if (process.platform !== 'win32') assert.strictEqual(fs.statSync(path.join(dir, 'zugang.json')).mode & 0o777, 0o600);
+    // Mit Schlüsselbund des Systems (hier nachgebaut): in der Datei steht nichts Lesbares
+    const host = { verschluesselnMoeglich: () => true, verschluesseln: (t) => Buffer.from(t).reverse().toString('base64'), entschluesseln: (b) => Buffer.from(b, 'base64').reverse().toString() };
+    const g2 = new Geheim(path.join(dir, 'sicher'), host);
+    await g2.set('deepseek', 'sk-geheimgeheimgeheim99');
+    assert.ok(!fs.readFileSync(path.join(dir, 'sicher', 'zugang.json'), 'utf8').includes('sk-geheim'));
+    assert.strictEqual(await new Geheim(path.join(dir, 'sicher'), host).get('deepseek'), 'sk-geheimgeheimgeheim99');
+    await g.entfernen('deepseek');
+    assert.strictEqual(await g.get('deepseek'), '');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DeepSeek: Agent-Schleife mit Werkzeugen, Verlauf, Fehler und Abbruch', async () => {
+  const fake = require('./fixtures/fake-deepseek');
+  const { Geheim } = require('../server/geheim');
+  const f = await fake.start({ skript: (req) => {
+    const letzte = req.messages[req.messages.length - 1];
+    if (/FEHLER401/.test(letzte.content || '')) return { status: 401, meldung: 'Authentication Fails' };
+    if (/FEHLER402/.test(letzte.content || '')) return { status: 402, meldung: 'Insufficient Balance' };
+    if (/FEHLER500/.test(letzte.content || '')) return { status: 500 };
+    if (/DENKEN/.test(JSON.stringify(req.messages.slice(-1)))) return { reasoning: 'Ich überlege.', text: 'Ergebnis nach Nachdenken.' };
+    const tools = req.messages.filter((m) => m.role === 'tool').length;
+    if (letzte.role === 'user' && /NOTIZ/.test(letzte.content)) return { tools: [{ name: 'Skill', args: { skill: 'wissenschaftlich-schreiben' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/notiz.md', content: 'Hallo\nWelt' } }] };
+    if (letzte.role === 'tool' && tools === 2) return { text: 'Notiz gespeichert.' };
+    return { text: `Antwort ${req.messages.length}` };
+  } });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ds-'));
+  process.env.MANGO_DEEPSEEK_URL = f.url;
+  delete require.cache[require.resolve('../server/providers/deepseek')];
+  const ds = require('../server/providers/deepseek');
+  try {
+    const g = new Geheim(dir);
+    await g.set('deepseek', f.key);
+    ds.init({ geheim: g });
+    const ws = path.join(dir, 'ws');
+    fs.mkdirSync(path.join(ws, '.claude', 'skills', 'wissenschaftlich-schreiben'), { recursive: true });
+    fs.mkdirSync(path.join(ws, '01_themenfindung_und_mindmap'), { recursive: true });
+    fs.writeFileSync(path.join(ws, '.claude', 'skills', 'wissenschaftlich-schreiben', 'SKILL.md'), '# Skill\nKurz schreiben');
+    // Erkennung
+    assert.strictEqual((await ds.detect()).status, 'bereit');
+    assert.strictEqual((await ds.pruefeSchluessel(f.key)).ok, true);
+    assert.strictEqual((await ds.pruefeSchluessel('sk-falsch-falsch-falsch')).ok, false);
+    // Lauf mit Werkzeugen
+    const ev = [];
+    const r = await ds.run({}, { cwd: ws, prompt: 'Mach eine NOTIZ', rulesText: 'Regeln', onEvent: (e) => ev.push(e) }).done;
+    assert.strictEqual(r.error, null);
+    assert.strictEqual(r.text, 'Notiz gespeichert.');
+    assert.deepStrictEqual(ev.filter((e) => e.type === 'activity').map((e) => e.item.kind), ['skill', 'schreiben']);
+    assert.strictEqual(ev.find((e) => e.type === 'activity').item.skill, 'wissenschaftlich-schreiben');
+    assert.strictEqual(fs.readFileSync(path.join(ws, '01_themenfindung_und_mindmap', 'notiz.md'), 'utf8'), 'Hallo\nWelt');
+    assert.deepStrictEqual(f.calls[0].tools.map((t) => t.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch']);
+    assert.deepStrictEqual(f.calls[0].thinking, { type: 'disabled' });
+    assert.match(f.calls[0].messages[0].content, /^Regeln[\s\S]*Werkzeuge in dieser Umgebung/);
+    assert.deepStrictEqual(f.calls[1].messages.map((m) => m.role), ['system', 'user', 'assistant', 'tool', 'tool']);
+    assert.strictEqual(f.calls[1].messages[3].tool_call_id, f.calls[1].messages[2].tool_calls[0].id);
+    assert.match(f.calls[1].messages[3].content, /Skill „wissenschaftlich-schreiben“ geladen/);
+    // Verlauf wird fortgesetzt
+    const r2 = await ds.run({}, { cwd: ws, prompt: 'Und weiter', sessionId: r.sessionId, resume: true, rulesText: 'Regeln', onEvent: () => {} }).done;
+    assert.strictEqual(r2.text, 'Antwort 7');
+    assert.strictEqual(ds.run({}, { cwd: ws, prompt: 'x', sessionId: 'gibtsnicht', resume: true, onEvent: () => {} }) && (await ds.run({}, { cwd: ws, prompt: 'x', sessionId: 'gibtsnicht', resume: true, onEvent: () => {} }).done).errorKind, 'sitzung');
+    // Nachdenken (Gründlichkeit hoch) schickt reasoning_effort und gibt reasoning_content mit zurück
+    const r3 = await ds.run({}, { cwd: ws, prompt: 'DENKEN', effort: 'high', onEvent: () => {} }).done;
+    assert.strictEqual(r3.text, 'Ergebnis nach Nachdenken.');
+    const letzte = f.calls[f.calls.length - 1];
+    assert.deepStrictEqual([letzte.thinking, letzte.reasoning_effort], [{ type: 'enabled' }, 'high']);
+    const r4 = await ds.run({}, { cwd: ws, prompt: 'noch DENKEN', sessionId: r3.sessionId, resume: true, effort: 'high', onEvent: () => {} }).done;
+    const vorletzte = f.calls[f.calls.length - 1].messages.find((m) => m.role === 'assistant' && m.reasoning_content);
+    assert.strictEqual(vorletzte.reasoning_content, 'Ich überlege.', 'reasoning_content wird zurückgeschickt');
+    assert.strictEqual(r4.error, null);
+    // Fehler
+    const e401 = await ds.run({}, { cwd: ws, prompt: 'FEHLER401', onEvent: () => {} }).done;
+    assert.deepStrictEqual([e401.errorKind, e401.retryable], ['anmeldung', false]);
+    assert.match(e401.error, /Schlüssel wurde abgelehnt/);
+    const e402 = await ds.run({}, { cwd: ws, prompt: 'FEHLER402', onEvent: () => {} }).done;
+    assert.deepStrictEqual([e402.errorKind, e402.retryable], ['limit', false]);
+    assert.match(e402.error, /Guthaben/);
+    const e500 = await ds.run({}, { cwd: ws, prompt: 'FEHLER500', onEvent: () => {} }).done;
+    assert.deepStrictEqual([e500.errorKind, e500.retryable], ['netz', true]);
+    // Kein Schlüssel
+    await g.entfernen('deepseek');
+    assert.strictEqual((await ds.run({}, { cwd: ws, prompt: 'x', onEvent: () => {} }).done).errorKind, 'anmeldung');
+    assert.strictEqual((await ds.detect()).status, 'anmeldung_noetig');
+    assert.strictEqual((await ds.detect()).hint.aktion, 'schluessel');
+    // Abbruch
+    await g.set('deepseek', f.key);
+    const h = ds.run({}, { cwd: ws, prompt: 'lang', onEvent: () => {} });
+    h.cancel();
+    const rc = await h.done;
+    assert.strictEqual(rc.canceled, true);
+    assert.strictEqual(rc.error, null);
+  } finally {
+    delete process.env.MANGO_DEEPSEEK_URL;
+    delete require.cache[require.resolve('../server/providers/deepseek')];
+    f.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

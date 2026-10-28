@@ -2,8 +2,11 @@
 // Verwaltet die beiden KI-Anbieter: Erkennung, Verbindungsstatus und Durchläufe.
 const claude = require('./claude');
 const antigravity = require('./antigravity');
+const deepseek = require('./deepseek');
 
-const MODULES = { claude, antigravity };
+// Auf dem Mac gibt es nur den DeepSeek-Zugang über einen API-Schlüssel (MANGO_NUR_API zum Testen).
+const NUR_API = process.platform === 'darwin' || !!process.env.MANGO_NUR_API;
+const MODULES = NUR_API ? { deepseek } : { claude, antigravity, deepseek };
 
 const STATUS_LABEL = {
   pruefe: 'Wird geprüft …',
@@ -29,13 +32,13 @@ class Providers {
       id: s.id, name: s.name, status: s.status, label: STATUS_LABEL[s.status] || s.status,
       detail: s.detail || '', hint: s.hint || null, version: s.version || '', model: s.model || '',
       models: s.models || [], modelWahl: !!(s.caps ? s.caps.model : s.id === 'claude'),
-      checkedAt: s.checkedAt || null, usable: this.usable(s.id),
+      checkedAt: s.checkedAt || null, usable: this.usable(s.id), api: !!s.api,
     }));
   }
 
   usable(id) {
     const s = this.state[id];
-    return !!s && s.installed && ['bereit', 'verbunden', 'ungeprueft', 'fehler'].includes(s.status) && !!s.bin;
+    return !!s && s.installed && ['bereit', 'verbunden', 'ungeprueft', 'fehler'].includes(s.status) && !!(s.bin || s.api);
   }
 
   // Erkennt Installation und (soweit ohne Anfrage möglich) die Anmeldung.
@@ -63,6 +66,7 @@ class Providers {
     this.verifying[id] = (async () => {
       await this.detect(id);
       const s = this.state[id];
+      if (id === 'deepseek') return this.state[id];
       if (!s.installed || id !== 'antigravity') return s;
       this.state[id] = { ...s, status: 'pruefe' };
       try {

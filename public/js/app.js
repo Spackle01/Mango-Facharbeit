@@ -13,6 +13,7 @@ import { openImportDialog, entriesFromDrop, dropIn, itemsFromInput } from './imp
 import { modelMenuSection, openModelDialog, providerModels, selectedModel, selectedModelLabel } from './modelle.js';
 import { modelLabel } from './modelname.js';
 import { showPreview } from './vorschau.js';
+import { schluesselFormular } from './schluessel.js';
 
 export const S = {
   state: null,
@@ -32,7 +33,7 @@ export function isStreaming(chatId = S.chatId) {
 
 const STATUS_SYMBOL = { offen: '×', in_arbeit: '?', erledigt: '✓' };
 const STATUS_LABEL = { offen: 'Offen', in_arbeit: 'In Arbeit', erledigt: 'Erledigt' };
-const PROVIDER_NAME = { claude: 'Claude Code', antigravity: 'Antigravity' };
+const PROVIDER_NAME = { claude: 'Claude Code', antigravity: 'Antigravity', deepseek: 'DeepSeek' };
 
 // ---------- Farbschema ----------
 
@@ -1210,7 +1211,8 @@ function renderProviderBanner() {
   const slot = S.els.composerWrap.querySelector('.banner-slot');
   slot.innerHTML = '';
   if (S.state.pruefung) return; // Die App sucht noch und wählt danach selbst aus.
-  if (S.state.providers.length && S.state.providers.every((p) => p.status === 'nicht_installiert')) {
+  // Noch nichts eingerichtet: alle CLIs fehlen und bei DeepSeek ist noch kein Schlüssel verbunden.
+  if (S.state.providers.length && S.state.providers.every((p) => p.status === 'nicht_installiert' || (p.api && p.status === 'anmeldung_noetig'))) {
     slot.append(setupCard());
     return;
   }
@@ -1223,10 +1225,14 @@ function renderProviderBanner() {
     ? [h('b', {}, `${prov.name}: `), 'Installiert. Die Verbindung wird beim ersten Senden geprüft.']
     : [h('b', {}, `${prov.name}: ${prov.label}. `), prov.hint ? prov.hint.text : prov.detail || ''];
   const banner = h('div', { class: `provider-banner${bad ? ' danger' : ''}`, role: 'status' }, h('span', { class: 'txt' }, text));
-  if (prov.hint && prov.hint.befehl) {
-    banner.append(h('code', { class: 'cmd' }, prov.hint.befehl), btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(prov.hint.befehl) }));
+  if (prov.hint && prov.hint.aktion === 'schluessel') {
+    banner.append(schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
+  } else {
+    if (prov.hint && prov.hint.befehl) {
+      banner.append(h('code', { class: 'cmd' }, prov.hint.befehl), btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(prov.hint.befehl) }));
+    }
+    banner.append(btn(prov.status === 'ungeprueft' ? 'Jetzt prüfen' : 'Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm', size: 15, onClick: () => checkProvider(prov.id) }));
   }
-  banner.append(btn(prov.status === 'ungeprueft' ? 'Jetzt prüfen' : 'Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm', size: 15, onClick: () => checkProvider(prov.id) }));
   if (other) banner.append(btn(`Zu ${other.name} wechseln`, { cls: 'btn btn-sm', onClick: () => chooseProvider(other.id) }));
   slot.append(banner);
 }
@@ -1235,12 +1241,19 @@ function renderProviderBanner() {
 const SETUP_INFO = {
   claude: 'Von Anthropic. Du brauchst ein Claude-Konto mit Abo (z. B. Pro oder Max).',
   antigravity: 'Von Google. Du meldest dich mit deinem Google-Konto an.',
+  deepseek: 'Über die DeepSeek-API mit eigenem Schlüssel. Es wird nichts installiert, du zahlst nach Verbrauch.',
 };
 
 function setupCard() {
   const wo = S.state.platform === 'win32' ? 'In der PowerShell ausführen:' : 'Im Terminal ausführen:';
   const option = (p) => {
     const hint = p.hint || {};
+    if (p.api) {
+      return h('div', { class: 'setup-option' },
+        h('div', { class: 'so-head' }, h('b', {}, 'DeepSeek')),
+        h('p', { class: 'so-info' }, SETUP_INFO.deepseek),
+        schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
+    }
     return h('div', { class: 'setup-option' },
       h('div', { class: 'so-head' }, h('b', {}, p.name),
         hint.link ? h('a', { class: 'link-btn', href: hint.link, target: '_blank', rel: 'noopener noreferrer' }, 'Anleitung öffnen', iconEl('external', 14)) : null),
@@ -1250,8 +1263,11 @@ function setupCard() {
           btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(hint.befehl) }))) : null);
   };
   return h('div', { class: 'provider-banner setup', role: 'status' },
-    h('div', { class: 'setup-head' }, h('b', {}, 'Bitte installiere Claude Code oder Antigravity.'),
-      h('span', {}, 'Damit Mango antworten kann, brauchst du einen der beiden KI-Anbieter. Einer reicht. Danach einmal anmelden und hier auf „Erneut prüfen“ klicken.')),
+    S.state.providers.some((p) => !p.api)
+      ? h('div', { class: 'setup-head' }, h('b', {}, 'Bitte richte einen KI-Anbieter ein.'),
+        h('span', {}, 'Damit Mango antworten kann, brauchst du Claude Code, Antigravity oder einen DeepSeek-Schlüssel. Einer reicht. Danach hier auf „Erneut prüfen“ klicken.'))
+      : h('div', { class: 'setup-head' }, h('b', {}, 'Bitte verbinde deinen DeepSeek-Schlüssel.'),
+        h('span', {}, 'Damit Mango antworten kann, braucht es einen API-Schlüssel von DeepSeek. Du erstellst ihn in wenigen Minuten auf platform.deepseek.com.')),
     h('div', { class: 'setup-options' }, S.state.providers.map(option)),
     h('div', { class: 'setup-foot' }, btn('Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: checkAllProviders })));
 }

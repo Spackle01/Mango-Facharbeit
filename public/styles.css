@@ -976,3 +976,9 @@ button.status-pill:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px
 .upd-bar { margin-top: 10px; }
 .upd-bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .3s ease; }
 .check-row { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+
+/* ---------- DeepSeek-Schlüssel ---------- */
+.ds-form { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; width: 100%; }
+.ds-hilfe { font-size: 12.5px; color: var(--text-3); }
+.ds-hilfe .link-btn { font-size: 12.5px; }
+.provider-banner .ds-form { flex-basis: 100%; }
