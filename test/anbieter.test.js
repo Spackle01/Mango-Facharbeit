@@ -203,7 +203,7 @@ test('Antigravity: verweigerte Aktionen und Text am Schrittende', { skip: SYSTEM
 test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
   const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
     const letzte = req.messages[req.messages.length - 1];
-    if (letzte.role === 'user') return { tools: [{ name: 'Skill', args: { skill: 'wissenschaftlich-schreiben' } }, { name: 'Skill', args: { skill: 'sprachpruefung' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/dsnotiz.md', content: 'Meine Notiz.' } }] };
+    if (letzte.role === 'user') return { tools: [{ name: 'Skill', args: { skill: 'stimmenprofil' } }, { name: 'Skill', args: { skill: 'natuerlich-schreiben' } }, { name: 'Skill', args: { skill: 'textpruefung' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/dsnotiz.md', content: 'Meine Notiz.' } }] };
     return { text: 'Notiz angelegt.' };
   } });
   try {
@@ -234,9 +234,10 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
     assert.strictEqual(m.status, 'fertig');
     assert.strictEqual(m.text, 'Notiz angelegt.');
     assert.ok(m.files.some((f) => f.path === '01_themenfindung_und_mindmap/dsnotiz.md' && f.aktion === 'neu'));
-    assert.deepStrictEqual(m.stil.skills, ['wissenschaftlich-schreiben', 'sprachpruefung']);
+    assert.deepStrictEqual(m.stil.skills, ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']);
+    assert.strictEqual(m.stil.vollstaendig, true);
     assert.strictEqual(m.stil.nachgeholt, false);
-    assert.ok(m.activity.some((a) => a.skill === 'sprachpruefung'));
+    assert.ok(m.activity.some((a) => a.skill === 'textpruefung'));
     assert.match(fake.calls[0].messages[0].content, /Arbeitsregeln/, 'Regeln der App gehen als Systemnachricht mit');
     assert.match(fake.calls[0].messages[1].content, /<antwortstil>/);
     // Zweite Nachricht setzt den Verlauf fort (nur eine neue Nachricht, kein neuer System-Verlauf)

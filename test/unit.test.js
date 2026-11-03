@@ -486,12 +486,108 @@ test('Sprachprüfung: neuer Text aus Word-Block und Textdateien, Rückmeldung an
 test('Regeln: Schreibregeln der Skills und „kurz und einfach“ werden immer mitgeschickt', () => {
   const regeln = fs.readFileSync(path.join(ROOT, 'ressourcen/regeln.md'), 'utf8');
   assert.match(regeln, /## Kurz und einfach/);
-  assert.match(regeln, /## Schreibregeln \(aus den Skills `wissenschaftlich-schreiben` und `sprachpruefung`, gelten immer\)/);
-  assert.match(regeln, /\*\*Pflicht:\*\* Bevor du einen Text schreibst/);
+  assert.match(regeln, /## Schreibregeln \(Skills `stimmenprofil`, `natuerlich-schreiben`, `stilrevision`, `textpruefung`, gelten immer\)/);
+  assert.match(regeln, /\*\*Pflicht:\*\* Für jeden Text, den du schreibst/);
   const p = ctx.buildPrompt({ context: '<projektkontext/>', text: 'Hallo', schreibaufgabe: true });
-  assert.match(p, /<schreibregeln>Ablauf bei jedem Text.*wissenschaftlich-schreiben.*sprachpruefung/);
+  assert.match(p, /<schreibregeln>Ablauf bei jedem Text.*stimmenprofil.*natuerlich-schreiben.*stilrevision.*textpruefung/);
   assert.ok(!/<schreibregeln>/.test(ctx.buildPrompt({ context: '', text: 'Hallo' })));
   assert.match(ctx.buildPrompt({ context: '', text: 'Hallo' }), /<antwortstil>.*höchstens drei kurze Sätze/, 'Antwortstil steht bei jeder Nachricht');
+});
+
+// ---------- Schreib-Skills (Paket „Huminizer GER V2“) ----------
+
+const schreibskills = require('../server/schreibskills');
+const wsLib = require('../server/workspace');
+const SKILL_NAMEN = ['natuerlich-schreiben', 'stilrevision', 'stimmenprofil', 'textpruefung'];
+
+test('Schreib-Skills: Pflicht = Stimme + Schreiben oder Überarbeiten + Prüfung', () => {
+  const g = (...n) => new Set(n);
+  const namen = (set) => schreibskills.fehlend(set).map((a) => a.id);
+  assert.deepStrictEqual(namen(g()), ['stimme', 'schreiben', 'pruefung']);
+  assert.deepStrictEqual(namen(g('stimmenprofil', 'natuerlich-schreiben', 'textpruefung')), []);
+  assert.deepStrictEqual(namen(g('stimmenprofil', 'stilrevision', 'textpruefung')), [], 'Überarbeitung statt neuem Text genügt');
+  assert.deepStrictEqual(namen(g('natuerlich-schreiben', 'stilrevision', 'textpruefung')), ['stimme'], 'ohne Stimmenprofil unvollständig');
+  assert.deepStrictEqual(namen(g('stimmenprofil', 'natuerlich-schreiben')), ['pruefung'], 'ohne Prüfung unvollständig');
+  assert.deepStrictEqual(namen(g('wissenschaftlich-schreiben', 'sprachpruefung')), ['stimme', 'schreiben', 'pruefung'], 'alte Skills zählen nicht mehr');
+  assert.deepStrictEqual(schreibskills.geladene(g('textpruefung', 'x', 'stimmenprofil')), ['stimmenprofil', 'textpruefung'], 'feste Reihenfolge, nur Schreib-Skills');
+});
+
+test('Schreib-Skills: Paket ist vollständig, unverändert und ohne Reste der alten Skills in der App', () => {
+  const paket = path.join(ROOT, 'Huminizer GER V2');
+  for (const name of SKILL_NAMEN) {
+    const dir = path.join(ROOT, 'ressourcen', 'skills', name);
+    const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+    assert.match(skill, new RegExp(`^---\\nname: ${name}\\n`), `${name}: Frontmatter steht am Dateianfang`);
+    assert.ok(skill.includes('mango-facharbeit:verwaltet'), `${name}: von der App verwaltet`);
+    // Verlinkte Referenzen gibt es.
+    for (const m of skill.matchAll(/\]\((references\/[^)]+)\)/g)) assert.ok(fs.existsSync(path.join(dir, m[1])), `${name}: ${m[1]}`);
+    // Inhalt entspricht dem gelieferten Paket (nur die Verwaltungszeile ist neu).
+    if (fs.existsSync(path.join(paket, name, 'SKILL.md'))) {
+      const original = fs.readFileSync(path.join(paket, name, 'SKILL.md'), 'utf8');
+      assert.strictEqual(skill.replace(/\n<!-- mango-facharbeit:verwaltet[^\n]*-->\n/, ''), original, `${name}: Text unverändert zum Paket`);
+      for (const ref of fs.readdirSync(path.join(paket, name, 'references'))) {
+        assert.strictEqual(fs.readFileSync(path.join(dir, 'references', ref), 'utf8'), fs.readFileSync(path.join(paket, name, 'references', ref), 'utf8'), `${name}/${ref}`);
+      }
+    }
+  }
+  // Die Regeln nennen alle vier Skills; alte Namen kommen nirgends in der App vor (außer in der Liste der veralteten).
+  const regeln = fs.readFileSync(path.join(ROOT, 'ressourcen/regeln.md'), 'utf8');
+  for (const name of SKILL_NAMEN) assert.ok(regeln.includes(`\`${name}\``), `regeln.md nennt ${name}`);
+  const dateien = [];
+  const sammle = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) sammle(f); else if (/\.(js|md|json|html|yml|py)$/.test(e.name)) dateien.push(f); } };
+  for (const d of ['server', 'public', 'ressourcen', 'electron']) sammle(path.join(ROOT, d));
+  for (const f of dateien) {
+    if (['schreibskills.js', 'workspace.js', 'HERKUNFT.md'].includes(path.basename(f))) continue; // dürfen den Wechsel nennen
+    const inhalt = fs.readFileSync(f, 'utf8');
+    for (const alt of schreibskills.VERALTET) assert.ok(!inhalt.includes(alt), `${path.relative(ROOT, f)} nennt noch den alten Skill ${alt}`);
+  }
+  assert.ok(!fs.existsSync(path.join(ROOT, 'ressourcen/skills/sprachpruefung')) && !fs.existsSync(path.join(ROOT, 'ressourcen/skills/wissenschaftlich-schreiben')));
+});
+
+test('Schreib-Skills: bestehende Arbeitsräume bekommen die neuen und verlieren die alten (eigene Dateien bleiben)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-skills-'));
+  await Project.create(dir, { name: 'Test' });
+  await wsLib.syncManagedFiles(dir);
+  // Zustand einer älteren App-Version: verwaltete alte Skills liegen im Arbeitsraum.
+  for (const root of ['.agents', '.claude']) {
+    for (const alt of schreibskills.VERALTET) {
+      fs.mkdirSync(path.join(dir, root, 'skills', alt, 'scripts'), { recursive: true });
+      fs.writeFileSync(path.join(dir, root, 'skills', alt, 'SKILL.md'), `---\nname: ${alt}\n---\n<!-- ${wsLib.MARKER} -->\nalt`);
+      fs.writeFileSync(path.join(dir, root, 'skills', alt, 'scripts', 'x.py'), 'print(1)');
+    }
+  }
+  // Ein alter Skill, den die Person selbst angelegt hat (ohne Verwaltungsvermerk), bleibt.
+  fs.writeFileSync(path.join(dir, '.claude', 'skills', 'sprachpruefung', 'SKILL.md'), '---\nname: sprachpruefung\n---\nMeine eigene Fassung');
+  await wsLib.syncManagedFiles(dir);
+  for (const root of ['.agents', '.claude']) {
+    assert.ok(!fs.existsSync(path.join(dir, root, 'skills', 'wissenschaftlich-schreiben')), `${root}: verwalteter alter Skill entfernt`);
+    for (const name of SKILL_NAMEN) assert.ok(fs.existsSync(path.join(dir, root, 'skills', name, 'SKILL.md')), `${root}: ${name} vorhanden`);
+  }
+  assert.ok(!fs.existsSync(path.join(dir, '.agents', 'skills', 'sprachpruefung')));
+  assert.match(fs.readFileSync(path.join(dir, '.claude', 'skills', 'sprachpruefung', 'SKILL.md'), 'utf8'), /Meine eigene Fassung/, 'Datei der Person bleibt');
+  // Die Skill-Datei beginnt mit dem Frontmatter, damit Claude Code sie erkennt.
+  assert.match(fs.readFileSync(path.join(dir, '.claude', 'skills', 'textpruefung', 'SKILL.md'), 'utf8'), /^---\nname: textpruefung\n/);
+});
+
+test('Sprachprüfung: harte Treffer müssen geändert werden, Prüfhinweise entscheidet der Assistent', () => {
+  const stellen = stil.pruefen('Gerne! Hier ist dein Text. Darüber hinaus ist das gut — sehr gut.');
+  const nach = (g) => stellen.find((x) => x.grund === g);
+  assert.strictEqual(nach('Chatbot-Rest').hart, true);
+  assert.ok(!nach('Floskel-Übergang').hart, 'Floskel-Übergang ist nur ein Hinweis');
+  assert.ok(!nach('Geviertstrich (—)').hart);
+  assert.strictEqual(stil.pruefen('Er sagte "ja" dazu.')[0].hart, true, 'falsche Anführungszeichen sind hart');
+  const p = stil.korrekturPrompt([{ datei: 'abgabe/a.md', stellen }]);
+  assert.match(p, /Suchhilfen, keine Urteile/);
+  assert.match(p, /„Gerne!“ – Chatbot-Rest \(ändern\)/);
+  assert.match(p, /– Floskel-Übergang\n/, 'Hinweise ohne „(ändern)“');
+  // Pflicht-Skills nachholen: alle drei Schritte in fester Reihenfolge.
+  const fehlend = schreibskills.fehlend(new Set()).map((a) => a.text);
+  const n = stil.korrekturPrompt([], {}, { fehlendeSkills: fehlend, dateien: ['abgabe/a.md'] });
+  assert.match(n, /Pflicht-Skills nicht geladen \(`stimmenprofil`, `natuerlich-schreiben` \(neuer Text\) oder `stilrevision` \(vorhandener Text\), `textpruefung`\)/);
+  assert.match(n, /`stimmenprofil`, dann `natuerlich-schreiben` bzw\. `stilrevision`, dann `textpruefung`/);
+  const c = stil.chatNachholenPrompt(fehlend);
+  assert.match(c, /^Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden/);
+  assert.match(c, /ganze Antwort noch einmal aus/);
 });
 
 // ---------- Dateien erstellen: PDF, PowerPoint, Excel, Vorschau ----------
@@ -670,9 +766,9 @@ test('Ordnung: Unordnung wird erkannt, Aufräum-Plan sicher ausgeführt und rüc
 });
 
 test('Aktivität: Skills werden erkannt (Skill-Werkzeug und SKILL.md lesen)', () => {
-  assert.strictEqual(describeTool('Skill', { skill: 'wissenschaftlich-schreiben' }, '/w').skill, 'wissenschaftlich-schreiben');
-  assert.strictEqual(describeTool('Skill', { skill: 'plugin:sprachpruefung' }, '/w').skill, 'sprachpruefung');
-  assert.strictEqual(describeTool('Read', { file_path: '/w/.agents/skills/sprachpruefung/SKILL.md' }, '/w').skill, 'sprachpruefung');
+  assert.strictEqual(describeTool('Skill', { skill: 'natuerlich-schreiben' }, '/w').skill, 'natuerlich-schreiben');
+  assert.strictEqual(describeTool('Skill', { skill: 'plugin:textpruefung' }, '/w').skill, 'textpruefung');
+  assert.strictEqual(describeTool('Read', { file_path: '/w/.agents/skills/textpruefung/SKILL.md' }, '/w').skill, 'textpruefung');
   assert.strictEqual(describeTool('Read', { file_path: '/w/notiz.md' }, '/w').skill, undefined);
 });
 
@@ -832,7 +928,7 @@ test('Werkzeuge: lesen, schreiben, bearbeiten, suchen, Skills; Originale und Off
   try {
     const put = (rel, t) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), t); };
     put('00_vorgaben/regel.md', 'Original');
-    put('.claude/skills/sprachpruefung/SKILL.md', '# Skill\nPrüfen');
+    put('.claude/skills/textpruefung/SKILL.md', '# Skill\nPrüfen');
     put('02_expose_und_zeitplan/expose.md', 'Zeile eins\nZeile zwei\nZeile drei');
     put('.facharbeit/extrakte/abgabe/x.docx.txt', '[1] Absatz');
     const w = new Werkzeuge(dir);
@@ -853,9 +949,9 @@ test('Werkzeuge: lesen, schreiben, bearbeiten, suchen, Skills; Originale und Off
     assert.match(await run('Glob', { pattern: '**/*.md' }), /02_expose_und_zeitplan\/expose\.md/);
     assert.match(await run('Glob', { pattern: '0*_*/*.md' }), /04_forschung_und_eigenanteil\/notiz\.md/);
     assert.match(await run('Grep', { pattern: 'satz', '-i': true }), /expose\.md:2: Satz zwei/);
-    assert.match(await run('Skill', { skill: 'sprachpruefung' }), /Skill „sprachpruefung“ geladen[\s\S]*Prüfen/);
+    assert.match(await run('Skill', { skill: 'textpruefung' }), /Skill „textpruefung“ geladen[\s\S]*Prüfen/);
     assert.match(await run('Skill', { skill: '../x' }), /Ungültiger Skill-Name/);
-    assert.match(await run('Skill', { skill: 'gibtsnicht' }), /Vorhanden: sprachpruefung/);
+    assert.match(await run('Skill', { skill: 'gibtsnicht' }), /Vorhanden: textpruefung/);
     assert.match(await run('Gibtsnicht', {}), /gibt es nicht/);
     // Webadressen: keine lokalen Ziele
     for (const u of ['http://127.0.0.1/x', 'http://localhost/x', 'http://192.168.1.5/', 'file:///etc/passwd', 'http://[::1]/', 'ftp://example.com/x', 'http://user:pw@example.com/']) {
@@ -905,7 +1001,7 @@ test('DeepSeek: Agent-Schleife mit Werkzeugen, Verlauf, Fehler und Abbruch', asy
     if (/FEHLER500/.test(letzte.content || '')) return { status: 500 };
     if (/DENKEN/.test(JSON.stringify(req.messages.slice(-1)))) return { reasoning: 'Ich überlege.', text: 'Ergebnis nach Nachdenken.' };
     const tools = req.messages.filter((m) => m.role === 'tool').length;
-    if (letzte.role === 'user' && /NOTIZ/.test(letzte.content)) return { tools: [{ name: 'Skill', args: { skill: 'wissenschaftlich-schreiben' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/notiz.md', content: 'Hallo\nWelt' } }] };
+    if (letzte.role === 'user' && /NOTIZ/.test(letzte.content)) return { tools: [{ name: 'Skill', args: { skill: 'natuerlich-schreiben' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/notiz.md', content: 'Hallo\nWelt' } }] };
     if (letzte.role === 'tool' && tools === 2) return { text: 'Notiz gespeichert.' };
     return { text: `Antwort ${req.messages.length}` };
   } });
@@ -918,9 +1014,9 @@ test('DeepSeek: Agent-Schleife mit Werkzeugen, Verlauf, Fehler und Abbruch', asy
     await g.set('deepseek', f.key);
     ds.init({ geheim: g });
     const ws = path.join(dir, 'ws');
-    fs.mkdirSync(path.join(ws, '.claude', 'skills', 'wissenschaftlich-schreiben'), { recursive: true });
+    fs.mkdirSync(path.join(ws, '.claude', 'skills', 'natuerlich-schreiben'), { recursive: true });
     fs.mkdirSync(path.join(ws, '01_themenfindung_und_mindmap'), { recursive: true });
-    fs.writeFileSync(path.join(ws, '.claude', 'skills', 'wissenschaftlich-schreiben', 'SKILL.md'), '# Skill\nKurz schreiben');
+    fs.writeFileSync(path.join(ws, '.claude', 'skills', 'natuerlich-schreiben', 'SKILL.md'), '# Skill\nKurz schreiben');
     // Erkennung
     assert.strictEqual((await ds.detect()).status, 'bereit');
     assert.strictEqual((await ds.pruefeSchluessel(f.key)).ok, true);
@@ -931,14 +1027,14 @@ test('DeepSeek: Agent-Schleife mit Werkzeugen, Verlauf, Fehler und Abbruch', asy
     assert.strictEqual(r.error, null);
     assert.strictEqual(r.text, 'Notiz gespeichert.');
     assert.deepStrictEqual(ev.filter((e) => e.type === 'activity').map((e) => e.item.kind), ['skill', 'schreiben']);
-    assert.strictEqual(ev.find((e) => e.type === 'activity').item.skill, 'wissenschaftlich-schreiben');
+    assert.strictEqual(ev.find((e) => e.type === 'activity').item.skill, 'natuerlich-schreiben');
     assert.strictEqual(fs.readFileSync(path.join(ws, '01_themenfindung_und_mindmap', 'notiz.md'), 'utf8'), 'Hallo\nWelt');
     assert.deepStrictEqual(f.calls[0].tools.map((t) => t.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch']);
     assert.deepStrictEqual(f.calls[0].thinking, { type: 'disabled' });
     assert.match(f.calls[0].messages[0].content, /^Regeln[\s\S]*Werkzeuge in dieser Umgebung/);
     assert.deepStrictEqual(f.calls[1].messages.map((m) => m.role), ['system', 'user', 'assistant', 'tool', 'tool']);
     assert.strictEqual(f.calls[1].messages[3].tool_call_id, f.calls[1].messages[2].tool_calls[0].id);
-    assert.match(f.calls[1].messages[3].content, /Skill „wissenschaftlich-schreiben“ geladen/);
+    assert.match(f.calls[1].messages[3].content, /Skill „natuerlich-schreiben“ geladen/);
     // Verlauf wird fortgesetzt
     const r2 = await ds.run({}, { cwd: ws, prompt: 'Und weiter', sessionId: r.sessionId, resume: true, rulesText: 'Regeln', onEvent: () => {} }).done;
     assert.strictEqual(r2.text, 'Antwort 7');

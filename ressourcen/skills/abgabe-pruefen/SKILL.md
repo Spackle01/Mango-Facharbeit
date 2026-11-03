@@ -60,7 +60,7 @@ Grundlage ist `00_vorgaben/anforderungen.md`. Lies die Datei zuerst. Prüfe nur 
 - Nur in Word prüfbar, deshalb als „in Word prüfen“ ausgeben: A4 einseitig; Arial 11 pt, Calibri 11 pt oder Times New Roman 12 pt; Zeilenabstand 1,5; Fußnoten 9 pt einzeilig; Rand links 2,5 cm, sonst 2,0 cm; Seitenzahl oben zentriert ab Einleitung; Silbentrennung.
 
 ### Sprache
-- Fachsprache, sachlich, präzise; Ich-Form nur in Einleitung und Schluss passend. Für eine genaue Prüfung den Skill `sprachpruefung` verwenden.
+- Fachsprache, sachlich, präzise; Ich-Form nur in Einleitung und Schluss passend. Für eine genaue Prüfung den Skill `textpruefung` verwenden.
 
 ### Abgabe (Hinweise, außerhalb der App)
 - 1× gedruckt im Sekretariat; digital als Word **und** PDF mit allen Anhängen und eingescannter, unterschriebener Erklärung auf Teams; Nachweis- und Betreuungsheft.

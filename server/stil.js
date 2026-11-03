@@ -1,11 +1,13 @@
 'use strict';
-// Automatische Sprachprüfung nach den Skills `wissenschaftlich-schreiben` und `sprachpruefung`.
-// Prüft Texte, die der Assistent in Dateien schreibt, auf typische KI-Muster und zu lange Sätze.
-// Eine Heuristik: Sie findet Stellen zum Überarbeiten, kein Urteil über die Autorschaft.
+// Automatische Sprachprüfung zum Skill `textpruefung`.
+// Prüft Texte, die der Assistent in Dateien schreibt, auf Chatbot-Reste, Floskeln, Stilwörter und lange Sätze.
+// Eine Heuristik: Sie findet Stellen zum Prüfen, kein Urteil über die Autorschaft. Wortlisten sind nur Suchhilfen
+// (so auch die Skills): Nur Chatbot-Reste und falsche Anführungszeichen müssen immer geändert werden, bei allen
+// anderen Treffern entscheidet der Assistent im Zusammenhang des Textes.
 
 const MAX_WOERTER = 25;
 
-// Stilwörter: einzeln unproblematisch, gehäuft auffällig (Skill, Abschnitt „Wörter“).
+// Stilwörter: einzeln unproblematisch, gehäuft auffällig.
 const STIL_DE = ['maßgeblich', 'vielfältig', 'nahtlos', 'ganzheitlich', 'facettenreich', 'Meilenstein', 'unterstreicht', 'unterstreichen',
   'Bereicherung', 'Mehrwert', 'essenziell', 'essentiell', 'zudem', 'somit', 'letztendlich', 'gewährleisten', 'gewährleistet', 'innovativ',
   'zukunftsweisend', 'wegweisend'];
@@ -14,7 +16,7 @@ const STIL_EN = ['delve', 'tapestry', 'testament', 'intricate', 'meticulous', 'p
   'vibrant', 'garner', 'interplay', 'streamline', 'cutting-edge', 'game-changer', 'paramount', 'noteworthy', 'invaluable', 'ever-evolving',
   'synergy', 'spearhead', 'bolster', 'groundbreaking', 'transformative', 'furthermore', 'moreover', 'additionally', 'notably'];
 
-// Floskeln und Strukturen, die immer überarbeitet werden.
+// Floskeln und Strukturen: Prüfhinweise. Ein dritter Eintrag `true` markiert Treffer, die immer geändert werden müssen.
 const MUSTER = [
   [/\bin der heutigen (?:Zeit|Welt|Gesellschaft)\b/i, 'Aufwärm-Einstieg'],
   [/\bin einer (?:Welt|Zeit), in der\b/i, 'Aufwärm-Einstieg'],
@@ -32,8 +34,8 @@ const MUSTER = [
   [/,\s*was (?:die|den|das)? ?\w+ (?:unterstreicht|verdeutlicht|hervorhebt)\b/i, 'Anhängsel'],
   [/\b(?:Experten|Fachleute|Studien|Forscher) (?:sagen|zeigen|belegen|meinen)\b(?![^.!?]*\((?:Vgl\.\s*)?[A-ZÄÖÜ][^)]*\d{4})/i, 'vager Beleg ohne Kurzbeleg'],
   [/\btauchen wir ein\b|\blass(?:t)? uns eintauchen\b/i, 'Wegweiser-Floskel'],
-  [/\b(?:Gerne!|Ich hoffe, (?:das|dies) hilft|Lass mich wissen|Gute Frage)/i, 'Chatbot-Rest'],
-  [/\[(?:Dein|Ihr) Name\]/i, 'Chatbot-Rest'],
+  [/\b(?:Gerne!|Ich hoffe, (?:das|dies) hilft|Lass mich wissen|Gute Frage)/i, 'Chatbot-Rest', true],
+  [/\[(?:Dein|Ihr) Name\]/i, 'Chatbot-Rest', true],
   [/\bin today's (?:world|digital age)\b|\bit is important to note\b|\bin conclusion\b/i, 'Floskel (Englisch)'],
 ];
 
@@ -77,25 +79,26 @@ function kurz(s, max = 140) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-// Liefert gefundene Stellen: [{ satz, grund }]. Höchstens eine Meldung je Satz und Grund.
+// Liefert gefundene Stellen: [{ satz, grund, hart? }]. Höchstens eine Meldung je Satz und Grund.
+// `hart`: muss geändert werden; alle anderen Stellen sind Prüfhinweise.
 function pruefen(text) {
   const raw = String(text || '');
   const stellen = [];
   const seen = new Set();
-  const add = (satz, grund) => {
+  const add = (satz, grund, hart = false) => {
     const key = `${satz}|${grund}`;
     if (seen.has(key)) return;
     seen.add(key);
-    stellen.push({ satz: kurz(satz), grund });
+    stellen.push(hart ? { satz: kurz(satz), grund, hart: true } : { satz: kurz(satz), grund });
   };
   const list = saetze(raw);
   const woerter = list.reduce((n, s) => n + s.split(/\s+/).length, 0);
   const istEn = englisch(raw);
 
   for (const s of list) {
-    for (const [re, grund] of MUSTER) if (re.test(s)) add(s, grund);
+    for (const [re, grund, hart] of MUSTER) if (re.test(s)) add(s, grund, !!hart);
     if (s.includes('—')) add(s, 'Geviertstrich (—)');
-    if (!istEn && /["“”]/.test(s) && !/[„]/.test(s)) add(s, 'englische Anführungszeichen statt „…“');
+    if (!istEn && /["“”]/.test(s) && !/[„]/.test(s)) add(s, 'englische Anführungszeichen statt „…“', true);
     const n = s.split(/\s+/).filter((w) => /[\wäöüß]/i.test(w)).length;
     if (n > MAX_WOERTER) add(s, `Satz zu lang (${n} Wörter) – teilen`);
   }
@@ -137,19 +140,30 @@ function neueZeilen(vorher, nachher) {
 }
 
 // Nachricht an den Assistenten mit den gefundenen Stellen (für den Überarbeitungsdurchlauf).
+// `fehlendeSkills`: Beschreibungen der Pflicht-Skills, die nicht geladen wurden (siehe schreibskills.js).
 function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = [] } = {}) {
   const L = [];
   if (fehlendeSkills.length) {
-    L.push(`Du hast für den eben eingetragenen Text die Pflicht-Skills nicht geladen (${fehlendeSkills.map((x) => `\`${x}\``).join(', ')}). Lade sie jetzt mit dem Skill-Werkzeug, prüfe den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} danach mit der Checkliste und überarbeite ihn direkt in der Datei. Kurz und einfach, ohne neue Inhalte. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
+    L.push(`Du hast für den eben eingetragenen Text die Pflicht-Skills nicht geladen (${fehlendeSkills.join(', ')}). Lade sie jetzt mit dem Skill-Werkzeug, in dieser Reihenfolge: \`stimmenprofil\`, dann \`natuerlich-schreiben\` bzw. \`stilrevision\`, dann \`textpruefung\`. Überarbeite den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} mit ihnen direkt in der Datei: Stimme der Person, Fakten und Unsicherheit erhalten, nichts Neues erfinden, kurz und einfach. Ist der Text schon passend, lass ihn unverändert. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
   }
-  if (funde.length) L.push(`${fehlendeSkills.length ? '' : 'Automatische Sprachprüfung (Skills `sprachpruefung` und `wissenschaftlich-schreiben`) deines gerade eingetragenen Textes. Überarbeite nur diese Stellen, direkt in der Datei: kurz und einfach, ohne neue Inhalte. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.'}${fehlendeSkills.length ? 'Die automatische Prüfung hat außerdem diese Stellen gefunden:' : ''}`);
+  if (funde.length) {
+    L.push(fehlendeSkills.length
+      ? 'Die automatische Prüfung hat außerdem diese Stellen gefunden. Sie sind Suchhilfen: Stellen mit „(ändern)“ änderst du immer, bei den übrigen änderst du nur, wenn sie in diesem Text schlechter sind als eine Alternative.'
+      : 'Automatische Sprachprüfung (Skill `textpruefung`) deines gerade eingetragenen Textes. Die Treffer sind Suchhilfen, keine Urteile: Stellen mit „(ändern)“ änderst du immer. Die übrigen prüfst du im Zusammenhang und änderst sie nur, wenn sie in diesem Text schlechter sind als eine Alternative (kleinster Eingriff, Skill `stilrevision`). Eine passende Stelle bleibt, wie sie ist. Keine neuen Inhalte, Stimme der Person und Fakten erhalten. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.');
+  }
   for (const f of funde) {
     const hinweis = extrakte[f.datei] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[f.datei]})`
       : /\.(pdf|pptx|xlsx)$/i.test(f.datei) ? ' (Block `erstellen` mit "ersetzen": true und dem vollständigen überarbeiteten Text)' : ' (Edit)';
     L.push('', `${f.datei}${hinweis}:`);
-    for (const s of f.stellen.slice(0, 12)) L.push(`- „${s.satz}“ – ${s.grund}`);
+    for (const s of f.stellen.slice(0, 12)) L.push(`- „${s.satz}“ – ${s.grund}${s.hart ? ' (ändern)' : ''}`);
   }
   return L.join('\n');
 }
 
-module.exports = { pruefen, textAusWord, neueZeilen, korrekturPrompt, saetze, MAX_WOERTER };
+// Nachricht, wenn der Assistent einen Text im Chat geschrieben hat, ohne die Pflicht-Skills zu laden:
+// Er soll sie laden und den Text komplett neu ausgeben (die App ersetzt die erste Fassung).
+function chatNachholenPrompt(fehlendeSkills) {
+  return `Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden (${fehlendeSkills.join(', ')}). Lade jetzt alle drei Schritte mit dem Skill-Werkzeug, in dieser Reihenfolge: \`stimmenprofil\`, dann \`natuerlich-schreiben\` bzw. \`stilrevision\`, dann \`textpruefung\`. Schreib den Text mit ihnen neu bzw. überarbeite ihn: Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Prüfe ihn danach mit \`textpruefung\` und behebe die Befunde. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.`;
+}
+
+module.exports = { pruefen, textAusWord, neueZeilen, korrekturPrompt, chatNachholenPrompt, saetze, MAX_WOERTER };

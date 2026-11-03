@@ -7,6 +7,7 @@ const {
   fileTimeStamp, resolveInside, writeTextAtomic, isInside,
 } = require('./util');
 const extract = require('./extract');
+const schreibskills = require('./schreibskills');
 
 const ROOT = path.resolve(__dirname, '..');
 const RES = path.join(ROOT, 'ressourcen');
@@ -100,6 +101,17 @@ Word-Dateien nicht selbst schreiben, sondern Änderungen mit dem Block \`word\` 
 `;
 }
 
+// Frühere Skills aus dem Arbeitsraum entfernen (nur von der App verwaltete), damit sie nicht mehr genutzt werden.
+async function entferneVeraltete(ws) {
+  for (const root of ['.agents', '.claude']) {
+    for (const name of schreibskills.VERALTET) {
+      const dir = path.join(ws, root, 'skills', name);
+      const datei = await fsp.readFile(path.join(dir, 'SKILL.md'), 'utf8').catch(() => null);
+      if (datei !== null && datei.includes(MARKER)) await fsp.rm(dir, { recursive: true, force: true });
+    }
+  }
+}
+
 async function syncManagedFiles(ws) {
   const regeln = await fsp.readFile(path.join(RES, 'regeln.md'), 'utf8');
   await writeManaged(path.join(internalDir(ws), 'regeln.md'), `<!-- ${MARKER} -->\n${regeln}`);
@@ -115,6 +127,8 @@ async function syncManagedFiles(ws) {
     await copyTree(path.join(skillsSrc, e.name), path.join(ws, '.agents', 'skills', e.name), { managed: true });
     await copyTree(path.join(skillsSrc, e.name), path.join(ws, '.claude', 'skills', e.name), { managed: true });
   }
+
+  await entferneVeraltete(ws);
 
   const vorgabenSrc = path.join(RES, 'vorgaben');
   const vorgabenDest = path.join(ws, '00_vorgaben');

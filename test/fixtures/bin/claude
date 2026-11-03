@@ -76,7 +76,7 @@ process.stdin.on('end', () => {
   }
   // Schreib-Skills: wie die echte CLI über das Skill-Werkzeug laden (außer bei OHNESKILL).
   const skills = () => {
-    for (const [i, name] of ['wissenschaftlich-schreiben', 'sprachpruefung'].entries()) {
+    for (const [i, name] of ['stimmenprofil', 'natuerlich-schreiben', 'textpruefung'].entries()) {
       out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `s${i}`, name: 'Skill', input: { skill: name } }] } });
     }
   };
@@ -86,6 +86,24 @@ process.stdin.on('end', () => {
     out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
+    return;
+  }
+  // Entwurf im Chat (keine Datei): ohne OHNESKILL werden die Schreib-Skills geladen, sonst nicht. Nach der Aufforderung der
+  // App (Skills nachholen) lädt der Assistent sie und gibt eine neue Fassung aus.
+  const entwurf = (fassung) => `${fassung}: ${'Ich habe in der Woche zuerst die Quellen gesammelt und danach die Fragen für die Umfrage geschrieben. '.repeat(6)}`;
+  const streame = (t) => {
+    out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
+    for (const chunk of t.match(/[\s\S]{1,60}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: chunk } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
+  };
+  if (msg.includes('Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden')) {
+    skills();
+    streame(entwurf('Neue Fassung'));
+    return;
+  }
+  if (msg.includes('CHATENTWURF')) {
+    if (!msg.includes('OHNESKILL')) skills();
+    streame(entwurf('Erste Fassung'));
     return;
   }
   // Sprachprüfung: erst Floskeln eintragen, nach der Rückmeldung der App die Stellen überarbeiten.

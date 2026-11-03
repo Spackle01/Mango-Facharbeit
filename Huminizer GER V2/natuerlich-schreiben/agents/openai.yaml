@@ -1,0 +1,4 @@
+interface:
+  display_name: "Natürlich schreiben"
+  short_description: "Neue Texte mit passender Stimme und klarer Sprache"
+  default_prompt: "Nutze $natuerlich-schreiben für einen neuen Text passend zu meinem Anlass, meinen Fakten und meiner gewünschten Stimme."

@@ -114,7 +114,12 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(state.project.aufgaben.length, 27);
     assert.ok(fs.existsSync(path.join(WS, '00_vorgaben', 'anforderungen.md')));
     assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', 'quellenrecherche', 'SKILL.md')));
-    assert.ok(fs.existsSync(path.join(WS, '.agents', 'skills', 'sprachpruefung', 'scripts', 'ai_tell_scan.py')));
+    for (const s of ['stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung']) {
+      assert.ok(fs.existsSync(path.join(WS, '.agents', 'skills', s, 'SKILL.md')), `Schreib-Skill ${s} liegt im Arbeitsraum`);
+      assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', s, 'SKILL.md')));
+    }
+    assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', 'textpruefung', 'references', 'pruefraster.md')), 'Referenzen der Skills sind dabei');
+    for (const alt of ['wissenschaftlich-schreiben', 'sprachpruefung']) assert.ok(!fs.existsSync(path.join(WS, '.claude', 'skills', alt)), `alter Skill ${alt} ist nicht mehr da`);
     assert.ok(fs.existsSync(path.join(WS, '.agents', 'rules', 'mango-facharbeit.md')));
     assert.ok(fs.existsSync(path.join(WS, 'FACHARBEIT.md')));
     assert.strictEqual(state.chats.length, 1);
@@ -329,7 +334,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.word[0].ok, 2);
     assert.strictEqual(m.word[0].fehler.length, 1);
     assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['wissenschaftlich-schreiben', 'sprachpruefung'], nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, Skills waren geladen');
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung'], vollstaendig: true, nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, Skills waren geladen');
     // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
     const extract = require('../server/extract');
     const info = await extract.analyse(path.join(WS, ...lt.split('/')));
@@ -355,15 +360,16 @@ test('Kompletter Ablauf', async (t) => {
     const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
     const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
     assert.strictEqual(m.text, 'Eingetragen.', 'Text der Überarbeitung wird nicht angezeigt');
-    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ['wissenschaftlich-schreiben', 'sprachpruefung'], nachgeholt: false });
-    assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen/.test(a.label)));
+    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung'], vollstaendig: true, nachgeholt: false });
+    assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen zum Prüfen/.test(a.label)));
     const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
     assert.strictEqual(w.ok, 2);
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
     assert.strictEqual(calls.length, 2, 'ein Überarbeitungsdurchlauf');
-    assert.match(calls[0].input, /<schreibregeln>.*wissenschaftlich-schreiben/);
+    assert.match(calls[0].input, /<schreibregeln>.*stimmenprofil.*natuerlich-schreiben.*textpruefung/);
     assert.ok(calls[1].args.includes('--resume'), 'Überarbeitung in derselben Sitzung');
     assert.match(calls[1].input, /„In der heutigen Zeit spielt Zeitmanagement eine entscheidende Rolle\.“ – Aufwärm-Einstieg/);
+    assert.match(calls[1].input, /Suchhilfen, keine Urteile/, 'Treffer sind Prüfhinweise, der Assistent entscheidet');
     const text = require('../server/extract').docxToText(fs.readFileSync(path.join(WS, ...w.datei.split('/'))));
     assert.match(text, /Ich habe über Windkraft geschrieben\./);
     assert.ok(!/heutigen Zeit/.test(text));
@@ -374,12 +380,43 @@ test('Kompletter Ablauf', async (t) => {
     const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
     const m = (await send(chat.id, 'OHNESKILL LERNTAGEBUCH Ergänzung')).done.message;
     assert.strictEqual(m.stil.nachgeholt, true);
-    assert.deepStrictEqual(m.stil.skills, ['wissenschaftlich-schreiben', 'sprachpruefung']);
+    assert.deepStrictEqual(m.stil.skills, ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']);
+    assert.strictEqual(m.stil.vollstaendig, true);
     assert.ok(m.activity.some((a) => /Schreib-Skills nachholen/.test(a.label)));
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
     assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
-    assert.match(calls[1].input, /Pflicht-Skills nicht geladen \(`wissenschaftlich-schreiben`, `sprachpruefung`\)/);
+    assert.match(calls[1].input, /Pflicht-Skills nicht geladen \(`stimmenprofil`, `natuerlich-schreiben` \(neuer Text\) oder `stilrevision` \(vorhandener Text\), `textpruefung`\)/);
     assert.match(calls[1].input, /aktuelle Absatznummern in \.facharbeit\/extrakte\/abgabe\//);
+  });
+
+  await t.test('Schreib-Skills: auch ein Entwurf im Chat braucht sie, fehlen sie, wird er neu geschrieben', async () => {
+    const lese = () => fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const skills = ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung'];
+    // Skills geladen: ein Durchlauf, die Antwort bleibt.
+    let chat = await call('POST', '/api/chats');
+    let vorher = lese().length;
+    let m = (await send(chat.id, 'Schreib mir CHATENTWURF einen Absatz für das Lerntagebuch')).done.message;
+    assert.match(m.text, /^Erste Fassung: /);
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills, vollstaendig: true, nachgeholt: false, chat: true });
+    assert.strictEqual(lese().length - vorher, 1, 'kein zweiter Durchlauf');
+    // Skills nicht geladen: Die App fordert sie ein, die neue Fassung ersetzt die erste.
+    chat = await call('POST', '/api/chats');
+    vorher = lese().length;
+    m = (await send(chat.id, 'Schreib mir CHATENTWURF OHNESKILL einen Absatz für das Lerntagebuch')).done.message;
+    assert.match(m.text, /^Neue Fassung: /, 'zweite Fassung ersetzt die erste');
+    assert.ok(!/Erste Fassung/.test(m.text));
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills, vollstaendig: true, nachgeholt: true, chat: true });
+    assert.ok(m.activity.some((a) => /Schreib-Skills nachholen und Text neu schreiben/.test(a.label)));
+    const calls = lese().slice(vorher);
+    assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
+    assert.ok(calls[1].args.includes('--resume'), 'in derselben Sitzung');
+    assert.match(calls[1].input, /^Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden \(`stimmenprofil`, `natuerlich-schreiben` \(neuer Text\) oder `stilrevision` \(vorhandener Text\), `textpruefung`\)/);
+    // Kurze Chat-Antworten sind kein Entwurf: keine Prüfung, kein zweiter Durchlauf.
+    chat = await call('POST', '/api/chats');
+    vorher = lese().length;
+    m = (await send(chat.id, 'Schreib mir bitte kurz hallo')).done.message;
+    assert.strictEqual(m.stil, undefined);
+    assert.strictEqual(lese().length - vorher, 1);
   });
 
   await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {
