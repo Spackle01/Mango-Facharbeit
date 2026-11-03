@@ -158,7 +158,7 @@ function run(info, { cwd, prompt, sessionId, resume, rulesText, onEvent, model: 
       let konsistent = messages.length;
       let denkt = effort === 'high';
       onEvent({ type: 'init', model, sessionId: sid });
-      const system = `${rulesText || ''}\n\n## Werkzeuge in dieser Umgebung\n\nDu hast die Werkzeuge Read, Write, Edit, Glob, Grep, Skill und WebFetch. Ruf sie direkt auf, ohne sie anzukündigen. Es gibt kein Terminal. Skills lädst du mit dem Werkzeug Skill. Word-, PDF- und PowerPoint-Dateien erzeugst oder änderst du nur über die Blöcke am Ende deiner Antwort.`;
+      const system = `${rulesText || ''}\n\n## Werkzeuge in dieser Umgebung\n\nDu hast die Werkzeuge Read, Write, Edit, Glob, Grep, Skill und WebFetch. Ruf sie direkt auf, ohne sie anzukündigen. Es gibt kein Terminal. Skills lädst du mit dem Werkzeug Skill. Word-, PDF- und PowerPoint-Dateien erzeugst oder änderst du nur über die Blöcke am Ende deiner Antwort. Zum Schluss, bei jeder Antwort: Jeder Text, den du schreibst, klingt wie ein Mensch und wie die Person selbst. Wende dafür die Schreib-Skills vom Anfang deiner Regeln an.`;
 
       for (let runde = 0; runde < MAX_RUNDEN; runde++) {
         if (canceled) break;

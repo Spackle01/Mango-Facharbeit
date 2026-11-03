@@ -229,6 +229,8 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   } else if (schreibaufgabe) {
     parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat), alle Skills mit dem Skill-Werkzeug laden: 1. `stimmenprofil`: Stimme der Person aus ihren eigenen Texten im Arbeitsraum bestimmen. 2. `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text): schreiben bzw. überarbeiten, kurz und einfach, nichts erfinden. 3. `textpruefung`: den fertigen Text prüfen und Befunde beheben. 4. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
   }
+  // Gilt bei jeder Nachricht, auch wenn die App keine Schreibaufgabe erkennt (z. B. „im Chat“): Texte klingen menschlich.
+  parts.push('<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Wende die Schreib-Skills vom Anfang deiner Regeln an und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>');
   // Gilt bei jeder Nachricht: hält die Antworten kurz, auch in langen Chats.
   parts.push('<antwortstil>Chat-Antwort: höchstens drei kurze Sätze und 40 Wörter, jeder Satz höchstens 15 Wörter. Einfache Wörter, so wie du es einer Mitschülerin erklären würdest. Keine Überschriften, Listen oder Fettdruck, keine Einleitung, kein Beispiel und keine Zusammenfassung, wenn nicht danach gefragt wurde. Länger nur, wenn die Person ausdrücklich Ausführliches verlangt. Dateiinhalte nicht im Chat wiederholen.</antwortstil>');
   parts.push(`Nachricht der Schülerin bzw. des Schülers:\n${text}`);
