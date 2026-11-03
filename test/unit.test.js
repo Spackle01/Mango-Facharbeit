@@ -491,6 +491,8 @@ test('Regeln: Schreibregeln der Skills und „kurz und einfach“ werden immer m
   const p = ctx.buildPrompt({ context: '<projektkontext/>', text: 'Hallo', schreibaufgabe: true });
   assert.match(p, /<schreibregeln>Ablauf bei jedem Text.*stimmenprofil.*natuerlich-schreiben.*stilrevision.*textpruefung/);
   assert.ok(!/<schreibregeln>/.test(ctx.buildPrompt({ context: '', text: 'Hallo' })));
+  // Die Erinnerung „wie ein Mensch schreiben“ kommt bei jeder Nachricht, auch wenn keine Schreibaufgabe erkannt wird („im chat“).
+  for (const text of ['im chat', 'Hallo', 'Und jetzt?']) assert.match(ctx.buildPrompt({ context: '', text }), /<menschlich>.*Schreib-Skills.*wie ein Mensch.*Erkennungsprogramme/, `bei „${text}“`);
   assert.match(ctx.buildPrompt({ context: '', text: 'Hallo' }), /<antwortstil>.*höchstens drei kurze Sätze/, 'Antwortstil steht bei jeder Nachricht');
 });
 
@@ -574,6 +576,13 @@ test('Schreib-Skills: Wortlaut steht vollständig und zuerst in den Regeln', asy
   const titel = text.indexOf(schreibskills.BLOCK_TITEL);
   assert.ok(titel > 0, 'Abschnitt mit dem Wortlaut vorhanden');
   assert.ok(titel < text.indexOf('## Kurz und einfach'), 'steht vor allen anderen Regeln');
+  // Ganz oben: die oberste Regel „immer wie ein Mensch schreiben“, dann der Wortlaut, erst danach die Rolle.
+  const oberste = text.indexOf('## Oberste Regel: Schreib immer wie ein Mensch');
+  assert.ok(oberste > 0 && oberste < titel, 'oberste Regel steht vor dem Wortlaut der Skills');
+  assert.ok(text.indexOf('## Deine Rolle') > titel, 'die Rolle kommt erst nach den Skills');
+  assert.ok(text.slice(0, titel).length < 2500, 'vor dem Wortlaut steht nur die kurze oberste Regel');
+  assert.match(text.slice(oberste, titel), /immer[\s\S]*Mensch[\s\S]*Schreib-Skills[\s\S]*Erkennungsprogramme/);
+  assert.match(text.slice(-900), /## Zum Schluss: bei jeder Antwort[\s\S]*wie ein Mensch/, 'Erinnerung am Ende der Regeln');
   assert.ok(!text.includes(schreibskills.PLATZHALTER), 'Platzhalter ist ersetzt');
   assert.ok(!text.includes('mango-facharbeit:verwaltet'), 'Verwaltungszeile der Skills steht nicht im Systemprompt');
   // Alle vier Skills in der Reihenfolge Stimme, Schreiben, Überarbeiten, Prüfen, jeweils vollständig und ohne Kopfblock.

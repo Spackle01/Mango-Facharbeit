@@ -243,6 +243,9 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
     assert.ok(system.indexOf('## Schreib-Skills: Wortlaut (zuerst lesen)') < system.indexOf('## Kurz und einfach'), 'der Wortlaut der Skills steht vor allen anderen Regeln');
     for (const titel of ['# Stimmenprofil', '# Natürlich schreiben', '# Stilrevision', '# Textprüfung']) assert.ok(system.includes(titel), `${titel} steht im Systemprompt`);
     assert.ok(m.activity[0].label.startsWith('Liest die Schreib-Skills'), 'erster Arbeitsschritt');
+    assert.ok(system.indexOf('## Oberste Regel: Schreib immer wie ein Mensch') < system.indexOf('## Schreib-Skills: Wortlaut'), 'oberste Regel steht ganz oben');
+    assert.match(system.slice(-500), /Zum Schluss, bei jeder Antwort: Jeder Text, den du schreibst, klingt wie ein Mensch/, 'Erinnerung am Ende des Systemprompts');
+    assert.match(fake.calls[0].messages[1].content, /<menschlich>/, 'Erinnerung steht bei jeder Nachricht');
     assert.match(fake.calls[0].messages[1].content, /<antwortstil>/);
     // Zweite Nachricht setzt den Verlauf fort (nur eine neue Nachricht, kein neuer System-Verlauf)
     const done2 = await srv.send(chat.id, 'Danke.');
