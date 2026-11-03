@@ -1,0 +1,4 @@
+interface:
+  display_name: "Textprüfung"
+  short_description: "Stil und Inhalt mit konkreten Befunden prüfen"
+  default_prompt: "Prüfe mit $textpruefung meinen Text auf passende Sprache und Inhaltstreue und nenne nur relevante Befunde mit konkreten Reparaturvorschlägen."

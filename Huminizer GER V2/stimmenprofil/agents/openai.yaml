@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stimmenprofil"
+  short_description: "Schreibstimme aus passenden Beispielen ableiten"
+  default_prompt: "Nutze $stimmenprofil, um aus meinen Textbeispielen ein anwendbares Schreibprofil mit belegten Eigenheiten und klaren Grenzen abzuleiten."
