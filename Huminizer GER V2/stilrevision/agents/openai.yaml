@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stilrevision"
+  short_description: "Texte passend überarbeiten und Aussagen erhalten"
+  default_prompt: "Nutze $stilrevision, um meinen Text natürlich und passend zur Zielgruppe zu überarbeiten, ohne Fakten oder Haltung zu verändern."
