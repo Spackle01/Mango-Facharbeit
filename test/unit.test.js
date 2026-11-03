@@ -590,6 +590,40 @@ test('Sprachprüfung: harte Treffer müssen geändert werden, Prüfhinweise ents
   assert.match(c, /ganze Antwort noch einmal aus/);
 });
 
+// ---------- Chat-Liste: Datumsgruppen und Suche ----------
+
+test('Chat-Liste: Datumsgruppen und Suche nach Titel', async () => {
+  const { chatGruppe, gruppiere, GRUPPEN } = await import('../public/js/chatliste.js');
+  const jetzt = new Date(2026, 10, 3, 9, 30); // 03.11.2026
+  const tag = (zurueck, h = 12) => new Date(2026, 10, 3 - zurueck, h).toISOString();
+  assert.strictEqual(chatGruppe(tag(0, 0), jetzt), 'Heute');
+  assert.strictEqual(chatGruppe(tag(0, 23), jetzt), 'Heute');
+  assert.strictEqual(chatGruppe(tag(1), jetzt), 'Gestern');
+  assert.strictEqual(chatGruppe(tag(2), jetzt), 'Letzte 7 Tage');
+  assert.strictEqual(chatGruppe(tag(7), jetzt), 'Letzte 7 Tage');
+  assert.strictEqual(chatGruppe(tag(8), jetzt), 'Letzte 30 Tage');
+  assert.strictEqual(chatGruppe(tag(30), jetzt), 'Letzte 30 Tage');
+  assert.strictEqual(chatGruppe(tag(31), jetzt), 'Älter');
+  assert.strictEqual(chatGruppe('kein Datum', jetzt), 'Älter');
+  assert.strictEqual(chatGruppe(tag(-2), jetzt), 'Heute', 'ein Datum in der Zukunft (Uhr falsch) bleibt oben');
+
+  const chats = [
+    { id: 'a', title: 'Exposé schreiben', updatedAt: tag(0) },
+    { id: 'b', title: 'Lerntagebuch', updatedAt: tag(1) },
+    { id: 'c', title: 'Zeitplan', updatedAt: tag(0, 8) },
+    { id: 'd', title: 'Alte Quellen', updatedAt: tag(90) },
+    { id: 'e', title: '', updatedAt: tag(3) },
+  ];
+  const g = gruppiere(chats, '', jetzt);
+  assert.deepStrictEqual(g.map((x) => [x.name, x.chats.map((c) => c.id)]), [['Heute', ['a', 'c']], ['Gestern', ['b']], ['Letzte 7 Tage', ['e']], ['Älter', ['d']]], 'feste Reihenfolge, Reihenfolge innerhalb der Gruppe bleibt');
+  assert.deepStrictEqual(GRUPPEN, ['Heute', 'Gestern', 'Letzte 7 Tage', 'Letzte 30 Tage', 'Älter']);
+  assert.deepStrictEqual(gruppiere(chats, 'EXPOSE', jetzt).flatMap((x) => x.chats.map((c) => c.id)), ['a'], 'ohne Groß-/Kleinschreibung und Akzente');
+  assert.deepStrictEqual(gruppiere(chats, '  tage ', jetzt).flatMap((x) => x.chats.map((c) => c.id)), ['b'], 'Leerzeichen am Rand zählen nicht');
+  assert.deepStrictEqual(gruppiere(chats, 'neuer', jetzt).flatMap((x) => x.chats.map((c) => c.id)), ['e'], 'ohne Titel gilt „Neuer Chat“');
+  assert.deepStrictEqual(gruppiere(chats, 'xyz', jetzt), []);
+  assert.deepStrictEqual(gruppiere(undefined, '', jetzt), []);
+});
+
 // ---------- Dateien erstellen: PDF, PowerPoint, Excel, Vorschau ----------
 
 const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');

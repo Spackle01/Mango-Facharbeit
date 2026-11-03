@@ -14,6 +14,7 @@ import { modelMenuSection, openModelDialog, providerModels, selectedModel, selec
 import { modelLabel } from './modelname.js';
 import { showPreview } from './vorschau.js';
 import { schluesselFormular } from './schluessel.js';
+import { gruppiere } from './chatliste.js';
 
 export const S = {
   state: null,
@@ -24,6 +25,7 @@ export const S = {
   streams: new Map(), // chatId -> Anzahl offener Streams
   viewStream: {}, // chatId -> Stream, dessen Ereignisse die Ansicht aktualisieren
   els: {},
+  chatFilter: '', // Suchtext der Chat-Liste (wird nicht gespeichert)
 };
 
 let streamSeq = 0;
@@ -212,11 +214,30 @@ function buildSidebar() {
       btn('', { iconName: 'x', cls: 'btn btn-icon sb-toggle-mobile', title: 'Seitenleiste schließen', onClick: () => toggleSidebar(false) })),
     btn('Neuer Chat', { iconName: 'plus', cls: 'btn new-chat', onClick: newChat }),
     btn('Dateien einsortieren', { iconName: 'upload', cls: 'btn new-chat dropin-btn', title: 'Dateien oder Ordner aus deiner bisherigen Arbeit hinzufügen – du kannst sie auch einfach ins Fenster ziehen', onClick: () => { toggleSidebarMobileClose(); openImportDialog([], (inv) => startImportChat(inv)); } }),
-    h('div', { class: 'sb-label', id: 'chats-label' }, 'Chats'),
-    h('nav', { class: 'chat-list', 'aria-labelledby': 'chats-label' }),
+    chatSearchEl(),
+    h('nav', { class: 'chat-list', 'aria-label': 'Chats' }),
     h('div', { class: 'sb-foot' }));
   renderChatList();
   renderSidebarFoot();
+}
+
+// Suchfeld über der Chat-Liste (Strg+K). Filtert nach dem Titel, ohne etwas auf dem Server zu ändern.
+function chatSearchEl() {
+  const input = h('input', { type: 'search', class: 'sb-search-input', placeholder: 'Chats suchen', 'aria-label': 'Chats durchsuchen', autocomplete: 'off', spellcheck: 'false', value: S.chatFilter });
+  input.addEventListener('input', () => { S.chatFilter = input.value; renderChatList(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && input.value) { e.preventDefault(); e.stopPropagation(); input.value = ''; S.chatFilter = ''; renderChatList(); }
+  });
+  return h('div', { class: 'sb-search' }, iconEl('search', 15), input);
+}
+
+function focusChatSearch() {
+  const app = S.els.app;
+  const mobil = window.matchMedia('(max-width: 860px)').matches;
+  const aufklappen = mobil ? !app.classList.contains('sb-open') : app.classList.contains('sb-collapsed');
+  if (aufklappen) toggleSidebar(true);
+  const fokus = () => { const i = S.els.sidebar.querySelector('.sb-search-input'); if (i) { i.focus(); i.select(); } };
+  if (aufklappen) setTimeout(fokus); else fokus(); // eingeklappt: erst nach dem Aufklappen
 }
 
 export function renderChatList() {
@@ -224,26 +245,33 @@ export function renderChatList() {
   list.innerHTML = '';
   const chats = S.state.chats || [];
   if (!chats.length) list.append(h('div', { class: 'empty-note' }, 'Noch keine Chats'));
-  for (const c of chats) {
-    const running = S.state.running.includes(c.id) || isStreaming(c.id);
-    const item = h('div', { class: `chat-item${c.id === S.chatId ? ' active' : ''}`, 'data-id': c.id });
-    const link = h('button', { type: 'button', class: 'chat-link', 'aria-current': c.id === S.chatId ? 'page' : null, title: c.title }, c.title || 'Neuer Chat');
-    link.addEventListener('click', () => { openChat(c.id); toggleSidebarMobileClose(); });
-    item.append(link);
-    if (running) item.append(h('span', { class: 'running-dot', title: 'Antwort läuft' }));
-    const more = btn('', { iconName: 'more', cls: 'btn btn-sm btn-icon chat-more', title: `Optionen für „${c.title}“`, attrs: { 'aria-haspopup': 'menu' } });
-    more.addEventListener('click', (e) => {
-      e.stopPropagation();
-      menu(more, [
-        { label: 'Umbenennen', icon: 'pencil', onClick: () => startRename(item, c) },
-        { label: 'Als Markdown exportieren', icon: 'download', onClick: () => { window.location.href = `/api/chats/${c.id}/export?t=${encodeURIComponent(document.querySelector('meta[name="mango-token"]').content)}`; } },
-        'sep',
-        { label: 'Löschen', icon: 'trash', danger: true, onClick: () => deleteChat(c) },
-      ], { placement: 'bottom-end' });
-    });
-    item.append(more);
-    list.append(item);
+  const gruppen = gruppiere(chats, S.chatFilter);
+  if (chats.length && !gruppen.length) list.append(h('div', { class: 'empty-note' }, 'Keine Treffer'));
+  for (const g of gruppen) {
+    list.append(h('div', { class: 'sb-label group-label' }, g.name));
+    for (const c of g.chats) renderChatItem(list, c);
   }
+}
+
+function renderChatItem(list, c) {
+  const running = S.state.running.includes(c.id) || isStreaming(c.id);
+  const item = h('div', { class: `chat-item${c.id === S.chatId ? ' active' : ''}`, 'data-id': c.id });
+  const link = h('button', { type: 'button', class: 'chat-link', 'aria-current': c.id === S.chatId ? 'page' : null, title: c.title }, c.title || 'Neuer Chat');
+  link.addEventListener('click', () => { openChat(c.id); toggleSidebarMobileClose(); });
+  item.append(link);
+  if (running) item.append(h('span', { class: 'running-dot', title: 'Antwort läuft' }));
+  const more = btn('', { iconName: 'more', cls: 'btn btn-sm btn-icon chat-more', title: `Optionen für „${c.title}“`, attrs: { 'aria-haspopup': 'menu' } });
+  more.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu(more, [
+      { label: 'Umbenennen', icon: 'pencil', onClick: () => startRename(item, c) },
+      { label: 'Als Markdown exportieren', icon: 'download', onClick: () => { window.location.href = `/api/chats/${c.id}/export?t=${encodeURIComponent(document.querySelector('meta[name="mango-token"]').content)}`; } },
+      'sep',
+      { label: 'Löschen', icon: 'trash', danger: true, onClick: () => deleteChat(c) },
+    ], { placement: 'bottom-end' });
+  });
+  item.append(more);
+  list.append(item);
 }
 
 function toggleSidebarMobileClose() {
@@ -466,7 +494,9 @@ function isNearEnd() {
 
 export function scrollToEnd(smooth) {
   const s = S.els.scroller;
-  s.scrollTo({ top: s.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  // Leerer Chat: Begrüßung oben zeigen (auf kleinen Bildschirmen ist sie höher als das Fenster).
+  const leer = !S.chat || !S.chat.messages.length;
+  s.scrollTo({ top: leer ? 0 : s.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   S.els.jump.hidden = true;
 }
 
@@ -506,7 +536,7 @@ function renderEmpty() {
   const a = p ? p.angaben : {};
   const first = a.name ? a.name.split(/\s+/)[0] : '';
   const heads = first ? [`Woran arbeiten wir heute, ${first}?`] : ['Woran arbeiten wir heute?'];
-  const wrap = h('div', { class: 'empty' }, h('h1', {}, heads[0]));
+  const wrap = h('div', { class: 'empty' }, h('div', { class: 'empty-logo' }, h('img', { src: 'logo.png', alt: '', width: '34', height: '34', draggable: 'false' })), h('h1', {}, heads[0]));
   const next = p && p.fristen && p.fristen[0];
   if (next) wrap.append(h('p', { class: 'sub' }, 'Nächste Frist: ', h('b', {}, next.titel), ` – ${next.text}`));
   else wrap.append(h('p', { class: 'sub' }, ''));
@@ -844,7 +874,8 @@ function hintBox(hint, { withCheck = false } = {}) {
 }
 
 function renderAssistantMessage(m, isLast) {
-  const el = h('div', { class: `msg assistant${isLast ? ' last' : ''}`, 'data-id': m.id });
+  const el = h('div', { class: `msg assistant${isLast ? ' last' : ''}`, 'data-id': m.id },
+    h('div', { class: 'msg-head' }, h('span', { class: 'msg-avatar' }, h('img', { src: 'logo.png', alt: '', width: '18', height: '18', draggable: 'false' })), h('span', { class: 'msg-name' }, 'Mango')));
   const running = m.status === 'laeuft';
   if (m.activity && m.activity.length) el.append(stepsEl(m));
   const text = running ? stripUpdateBlock(m.text || '') : m.text || '';
@@ -1492,6 +1523,7 @@ function setupDragDrop() {
 function setupGlobalKeys() {
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'o' || e.key === 'O')) { e.preventDefault(); newChat(); }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); focusChatSearch(); }
     if (e.key === 'Escape' && S.els.app.classList.contains('sb-open')) toggleSidebar(false);
   });
 }
