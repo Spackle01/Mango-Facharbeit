@@ -27,7 +27,7 @@ const DEFINITIONEN = [
     parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string', description: 'Unterordner (optional)' } }, required: ['pattern'] } },
   { name: 'Grep', description: 'Durchsucht Textdateien im Arbeitsraum nach einem regulären Ausdruck.',
     parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string', description: 'Nur Dateien, die zu diesem Muster passen' }, '-i': { type: 'boolean' } }, required: ['pattern'] } },
-  { name: 'Skill', description: 'Lädt einen Skill (Arbeitsanleitung). Namen stehen in den Regeln, z. B. wissenschaftlich-schreiben, sprachpruefung, quellenrecherche, abgabe-pruefen, bestehende-arbeit-uebernehmen.',
+  { name: 'Skill', description: 'Lädt einen Skill (Arbeitsanleitung). Namen stehen in den Regeln, z. B. stimmenprofil, natuerlich-schreiben, stilrevision, textpruefung, quellenrecherche, abgabe-pruefen, bestehende-arbeit-uebernehmen.',
     parameters: { type: 'object', properties: { skill: { type: 'string' } }, required: ['skill'] } },
   { name: 'WebFetch', description: 'Ruft eine öffentliche Webseite (http/https) ab und liefert den Text. Nur für Quellen, die die Person nennt oder die du prüfen willst.',
     parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },

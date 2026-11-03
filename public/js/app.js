@@ -727,16 +727,20 @@ function wordEl(m, isLast) {
   return h('div', { class: 'import-card compact' }, sec);
 }
 
-// Ergebnis der automatischen Sprachprüfung (Schreib-Skills) für Texte, die in Dateien eingetragen wurden.
+// Ergebnis der automatischen Sprachprüfung und der Schreib-Skills für Texte, die in Dateien oder im Chat entstanden sind.
 function stilEl(st) {
   const offen = st.offen || [];
   const behoben = Math.max(0, st.gefunden - offen.length);
-  let text = 'Sprachprüfung: unauffällig';
-  if (st.gefunden && !offen.length) text = `Sprachprüfung: ${st.gefunden} ${st.gefunden === 1 ? 'Stelle' : 'Stellen'} gefunden und überarbeitet`;
-  else if (offen.length) text = `Sprachprüfung: ${behoben ? `${behoben} überarbeitet, ` : ''}${offen.length} ${offen.length === 1 ? 'Stelle' : 'Stellen'} noch prüfen`;
+  let text = st.chat ? '' : 'Sprachprüfung: unauffällig';
+  if (!st.chat) {
+    if (st.gefunden && !offen.length) text = `Sprachprüfung: ${st.gefunden} ${st.gefunden === 1 ? 'Stelle' : 'Stellen'} geprüft`;
+    else if (offen.length) text = `Sprachprüfung: ${behoben ? `${behoben} geprüft, ` : ''}${offen.length} ${offen.length === 1 ? 'Stelle' : 'Stellen'} noch ändern`;
+  }
   const skills = st.skills || [];
-  const skillText = skills.length >= 2 ? `Schreib-Skills ${st.nachgeholt ? 'nachgeholt' : 'gelesen'}` : st.skills ? 'Schreib-Skills nicht vollständig geladen' : '';
-  const el = h('div', { class: `stil-note${offen.length ? ' warn' : ''}` }, iconEl(offen.length ? 'alert' : 'check', 14), h('span', {}, [text, skillText].filter(Boolean).join(' · ')));
+  const vollstaendig = st.vollstaendig != null ? st.vollstaendig : skills.length >= 2; // ältere Nachrichten ohne Feld
+  const skillText = vollstaendig ? `Schreib-Skills ${st.nachgeholt ? 'nachgeholt' : 'gelesen'}` : st.skills ? 'Schreib-Skills nicht vollständig geladen' : '';
+  const warn = offen.length || !vollstaendig;
+  const el = h('div', { class: `stil-note${warn ? ' warn' : ''}` }, iconEl(warn ? 'alert' : 'check', 14), h('span', {}, [text, skillText].filter(Boolean).join(' · ')));
   if (!offen.length) return el;
   return h('details', { class: 'stil-details' }, h('summary', {}, el),
     h('ul', {}, offen.map((o) => h('li', {}, h('span', { class: 'satz' }, `„${o.satz}“`), ` – ${o.grund} `, h('button', { type: 'button', class: 'file-ref', 'data-path': o.datei }, shortName(o.datei))))));

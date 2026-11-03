@@ -9,13 +9,15 @@ const sortieren = require('./sortieren');
 const word = require('./word');
 const abgabe = require('./abgabe');
 const stil = require('./stil');
+const schreibskills = require('./schreibskills');
 const ordnung = require('./ordnung');
 const extract = require('./extract');
 const { kindOf } = require('./extract');
 const { GRUENDLICHKEIT } = require('./providers/models');
 
-// Skills, die bei jedem Text für eine Datei geladen werden müssen.
-const SCHREIB_SKILLS = ['wissenschaftlich-schreiben', 'sprachpruefung'];
+// Ein Chat-Entwurf (Text in der Antwort statt in einer Datei) braucht mindestens so viele Wörter, damit die App
+// die Schreib-Skills einfordert. Normale Chat-Antworten sind kürzer (höchstens 40 Wörter).
+const CHAT_ENTWURF_WOERTER = 60;
 const MAX_ARG_PROMPT = 24000;
 const RETRY_DELAY_MS = Number(process.env.MANGO_RETRY_DELAY_MS || 3000);
 
@@ -60,6 +62,11 @@ function errorHint(kind, providerState, model = '') {
 // Schreibaufgaben erkennen: dann erinnert die App ausdrücklich an die Schreib-Skills.
 const SCHREIBAUFGABE = /(schreib|formulier|eintrag|trag\b.*\bein|ergänz|überarbeit|umschreib|verbesser|korrigier|kürz|lerntagebuch|expos[eé]|kapitel|einleitung|fazit|schluss|absatz|e-?mail|mail an|text|entwurf|zusammenfass|reflexion|präsentation|praesentation|folie|powerpoint|pptx|\bpdf\b|\bword\b|\bexcel\b|dokument|erstell|handout|thesenpapier|bericht|brief|anschreiben|notiz)/i;
 
+// Wörter einer Chat-Antwort ohne Steuerblöcke.
+function chatWoerter(text) {
+  return String(text || '').replace(/```[\s\S]*?(?:```|$)/g, ' ').split(/\s+/).filter((w) => /[\wäöüß]/i.test(w)).length;
+}
+
 // Texte, die der Assistent in diesem Durchlauf in Dateien geschrieben hat (nur neuer Text).
 async function geschriebeneTexte(project, { dateien, ergebnisse, changes, before, ausgenommen }) {
   const out = [];
@@ -78,7 +85,8 @@ async function geschriebeneTexte(project, { dateien, ergebnisse, changes, before
   return out;
 }
 
-// Gefundene Stellen, die nach der Überarbeitung noch unverändert in der Datei stehen.
+// Gefundene Stellen, die nach der Überarbeitung noch unverändert in der Datei stehen. Nur harte Treffer (Chatbot-Reste,
+// falsche Anführungszeichen) gelten als offen; bei Prüfhinweisen entscheidet der Assistent im Zusammenhang.
 async function nochVorhanden(project, funde) {
   const offen = [];
   const norm = (t) => String(t).replace(/[*_]/g, '').replace(/\s+/g, ' ');
@@ -88,7 +96,7 @@ async function nochVorhanden(project, funde) {
     let text = '';
     try { text = /\.docx$/i.test(f.datei) ? extract.docxToText(buf) : buf.toString('utf8'); } catch { continue; }
     const jetzt = norm(text);
-    for (const st of f.stellen) {
+    for (const st of f.stellen.filter((x) => x.hart)) {
       if (jetzt.includes(norm(st.satz.replace(/…$/, '')).slice(0, 60))) offen.push({ datei: f.datei, ...st });
     }
   }
@@ -397,8 +405,10 @@ class RunManager {
       }
       if (wp.invalid) msg.activity.push({ kind: 'info', label: 'Word-Änderungen waren nicht lesbar und wurden ignoriert' });
 
-      // Sprachprüfung nach den Schreib-Skills: Was der Assistent in Dateien geschrieben hat, wird
-      // geprüft; gefundene Stellen überarbeitet er einmal selbst (in derselben Sitzung, ohne neue Antwort).
+      // Schreib-Skills (stimmenprofil, natuerlich-schreiben bzw. stilrevision, textpruefung) sind bei jedem Text Pflicht.
+      // Was der Assistent in Dateien geschrieben hat, wird geprüft; gefundene Stellen überarbeitet er einmal selbst
+      // (in derselben Sitzung, ohne neue Antwort). Wurden die Skills nicht geladen, holt er das nach.
+      let restText = wp.text;
       if (!inv && !res.canceled && !res.error && !run.stopRequested) {
         const ausgenommen = new Set(einsortiert.filter((r) => !r.fehler).map((r) => r.nach));
         const texte = await geschriebeneTexte(project, { dateien: wp.dateien, ergebnisse: msg.word, changes, before, ausgenommen });
@@ -406,10 +416,10 @@ class RunManager {
           const funde = texte.map((t) => ({ datei: t.datei, stellen: stil.pruefen(t.text) })).filter((f) => f.stellen.length);
           const gefunden = funde.reduce((n, f) => n + f.stellen.length, 0);
           // Pflicht-Skills: Wurden sie nicht geladen, holt der Assistent das in einem stillen Durchlauf nach.
-          const fehlend = SCHREIB_SKILLS.filter((x) => !skillsGeladen.has(x));
-          msg.stil = { gefunden, offen: [], skills: SCHREIB_SKILLS.filter((x) => skillsGeladen.has(x)), nachgeholt: false };
+          const fehlend = schreibskills.fehlend(skillsGeladen).map((a) => a.text);
+          msg.stil = { gefunden, offen: [], skills: schreibskills.geladene(skillsGeladen), vollstaendig: !fehlend.length, nachgeholt: false };
           if (gefunden || fehlend.length) {
-            const info = { kind: 'info', label: gefunden ? `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Überarbeiten` : 'Schreib-Skills nachholen und Text prüfen' };
+            const info = { kind: 'info', label: gefunden ? `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Prüfen` : 'Schreib-Skills nachholen und Text prüfen' };
             msg.activity.push(info);
             broadcast({ type: 'activity', item: info });
             const extrakte = {};
@@ -427,7 +437,11 @@ class RunManager {
             if (res2.error || res2.canceled) {
               msg.activity.push({ kind: 'info', label: 'Überarbeitung nach der Sprachprüfung nicht abgeschlossen' });
             } else {
-              if (fehlend.length) { msg.stil.nachgeholt = true; msg.stil.skills = SCHREIB_SKILLS.filter((x) => skillsGeladen.has(x)); }
+              if (fehlend.length) {
+                msg.stil.nachgeholt = true;
+                msg.stil.skills = schreibskills.geladene(skillsGeladen);
+                msg.stil.vollstaendig = !schreibskills.fehlend(skillsGeladen).length;
+              }
               if (res2.sessionId) res.sessionId = res2.sessionId;
               let ch2 = [];
               try { ch2 = await ws.restoreChanges(project.workspace, await ws.diffAndBackup(project.workspace, before2)); } catch { ch2 = []; }
@@ -440,11 +454,40 @@ class RunManager {
             }
             msg.stil.offen = await nochVorhanden(project, funde);
           }
+        } else if (schreibaufgabe && chatWoerter(wp.text) >= CHAT_ENTWURF_WOERTER) {
+          // Entwurf im Chat statt in einer Datei: Auch dafür sind die Skills Pflicht. Fehlen sie, lädt der Assistent sie
+          // nach und gibt die Antwort mit der neuen Fassung noch einmal aus (sie ersetzt die erste).
+          const fehlend = schreibskills.fehlend(skillsGeladen).map((a) => a.text);
+          msg.stil = { gefunden: 0, offen: [], skills: schreibskills.geladene(skillsGeladen), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
+          if (fehlend.length) {
+            const info = { kind: 'info', label: 'Schreib-Skills nachholen und Text neu schreiben' };
+            msg.activity.push(info);
+            broadcast({ type: 'activity', item: info });
+            const alterText = msg.text;
+            Object.assign(msg, { text: '' });
+            broadcast({ type: 'snapshot', message: msg });
+            sessionId = res.sessionId || sessionId;
+            resume = true;
+            const res2 = await launch(stil.chatNachholenPrompt(fehlend)).catch((err) => ({ error: err.message }));
+            const neuerText = res2.text || msg.text;
+            if (res2.error || res2.canceled || !neuerText.trim()) {
+              Object.assign(msg, { text: alterText });
+              broadcast({ type: 'snapshot', message: msg });
+              msg.activity.push({ kind: 'info', label: 'Neufassung mit den Schreib-Skills nicht abgeschlossen' });
+            } else {
+              if (res2.sessionId) res.sessionId = res2.sessionId;
+              // Blöcke aus der neuen Antwort wurden schon aus der ersten angewendet: nur entfernen.
+              restText = word.parseBlock(sortieren.parsePlan(neuerText).text).text;
+              msg.stil.nachgeholt = true;
+              msg.stil.skills = schreibskills.geladene(skillsGeladen);
+              msg.stil.vollstaendig = !schreibskills.fehlend(skillsGeladen).length;
+            }
+          }
         }
       }
 
       // Aufräumen: Der Assistent nennt Verschieben und Archivieren, die App führt es sicher aus (nichts wird gelöscht).
-      const ap = ordnung.parsePlan(wp.text);
+      const ap = ordnung.parsePlan(restText);
       if (ap.plan.length && !res.canceled) {
         msg.aufgeraeumt = await ordnung.anwenden(project, ap.plan);
         for (const r of msg.aufgeraeumt) {
