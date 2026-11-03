@@ -286,11 +286,14 @@ class RunManager {
       let history = !sessionId && earlier.length ? ctx.historyTranscript(earlier) : '';
       const schreibaufgabe = !inv && SCHREIBAUFGABE.test(cleanText);
       // Regeln der App; enthalten sie den Wortlaut der Schreib-Skills (Normalfall), liest die KI sie vor allem anderen.
-      const rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md');
-      const rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => '');
-      const skillsImKontext = rulesText.includes(schreibskills.BLOCK_TITEL);
+      // DeepSeek bekommt eigene Regeln (kurze Schreib-Anleitung mit Schreibwerkzeugen), die anderen Anbieter die mit den Skills.
+      const regelnName = providerId === 'deepseek' ? 'regeln-deepseek.md' : 'regeln.md';
+      let rulesFile = path.join(ws.internalDir(project.workspace), regelnName);
+      let rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => '');
+      if (!rulesText && regelnName !== 'regeln.md') { rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md'); rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => ''); }
+      const skillsImKontext = rulesText.includes(schreibskills.BLOCK_TITEL) || rulesText.includes(schreibskills.DEEPSEEK_TITEL);
       const buildPrompt = (unchanged) => ctx.buildPrompt({
-        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe, skillsImKontext,
+        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe, skillsImKontext, anbieter: providerId,
         text: inv ? `${cleanText}\n\n${importer.importPrompt(inv, { bisher: project.data.uebernahme })}` : cleanText || 'Bitte sieh dir die angehängten Dateien an.',
       });
       let prompt = buildPrompt(!!sessionId && sess.contextHash === context.hash);
@@ -309,7 +312,7 @@ class RunManager {
       if (skillsImKontext) {
         // Der Wortlaut steht am Anfang der Regeln: Das ist der erste „Arbeitsschritt“ jeder Antwort.
         for (const s of schreibskills.ALLE) skillsGeladen.add(s);
-        msg.activity.push({ kind: 'skill', label: 'Liest die Schreib-Skills (Stimme, Schreiben, Prüfung)', skill: 'schreib-skills' });
+        msg.activity.push({ kind: 'skill', label: providerId === 'deepseek' ? 'Liest die Schreib-Anleitung für DeepSeek (Stimme, Schreiben, Prüfung)' : 'Liest die Schreib-Skills (Stimme, Schreiben, Prüfung)', skill: 'schreib-skills' });
       }
       const onEvent = (ev) => {
         if (ev.type === 'init') {

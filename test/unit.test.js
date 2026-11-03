@@ -624,6 +624,128 @@ test('Claude-Anbindung: lange Regeln gehen als Datei, kurze als Argument', async
   assert.strictEqual(kurz[kurz.indexOf('--append-system-prompt') + 1], 'Kurze Regeln', 'kurze Regeln als Argument');
 });
 
+// ---------- DeepSeek: eigene Schreib-Anleitung und Schreibwerkzeuge ----------
+
+const stimmeLib = require('../server/stimme');
+const EIGEN = 'Ich habe am Montag zuerst die Quellen gesammelt. Das war mühsam. In der SLUB fand ich zwei Bücher zum Thema, eins davon war leider ausgeliehen. Danach schrieb ich die Fragen für die Umfrage, weil ich bis Freitag fertig sein will.\n\nIch glaube, die Umfrage wird gut, aber ich bin mir nicht sicher, ob 40 Leute reichen. Mein Lehrer meint ja. Wir werden sehen.';
+const KI_TEXT = 'In der heutigen Zeit spielt Nachhaltigkeit eine entscheidende Rolle. Darüber hinaus ist es wichtig zu beachten, dass Unternehmen innovative Lösungen entwickeln. Zudem unterstreicht dies die Bedeutung von Bildung, Forschung und Zusammenarbeit. Somit lässt sich festhalten, dass Nachhaltigkeit ein zentrales Thema bleibt. Zusammenfassend lässt sich sagen, dass Wandel notwendig ist.';
+
+test('Stimme: Fingerabdruck, Ähnlichkeit und Scan arbeiten deterministisch und ohne „KI-Wert“', () => {
+  const fa = stimmeLib.fingerabdruck([EIGEN]);
+  assert.strictEqual(fa.proben, 1);
+  assert.ok(fa.woerter > 55 && fa.saetze >= 6);
+  assert.ok(fa.haltung.ich > 10, 'Ich-Form erkannt');
+  assert.strictEqual(fa.haltung.uebergang, 0);
+  assert.ok(fa.satz.kurz > 0.3, 'kurze Sätze erkannt');
+  // Typische Wörter: keine Hauptwörter, sonst übernimmt die KI Themenwörter als „Stil“.
+  const wortliste = fa.wortschatz.haeufig.map((x) => x.wort);
+  assert.ok(wortliste.includes('mühsam') && wortliste.includes('leider'));
+  assert.ok(!wortliste.some((w) => ['umfrage', 'montag', 'quellen', 'mfrage'].includes(w)), `keine Hauptwörter: ${wortliste}`);
+  // Der eigene Text liegt nah am eigenen Profil, ein Floskeltext deutlich darunter.
+  const profil = stimmeLib.neuesProfil([EIGEN], ['probe']);
+  assert.strictEqual(stimmeLib.aehnlichkeit(fa, profil.fingerabdruck).punkte, 100);
+  const ki = stimmeLib.aehnlichkeit(stimmeLib.fingerabdruck([KI_TEXT]), profil.fingerabdruck);
+  assert.ok(ki.punkte < 75, `Floskeltext liegt unter dem eigenen Text: ${ki.punkte}`);
+  assert.strictEqual(ki.merkmale.length, 6);
+  assert.deepStrictEqual(stimmeLib.fingerabdruck([EIGEN]), fa, 'gleiche Eingabe, gleiches Ergebnis');
+  // Scan: harte und weiche Befunde, Rhythmus; kein Prozentwert für „KI“.
+  const r = stimmeLib.scan(KI_TEXT);
+  const gruende = r.funde.map((f) => f.grund).join(' | ');
+  assert.match(gruende, /Aufwärm-Einstieg/);
+  assert.match(gruende, /Schlussfloskel/);
+  assert.ok(r.extra.some((e) => /gleichförmiger Rhythmus/.test(e.grund)));
+  const text = stimmeLib.scanText(r);
+  assert.match(text, /Prüfung: \d+ Wörter, 5 Sätze/);
+  assert.ok(!/%|KI-Wert|KI-Anteil|AI/.test(text.replace(/Satz-?länge/g, '')), 'kein KI-Prozentwert im Scan');
+  assert.match(stimmeLib.scanText(stimmeLib.scan(EIGEN)), /Keine auffälligen Muster/);
+  assert.match(stimmeLib.aehnlichkeitText(ki, stimmeLib.fingerabdruck([KI_TEXT]), profil), /nicht das Urteil eines Erkennungsprogramms/);
+  // Anleitung im Stil der Person: Kennzahlen und Beispiele aus den Proben, Regeln, Befunde.
+  const a = stimmeLib.stimmeAnleitung(KI_TEXT, profil);
+  assert.match(a, /Satzlänge: im Schnitt/);
+  assert.match(a, /> Ich habe am Montag zuerst die Quellen gesammelt/);
+  assert.match(a, /Nichts erfinden/);
+  assert.match(a, /Aufwärm-Einstieg/);
+  assert.match(a, /Gib nur den fertigen Text aus/);
+});
+
+test('DeepSeek-Werkzeuge: Stimmenprofil aus eigenen Texten, Scan und Umschreib-Anleitungen', async () => {
+  const { Werkzeuge, DEFINITIONEN } = require('../server/providers/werkzeuge');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-stimme-'));
+  for (const d of ['uebernommen', '00_vorgaben', 'abgabe']) fs.mkdirSync(path.join(dir, d));
+  fs.writeFileSync(path.join(dir, 'uebernommen', 'aufsatz.md'), `[KI-Entwurf, 01.11.2026, DeepSeek – selbst überarbeiten]\n\n${EIGEN}`);
+  fs.writeFileSync(path.join(dir, '00_vorgaben', 'handreichung.md'), KI_TEXT);
+  const w = new Werkzeuge(dir);
+  const lauf = (name, args) => w.ausfuehren(name, args);
+  assert.deepStrictEqual(DEFINITIONEN.map((d) => d.name).slice(-6), ['voice_profile', 'voice_import', 'humanize_scan', 'humanize_rewrite', 'voice_score', 'voice_rewrite']);
+  assert.ok(!/stimmenprofil|natuerlich|stilrevision|textpruefung/.test(DEFINITIONEN.find((d) => d.name === 'Skill').description), 'das Skill-Werkzeug nennt die Schreib-Skills nicht mehr');
+
+  // Ohne Profil: klare Hinweise, was zu tun ist.
+  assert.match(await lauf('voice_profile', {}), /Es gibt noch kein Stimmenprofil.*voice_import/);
+  assert.match(await lauf('voice_score', { text: EIGEN }), /^Fehler: Es gibt noch kein Stimmenprofil/);
+  assert.match(await lauf('voice_rewrite', { text: EIGEN }), /^Fehler: Es gibt noch kein Stimmenprofil/);
+  // humanize_* brauchen kein Profil.
+  assert.match(await lauf('humanize_scan', { text: KI_TEXT }), /Schlussfloskel/);
+  assert.match(await lauf('humanize_rewrite', { text: KI_TEXT }), /^Umschreib-Anleitung\n[\s\S]*Gefunden in diesem Text:[\s\S]*Aufwärm-Einstieg/);
+  assert.match(await lauf('humanize_scan', { text: '  ' }), /^Fehler: Der Text fehlt/);
+
+  // Import: Schuldokumente und fehlende Dateien werden abgelehnt, zu wenig Text auch.
+  assert.match(await lauf('voice_import', { dateien: ['00_vorgaben/handreichung.md'] }), /^Fehler: Zu wenig Text[\s\S]*Schuldokumente/);
+  assert.match(await lauf('voice_import', { proben: ['Zu kurz.'] }), /^Fehler: Zu wenig Text/);
+  assert.ok(!fs.existsSync(path.join(dir, '.facharbeit', 'stimme.json')), 'bei zu wenig Text wird nichts gespeichert');
+  const ok = await lauf('voice_import', { dateien: ['uebernommen/aufsatz.md', 'gibt-es-nicht.md', '.facharbeit/regeln.md'] });
+  assert.match(ok, /^Stimmenprofil \(aus 1 Text, \d+ Wörter/);
+  assert.match(ok, /Nicht gelesen: gibt-es-nicht\.md: Datei nicht gefunden; \.facharbeit\/regeln\.md: Schuldokumente und interne Dateien/);
+  const gespeichert = JSON.parse(fs.readFileSync(path.join(dir, '.facharbeit', 'stimme.json'), 'utf8'));
+  assert.deepStrictEqual(gespeichert.quellen, ['uebernommen/aufsatz.md']);
+  assert.ok(!JSON.stringify(gespeichert).includes('KI-Entwurf'), 'der KI-Vermerk gehört nicht zur Stimme der Person');
+  assert.ok(gespeichert.auszuege.length >= 1 && gespeichert.fingerabdruck.haltung.ich > 10);
+
+  // Mit Profil: Profil lesen, Ähnlichkeit, Anleitung im Stil der Person.
+  assert.match(await lauf('voice_profile', {}), /^Stimmenprofil \(aus 1 Text/);
+  const eigen = await lauf('voice_score', { text: EIGEN });
+  const fremd = await lauf('voice_score', { text: KI_TEXT });
+  const punkte = (s) => Number(/: (\d+) von 100/.exec(s)[1]);
+  assert.ok(punkte(eigen) > punkte(fremd) + 20, `eigener Text liegt klar näher (${punkte(eigen)} gegen ${punkte(fremd)})`);
+  assert.match(fremd, /weicht ab/);
+  const anleitung = await lauf('voice_rewrite', { text: KI_TEXT });
+  assert.match(anleitung, /^Umschreib-Anleitung im Stil der Person/);
+  assert.match(anleitung, /> Ich habe am Montag/);
+  // Proben als Text gehen auch; ein neuer Import ersetzt das Profil.
+  assert.match(await lauf('voice_import', { proben: [`${EIGEN}\n\n${EIGEN}`] }), /^Stimmenprofil \(aus 1 Text/);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, '.facharbeit', 'stimme.json'), 'utf8')).quellen, ['Textprobe']);
+});
+
+test('Regeln je Anbieter: DeepSeek bekommt die eigene Schreib-Anleitung, Claude und Antigravity den Wortlaut der Skills', async () => {
+  const std = await wsLib.regelnText('standard');
+  const ds = await wsLib.regelnText('deepseek');
+  for (const text of [std, ds]) {
+    assert.ok(!/<!--\/?NUR/.test(text), 'keine Reste der Anbieter-Blöcke');
+    assert.ok(!text.includes(schreibskills.PLATZHALTER));
+    assert.ok(text.indexOf('## Oberste Regel: Schreib immer wie ein Mensch') < text.indexOf('## Kurz und einfach'), 'oberste Regel steht vorn');
+    assert.ok(text.includes('## Schreibregeln') && text.includes('## Quellen und Recherche') && text.includes('## Word-Dateien bearbeiten'), 'gemeinsame Regeln sind in beiden Varianten');
+  }
+  // Standard: unverändert mit den vier Skills.
+  assert.ok(std.includes(schreibskills.BLOCK_TITEL) && std.includes('### Skill `textpruefung`'));
+  assert.ok(!std.includes(schreibskills.DEEPSEEK_TITEL) && !std.includes('voice_import'));
+  assert.ok(std.includes('## Schreibregeln (Skills `stimmenprofil`'));
+  // DeepSeek: eigene Anleitung vor allen anderen Regeln, nichts von den vier Skills.
+  assert.ok(ds.includes(schreibskills.DEEPSEEK_TITEL) && ds.indexOf(schreibskills.DEEPSEEK_TITEL) < ds.indexOf('## Deine Rolle'));
+  assert.ok(!ds.includes(schreibskills.BLOCK_TITEL) && !ds.includes('### Skill `') && !/Skill `stimmenprofil`|`natuerlich-schreiben`|`textpruefung`/.test(ds), 'DeepSeek sieht die vier Skills nicht');
+  for (const w of ['voice_profile', 'voice_import', 'humanize_scan', 'humanize_rewrite', 'voice_score', 'voice_rewrite']) assert.ok(ds.includes(`\`${w}\``), w);
+  assert.ok(ds.includes('## Schreibregeln (gelten immer)') && !ds.includes('Skills `stimmenprofil`'));
+  assert.ok(ds.length < std.length - 10000, 'DeepSeek bekommt deutlich kürzere Regeln');
+  assert.match(ds, /Skills[\s\S]*`quellenrecherche`[\s\S]*Fürs Schreiben brauchst du keinen Skill/, 'übrige Skills bleiben');
+  // Beide Dateien liegen im Arbeitsraum; Antigravity nutzt die Standard-Regeln.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-var-'));
+  await Project.create(dir, { name: 'Test' });
+  await wsLib.syncManagedFiles(dir);
+  assert.ok(fs.readFileSync(path.join(dir, '.facharbeit', 'regeln-deepseek.md'), 'utf8').includes(schreibskills.DEEPSEEK_TITEL));
+  assert.ok(fs.readFileSync(path.join(dir, '.facharbeit', 'regeln.md'), 'utf8').includes(schreibskills.BLOCK_TITEL));
+  assert.ok(fs.readFileSync(path.join(dir, '.agents', 'rules', 'mango-facharbeit.md'), 'utf8').includes(schreibskills.BLOCK_TITEL));
+  // Lizenzhinweis zu dsh-humanizer liegt bei.
+  assert.match(fs.readFileSync(path.join(ROOT, 'ressourcen', 'deepseek', 'LIZENZ-dsh-humanizer.txt'), 'utf8'), /BSD 3-Clause License[\s\S]*lynote-ai/);
+});
+
 test('Sprachprüfung: harte Treffer müssen geändert werden, Prüfhinweise entscheidet der Assistent', () => {
   const stellen = stil.pruefen('Gerne! Hier ist dein Text. Darüber hinaus ist das gut — sehr gut.');
   const nach = (g) => stellen.find((x) => x.grund === g);
@@ -1118,7 +1240,7 @@ test('DeepSeek: Agent-Schleife mit Werkzeugen, Verlauf, Fehler und Abbruch', asy
     assert.deepStrictEqual(ev.filter((e) => e.type === 'activity').map((e) => e.item.kind), ['skill', 'schreiben']);
     assert.strictEqual(ev.find((e) => e.type === 'activity').item.skill, 'natuerlich-schreiben');
     assert.strictEqual(fs.readFileSync(path.join(ws, '01_themenfindung_und_mindmap', 'notiz.md'), 'utf8'), 'Hallo\nWelt');
-    assert.deepStrictEqual(f.calls[0].tools.map((t) => t.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch']);
+    assert.deepStrictEqual(f.calls[0].tools.map((t) => t.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch', 'voice_profile', 'voice_import', 'humanize_scan', 'humanize_rewrite', 'voice_score', 'voice_rewrite']);
     assert.deepStrictEqual(f.calls[0].thinking, { type: 'disabled' });
     assert.match(f.calls[0].messages[0].content, /^Regeln[\s\S]*Werkzeuge in dieser Umgebung/);
     assert.deepStrictEqual(f.calls[1].messages.map((m) => m.role), ['system', 'user', 'assistant', 'tool', 'tool']);

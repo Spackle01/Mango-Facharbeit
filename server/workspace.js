@@ -112,11 +112,14 @@ async function entferneVeraltete(ws) {
   }
 }
 
-// Arbeitsregeln mit dem vollständigen Wortlaut der Schreib-Skills am Anfang: Sie stehen damit im Systemprompt, die KI
-// liest sie vor allem anderen und muss sie nicht erst über ein Werkzeug laden (das hängt sonst vom Modell ab).
-async function regelnText() {
-  const regeln = await fsp.readFile(path.join(RES, 'regeln.md'), 'utf8');
-  if (!regeln.includes(schreibskills.PLATZHALTER)) return regeln;
+// Blöcke `<!--NUR:x-->…<!--/NUR-->` in den Regeln gelten nur für eine Variante: Für die gewählte bleibt der Inhalt, für
+// die andere fällt der ganze Block weg. Varianten: `standard` (Claude, Antigravity) und `deepseek`.
+function regelnVariante(text, variante) {
+  return text.replace(/<!--NUR:(\w+)-->\n([\s\S]*?)\n<!--\/NUR-->\n?/g, (m, v, inhalt) => (v === variante ? `${inhalt}\n` : ''));
+}
+
+// Der Wortlaut der vier Schreib-Skills (Standard).
+async function skillsBlock() {
   const teile = [];
   for (const name of schreibskills.REIHENFOLGE) {
     const roh = await fsp.readFile(path.join(RES, 'skills', name, 'SKILL.md'), 'utf8');
@@ -124,12 +127,25 @@ async function regelnText() {
     teile.push(`### Skill \`${name}\`\n\n${text}`);
   }
   const kopf = `${schreibskills.BLOCK_TITEL}\n\nDie vier Schreib-Skills stehen hier vollständig. Lies sie, bevor du irgendetwas schreibst, überarbeitest oder prüfst, und wende sie bei jedem Text in dieser Reihenfolge an: \`stimmenprofil\`, dann \`natuerlich-schreiben\` (neuer Text) oder \`stilrevision\` (vorhandener Text), dann \`textpruefung\`. Du musst sie nicht mehr mit dem Skill-Werkzeug laden. Dateien unter \`references/\` liegen im Arbeitsraum unter \`.claude/skills/<Skill>/references/\`; lies sie bei Bedarf dort. Was die Schulvorgaben und die übrigen Regeln unten verlangen, geht den Skills vor.\n\n`;
-  return regeln.replace(schreibskills.PLATZHALTER, kopf + teile.join('\n\n'));
+  return kopf + teile.join('\n\n');
+}
+
+// Arbeitsregeln für einen Anbieter, mit der Schreibanleitung ganz vorn. Claude und Antigravity bekommen den vollständigen
+// Wortlaut der vier Schreib-Skills. DeepSeek folgt langen Prosa-Regeln weniger zuverlässig und bekommt deshalb eine kurze,
+// eigene Anleitung mit Werkzeugen (Stimmenprofil, Scan, Umschreib-Anleitungen, siehe server/stimme.js).
+// Beides steht im Systemprompt: Die KI liest es vor allem anderen und muss nichts laden.
+async function regelnText(variante = 'standard') {
+  const regeln = regelnVariante(await fsp.readFile(path.join(RES, 'regeln.md'), 'utf8'), variante);
+  if (!regeln.includes(schreibskills.PLATZHALTER)) return regeln;
+  const block = variante === 'deepseek' ? (await fsp.readFile(path.join(RES, 'deepseek', 'schreiben.md'), 'utf8')).trim() : await skillsBlock();
+  return regeln.replace(schreibskills.PLATZHALTER, block);
 }
 
 async function syncManagedFiles(ws) {
   const regeln = await regelnText();
   await writeManaged(path.join(internalDir(ws), 'regeln.md'), `<!-- ${MARKER} -->\n${regeln}`);
+  // Eigene Regeln für DeepSeek (kurze Anleitung mit Schreibwerkzeugen statt des Wortlauts der Skills).
+  await writeManaged(path.join(internalDir(ws), 'regeln-deepseek.md'), `<!-- ${MARKER} -->\n${await regelnText('deepseek')}`);
   // Antigravity lädt Regeln aus .agents/rules/ automatisch.
   await writeManaged(path.join(ws, '.agents', 'rules', 'mango-facharbeit.md'),
     `---\ntrigger: always_on\n---\n<!-- ${MARKER} -->\n${regeln}`);

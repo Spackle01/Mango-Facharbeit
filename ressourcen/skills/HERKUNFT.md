@@ -22,6 +22,17 @@ Die vier Schreib-Skills ersetzen die früheren Skills `wissenschaftlich-schreibe
 - **Pflicht bei jedem Text:** `stimmenprofil` (Stimme der Person), dann `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text), dann `textpruefung`. Das gilt für Texte in Dateien und für Entwürfe im Chat. Der vollständige Wortlaut aller vier Skills wird beim Einrichten des Arbeitsraums an den Anfang der Regeln gesetzt (`regelnText()` in `server/workspace.js`), steht also vor allem anderen im Systemprompt. Nur wenn er fehlt, merkt die App (`server/schreibskills.js`, `server/runs.js`), welche Skills geladen wurden, und lässt fehlende nachholen.
 - **Die automatische Prüfung** (`server/stil.js`) gibt Wortlisten und Floskeln nur noch als Prüfhinweise weiter, wie es `textpruefung` und `stilrevision` verlangen („Wortlisten sind höchstens Suchhilfen“). Nur Chatbot-Reste und falsche Anführungszeichen müssen immer geändert werden.
 
+## DeepSeek: eigene Schreib-Anleitung und Werkzeuge
+
+Claude und Antigravity bekommen den Wortlaut der vier Schreib-Skills. DeepSeek bekommt etwas anderes, weil es lange Prosa-Regeln schlechter befolgt: eine kurze Anleitung (`ressourcen/deepseek/schreiben.md`) und sechs Werkzeuge (`server/stimme.js`). Die Regeln in `ressourcen/regeln.md` sind für beide Fälle gemeinsam; Blöcke `<!--NUR:standard-->` und `<!--NUR:deepseek-->` gelten nur für einen Anbieter.
+
+| Quelle | Was übernommen wurde | Was nicht übernommen wurde und warum |
+|---|---|---|
+| [dsh-humanizer](https://github.com/lynote-ai/dsh-humanizer) (lynote-ai, BSD-3-Clause, Lizenztext in `ressourcen/deepseek/LIZENZ-dsh-humanizer.txt`) | Das Prinzip („nicht wie irgendein Mensch, sondern wie ich“), der Aufbau aus Muster-Scan, Stil-Fingerabdruck, Ähnlichkeitswert und Umschreib-Anleitung, die Gewichtung der Merkmale beim Ähnlichkeitswert, die Idee, dass die Werkzeuge nur rechnen und die KI selbst umschreibt | Der Code selbst (TypeScript, Plugin für das „DeepSeek Harness“): stattdessen für deutsche Texte neu geschrieben. Die englischen und chinesischen Regeln: stattdessen die deutschen Muster der automatischen Sprachprüfung (`server/stil.js`). Der „AI-Score“ von 0 bis 100: Er wäre ein Ziel, auf das sich ein Text trimmen ließe. Stattdessen gibt `humanize_scan` Befunde mit Textstelle aus und `voice_score` die Nähe zur Schreibweise der Person (Qualität, nicht das Urteil eines Erkennungsprogramms). Wie in `textpruefung` gibt es keinen Prozentwert für „KI“ |
+| Schreib-Skills (Huminizer GER V2) | Die Regeln der Umschreib-Anleitung (Aussage zuerst, nichts Austauschbares, keine Floskeln in Serie, Inhalt statt Schema, ein Begriff bleibt ein Begriff, nichts erfinden, keine künstlichen Fehler) | Der volle Wortlaut: DeepSeek bekommt ihn nicht, sondern die kurze Fassung als Anleitung und als Ergebnis der Werkzeuge |
+
+Das Stimmenprofil entsteht nur aus eigenen Texten der Person. Schuldokumente, interne Dateien und KI-Vermerke werden nicht als Proben genommen.
+
 Weitere Ausgangsdateien:
 
 - `agent.md`: Die Stilregeln (einfache Sprache, kurz, direkt, Struktur, Schritt für Schritt) sind in `ressourcen/regeln.md` eingeflossen. Das dort genannte Thema („Der Goldene Schnitt in der KI-Kunst“) ist Beispielmaterial einer begonnenen Facharbeit und wird nicht als Standard verwendet.

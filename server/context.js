@@ -215,7 +215,8 @@ function historyTranscript(messages, maxChars = 24000) {
   return out.join('\n\n');
 }
 
-function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false, skillsImKontext = false }) {
+// anbieter: 'deepseek' bekommt Erinnerungen an seine Schreibwerkzeuge statt an die vier Schreib-Skills.
+function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false, skillsImKontext = false, anbieter = '' }) {
   const parts = [];
   parts.push(contextUnchanged ? '<projektkontext>unverändert seit der letzten Nachricht</projektkontext>' : context);
   if (history) {
@@ -224,13 +225,17 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   if (attachments.length) {
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
   }
-  if (schreibaufgabe && skillsImKontext) {
+  if (schreibaufgabe && skillsImKontext && anbieter === 'deepseek') {
+    parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat). Die Schreib-Anleitung steht am Anfang deiner Regeln: 1. `voice_profile` aufrufen (gibt es keins: `voice_import` mit eigenen Texten der Person). 2. Entwurf schreiben, kurz und einfach, nichts erfinden. 3. `voice_rewrite` (mit Profil) oder `humanize_rewrite` mit dem Entwurf aufrufen und nach der Anleitung umschreiben. 4. `humanize_scan` (und `voice_score`) mit dem fertigen Text aufrufen und die Befunde beheben. 5. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
+  } else if (schreibaufgabe && skillsImKontext) {
     parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat). Der Wortlaut der Schreib-Skills steht am Anfang deiner Regeln: 1. `stimmenprofil`: Stimme der Person aus ihren eigenen Texten im Arbeitsraum bestimmen. 2. `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text): schreiben bzw. überarbeiten, kurz und einfach, nichts erfinden. 3. `textpruefung`: den fertigen Text prüfen und Befunde beheben. 4. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
   } else if (schreibaufgabe) {
     parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat), alle Skills mit dem Skill-Werkzeug laden: 1. `stimmenprofil`: Stimme der Person aus ihren eigenen Texten im Arbeitsraum bestimmen. 2. `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text): schreiben bzw. überarbeiten, kurz und einfach, nichts erfinden. 3. `textpruefung`: den fertigen Text prüfen und Befunde beheben. 4. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
   }
   // Gilt bei jeder Nachricht, auch wenn die App keine Schreibaufgabe erkennt (z. B. „im Chat“): Texte klingen menschlich.
-  parts.push('<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Wende die Schreib-Skills vom Anfang deiner Regeln an und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>');
+  parts.push(anbieter === 'deepseek'
+    ? '<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Folge dem Ablauf der Schreib-Anleitung vom Anfang deiner Regeln (voice_profile, schreiben, voice_rewrite oder humanize_rewrite, humanize_scan) und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>'
+    : '<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Wende die Schreib-Skills vom Anfang deiner Regeln an und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>');
   // Gilt bei jeder Nachricht: hält die Antworten kurz, auch in langen Chats.
   parts.push('<antwortstil>Chat-Antwort: höchstens drei kurze Sätze und 40 Wörter, jeder Satz höchstens 15 Wörter. Einfache Wörter, so wie du es einer Mitschülerin erklären würdest. Keine Überschriften, Listen oder Fettdruck, keine Einleitung, kein Beispiel und keine Zusammenfassung, wenn nicht danach gefragt wurde. Länger nur, wenn die Person ausdrücklich Ausführliches verlangt. Dateiinhalte nicht im Chat wiederholen.</antwortstil>');
   parts.push(`Nachricht der Schülerin bzw. des Schülers:\n${text}`);

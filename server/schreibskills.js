@@ -17,6 +17,8 @@ const REIHENFOLGE = ['stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 't
 // dass der Wortlaut der Skills schon im Systemprompt steht).
 const PLATZHALTER = '<!-- MANGO:SCHREIB-SKILLS -->';
 const BLOCK_TITEL = '## Schreib-Skills: Wortlaut (zuerst lesen)';
+// Für DeepSeek steht statt der vier Skills die eigene Schreib-Anleitung mit Werkzeugen (ressourcen/deepseek/schreiben.md).
+const DEEPSEEK_TITEL = '## Schreib-Anleitung für DeepSeek (zuerst lesen)';
 
 // Frühere Skills: Die App entfernt sie aus bestehenden Arbeitsräumen, damit niemand sie mehr nutzt.
 const VERALTET = ['wissenschaftlich-schreiben', 'sprachpruefung'];
@@ -31,4 +33,4 @@ function geladene(geladen) {
   return ALLE.filter((s) => geladen.has(s));
 }
 
-module.exports = { ANFORDERUNGEN, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, VERALTET, fehlend, geladene };
+module.exports = { ANFORDERUNGEN, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, DEEPSEEK_TITEL, VERALTET, fehlend, geladene };
