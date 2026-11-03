@@ -240,13 +240,18 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
     assert.ok(m.activity.some((a) => a.skill === 'textpruefung'));
     assert.match(fake.calls[0].messages[0].content, /Arbeitsregeln/, 'Regeln der App gehen als Systemnachricht mit');
     const system = fake.calls[0].messages[0].content;
-    assert.ok(system.indexOf('## Schreib-Skills: Wortlaut (zuerst lesen)') < system.indexOf('## Kurz und einfach'), 'der Wortlaut der Skills steht vor allen anderen Regeln');
-    for (const titel of ['# Stimmenprofil', '# Natürlich schreiben', '# Stilrevision', '# Textprüfung']) assert.ok(system.includes(titel), `${titel} steht im Systemprompt`);
-    assert.ok(m.activity[0].label.startsWith('Liest die Schreib-Skills'), 'erster Arbeitsschritt');
-    assert.ok(system.indexOf('## Oberste Regel: Schreib immer wie ein Mensch') < system.indexOf('## Schreib-Skills: Wortlaut'), 'oberste Regel steht ganz oben');
-    assert.match(system.slice(-500), /Zum Schluss, bei jeder Antwort: Jeder Text, den du schreibst, klingt wie ein Mensch/, 'Erinnerung am Ende des Systemprompts');
-    assert.match(fake.calls[0].messages[1].content, /<menschlich>/, 'Erinnerung steht bei jeder Nachricht');
-    assert.match(fake.calls[0].messages[1].content, /<antwortstil>/);
+    // DeepSeek bekommt eigene Regeln: kurze Schreib-Anleitung mit Werkzeugen statt des Wortlauts der vier Skills.
+    assert.ok(system.indexOf('## Oberste Regel: Schreib immer wie ein Mensch') < system.indexOf('## Schreib-Anleitung für DeepSeek (zuerst lesen)'), 'oberste Regel steht ganz oben');
+    assert.ok(system.indexOf('## Schreib-Anleitung für DeepSeek (zuerst lesen)') < system.indexOf('## Kurz und einfach'), 'die Anleitung steht vor allen anderen Regeln');
+    for (const w of ['voice_profile', 'voice_import', 'humanize_scan', 'humanize_rewrite', 'voice_score', 'voice_rewrite']) {
+      assert.ok(system.includes(`\`${w}\``), `${w} steht in der Anleitung`);
+      assert.ok(fake.calls[0].tools.some((x) => x.function.name === w), `${w} ist als Werkzeug angeboten`);
+    }
+    assert.ok(!system.includes('## Schreib-Skills: Wortlaut') && !system.includes('### Skill `stimmenprofil`') && !/# Natürlich schreiben/.test(system), 'nicht der Wortlaut der vier Skills');
+    assert.ok(!/<!--NUR/.test(system), 'keine Reste der Anbieter-Blöcke');
+    assert.match(system.slice(-600), /Folge dafür dem Ablauf der Schreib-Anleitung vom Anfang deiner Regeln/, 'Erinnerung am Ende des Systemprompts');
+    assert.ok(m.activity[0].label.startsWith('Liest die Schreib-Anleitung für DeepSeek'), 'erster Arbeitsschritt');
+    assert.match(fake.calls[0].messages[1].content, /<menschlich>.*voice_profile.*humanize_scan/, 'Erinnerung steht bei jeder Nachricht');
     // Zweite Nachricht setzt den Verlauf fort (nur eine neue Nachricht, kein neuer System-Verlauf)
     const done2 = await srv.send(chat.id, 'Danke.');
     assert.strictEqual(done2.message.status, 'fertig');
