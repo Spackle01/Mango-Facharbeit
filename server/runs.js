@@ -285,15 +285,17 @@ class RunManager {
       let resume = !!sessionId;
       let history = !sessionId && earlier.length ? ctx.historyTranscript(earlier) : '';
       const schreibaufgabe = !inv && SCHREIBAUFGABE.test(cleanText);
+      // Regeln der App; enthalten sie den Wortlaut der Schreib-Skills (Normalfall), liest die KI sie vor allem anderen.
+      const rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md');
+      const rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => '');
+      const skillsImKontext = rulesText.includes(schreibskills.BLOCK_TITEL);
       const buildPrompt = (unchanged) => ctx.buildPrompt({
-        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe,
+        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe, skillsImKontext,
         text: inv ? `${cleanText}\n\n${importer.importPrompt(inv, { bisher: project.data.uebernahme })}` : cleanText || 'Bitte sieh dir die angehängten Dateien an.',
       });
       let prompt = buildPrompt(!!sessionId && sess.contextHash === context.hash);
       userMsg.gesendet = prompt;
 
-      const rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md');
-      const rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => '');
       const before = await ws.snapshot(project.workspace);
       const started = Date.now();
 
@@ -304,6 +306,11 @@ class RunManager {
       };
       let still = false; // Überarbeitungsdurchlauf: Text nicht anzeigen, nur Arbeitsschritte
       const skillsGeladen = new Set(); // Skills, die der Assistent in diesem Durchlauf geladen hat
+      if (skillsImKontext) {
+        // Der Wortlaut steht am Anfang der Regeln: Das ist der erste „Arbeitsschritt“ jeder Antwort.
+        for (const s of schreibskills.ALLE) skillsGeladen.add(s);
+        msg.activity.push({ kind: 'skill', label: 'Liest die Schreib-Skills (Stimme, Schreiben, Prüfung)', skill: 'schreib-skills' });
+      }
       const onEvent = (ev) => {
         if (ev.type === 'init') {
           if (ev.model) msg.model = ev.model;
