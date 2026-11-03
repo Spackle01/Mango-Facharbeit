@@ -10,8 +10,8 @@ const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme, session, 
 const IS_MAC = process.platform === 'darwin';
 const TITLEBAR_HEIGHT = 48;
 const COLORS = {
-  light: { bg: '#faf8f5', fg: '#55514a' },
-  dark: { bg: '#1e1f22', fg: '#b3afa8' },
+  light: { bg: '#ffffff', fg: '#424242' },
+  dark: { bg: '#212121', fg: '#cdcdcd' },
 };
 
 const smokeArg = process.argv.find((a) => a.startsWith('--smoke-test='));
