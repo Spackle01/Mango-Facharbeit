@@ -234,11 +234,15 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
     assert.strictEqual(m.status, 'fertig');
     assert.strictEqual(m.text, 'Notiz angelegt.');
     assert.ok(m.files.some((f) => f.path === '01_themenfindung_und_mindmap/dsnotiz.md' && f.aktion === 'neu'));
-    assert.deepStrictEqual(m.stil.skills, ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']);
+    assert.deepStrictEqual(m.stil.skills, ['natuerlich-schreiben', 'stilrevision', 'stimmenprofil', 'textpruefung']);
     assert.strictEqual(m.stil.vollstaendig, true);
     assert.strictEqual(m.stil.nachgeholt, false);
     assert.ok(m.activity.some((a) => a.skill === 'textpruefung'));
     assert.match(fake.calls[0].messages[0].content, /Arbeitsregeln/, 'Regeln der App gehen als Systemnachricht mit');
+    const system = fake.calls[0].messages[0].content;
+    assert.ok(system.indexOf('## Schreib-Skills: Wortlaut (zuerst lesen)') < system.indexOf('## Kurz und einfach'), 'der Wortlaut der Skills steht vor allen anderen Regeln');
+    for (const titel of ['# Stimmenprofil', '# Natürlich schreiben', '# Stilrevision', '# Textprüfung']) assert.ok(system.includes(titel), `${titel} steht im Systemprompt`);
+    assert.ok(m.activity[0].label.startsWith('Liest die Schreib-Skills'), 'erster Arbeitsschritt');
     assert.match(fake.calls[0].messages[1].content, /<antwortstil>/);
     // Zweite Nachricht setzt den Verlauf fort (nur eine neue Nachricht, kein neuer System-Verlauf)
     const done2 = await srv.send(chat.id, 'Danke.');

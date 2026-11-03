@@ -10,6 +10,14 @@ const ANFORDERUNGEN = [
 
 const ALLE = ['natuerlich-schreiben', 'stilrevision', 'stimmenprofil', 'textpruefung'];
 
+// Reihenfolge, in der die Skills in den Regeln stehen und angewendet werden: Stimme, schreiben bzw. überarbeiten, prüfen.
+const REIHENFOLGE = ['stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung'];
+
+// Platzhalter in ressourcen/regeln.md und Überschrift des Abschnitts, der ihn ersetzt (daran erkennt die App,
+// dass der Wortlaut der Skills schon im Systemprompt steht).
+const PLATZHALTER = '<!-- MANGO:SCHREIB-SKILLS -->';
+const BLOCK_TITEL = '## Schreib-Skills: Wortlaut (zuerst lesen)';
+
 // Frühere Skills: Die App entfernt sie aus bestehenden Arbeitsräumen, damit niemand sie mehr nutzt.
 const VERALTET = ['wissenschaftlich-schreiben', 'sprachpruefung'];
 
@@ -23,4 +31,4 @@ function geladene(geladen) {
   return ALLE.filter((s) => geladen.has(s));
 }
 
-module.exports = { ANFORDERUNGEN, ALLE, VERALTET, fehlend, geladene };
+module.exports = { ANFORDERUNGEN, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, VERALTET, fehlend, geladene };

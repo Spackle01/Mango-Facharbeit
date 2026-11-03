@@ -112,8 +112,23 @@ async function entferneVeraltete(ws) {
   }
 }
 
-async function syncManagedFiles(ws) {
+// Arbeitsregeln mit dem vollständigen Wortlaut der Schreib-Skills am Anfang: Sie stehen damit im Systemprompt, die KI
+// liest sie vor allem anderen und muss sie nicht erst über ein Werkzeug laden (das hängt sonst vom Modell ab).
+async function regelnText() {
   const regeln = await fsp.readFile(path.join(RES, 'regeln.md'), 'utf8');
+  if (!regeln.includes(schreibskills.PLATZHALTER)) return regeln;
+  const teile = [];
+  for (const name of schreibskills.REIHENFOLGE) {
+    const roh = await fsp.readFile(path.join(RES, 'skills', name, 'SKILL.md'), 'utf8');
+    const text = roh.replace(/^---\n[\s\S]*?\n---\n/, '').replace(/<!--[^>]*mango-facharbeit:verwaltet[^>]*-->\n?/, '').trim();
+    teile.push(`### Skill \`${name}\`\n\n${text}`);
+  }
+  const kopf = `${schreibskills.BLOCK_TITEL}\n\nDie vier Schreib-Skills stehen hier vollständig. Lies sie, bevor du irgendetwas schreibst, überarbeitest oder prüfst, und wende sie bei jedem Text in dieser Reihenfolge an: \`stimmenprofil\`, dann \`natuerlich-schreiben\` (neuer Text) oder \`stilrevision\` (vorhandener Text), dann \`textpruefung\`. Du musst sie nicht mehr mit dem Skill-Werkzeug laden. Dateien unter \`references/\` liegen im Arbeitsraum unter \`.claude/skills/<Skill>/references/\`; lies sie bei Bedarf dort. Was die Schulvorgaben und die übrigen Regeln unten verlangen, geht den Skills vor.\n\n`;
+  return regeln.replace(schreibskills.PLATZHALTER, kopf + teile.join('\n\n'));
+}
+
+async function syncManagedFiles(ws) {
+  const regeln = await regelnText();
   await writeManaged(path.join(internalDir(ws), 'regeln.md'), `<!-- ${MARKER} -->\n${regeln}`);
   // Antigravity lädt Regeln aus .agents/rules/ automatisch.
   await writeManaged(path.join(ws, '.agents', 'rules', 'mango-facharbeit.md'),
@@ -414,7 +429,7 @@ async function finalizeAttachment(ws, stagedId) {
 }
 
 module.exports = {
-  MARKER, internalDir, suggestWorkspacePath, setupWorkspace, syncManagedFiles, isWorkspace,
+  MARKER, internalDir, suggestWorkspacePath, setupWorkspace, syncManagedFiles, isWorkspace, regelnText,
   listFiles, snapshot, diffAndBackup, restoreChanges, saveVersion, listVersions, restoreVersionAsCopy, stageUpload,
   discardStaged, cleanupStaging, ensureExtract, finalizeAttachment, defaultWorkspaceParent, RES, ROOT,
 };

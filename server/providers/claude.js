@@ -7,6 +7,7 @@ const { CLAUDE_MODELS } = require('./models');
 const ID = 'claude';
 const NAME = 'Claude Code';
 const INSTALL_LINK = 'https://code.claude.com/docs/en/setup';
+const MAX_ARG_REGELN = 20000;
 const ALLOWED_TOOLS = 'Read,Write,Edit,MultiEdit,Glob,Grep,WebSearch,WebFetch,TodoWrite,Skill';
 
 function installHint() {
@@ -70,7 +71,10 @@ function run(info, { cwd, prompt, sessionId, resume, rulesText, rulesFile, onEve
     else if (caps.sessionId) args.push('--session-id', sessionId);
   }
   // Regeln als Systemprompt: direkt als Argument, außer bei .cmd-Starter unter Windows (Längen- und Zeichengrenzen).
-  if (rulesText && caps.appendPrompt && !needsShell(info.bin)) args.push('--append-system-prompt', rulesText);
+  // Lange Regeln (mit dem Wortlaut der Schreib-Skills) gehen als Datei: Windows begrenzt die Kommandozeile auf rund 32.000 Zeichen.
+  const lang = !!rulesText && rulesText.length > MAX_ARG_REGELN;
+  if (lang && rulesFile && caps.appendFile) args.push('--append-system-prompt-file', rulesFile);
+  else if (rulesText && caps.appendPrompt && !needsShell(info.bin)) args.push('--append-system-prompt', rulesText);
   else if (rulesFile && caps.appendFile) args.push('--append-system-prompt-file', rulesFile);
 
   const child = spawnProgram(info.bin, args, { cwd, stdin: 'pipe' });

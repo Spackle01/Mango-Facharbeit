@@ -215,7 +215,7 @@ function historyTranscript(messages, maxChars = 24000) {
   return out.join('\n\n');
 }
 
-function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false }) {
+function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false, skillsImKontext = false }) {
   const parts = [];
   parts.push(contextUnchanged ? '<projektkontext>unverändert seit der letzten Nachricht</projektkontext>' : context);
   if (history) {
@@ -224,7 +224,9 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   if (attachments.length) {
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
   }
-  if (schreibaufgabe) {
+  if (schreibaufgabe && skillsImKontext) {
+    parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat). Der Wortlaut der Schreib-Skills steht am Anfang deiner Regeln: 1. `stimmenprofil`: Stimme der Person aus ihren eigenen Texten im Arbeitsraum bestimmen. 2. `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text): schreiben bzw. überarbeiten, kurz und einfach, nichts erfinden. 3. `textpruefung`: den fertigen Text prüfen und Befunde beheben. 4. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
+  } else if (schreibaufgabe) {
     parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat), alle Skills mit dem Skill-Werkzeug laden: 1. `stimmenprofil`: Stimme der Person aus ihren eigenen Texten im Arbeitsraum bestimmen. 2. `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text): schreiben bzw. überarbeiten, kurz und einfach, nichts erfinden. 3. `textpruefung`: den fertigen Text prüfen und Befunde beheben. 4. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
   }
   // Gilt bei jeder Nachricht: hält die Antworten kurz, auch in langen Chats.

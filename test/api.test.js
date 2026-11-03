@@ -20,6 +20,19 @@ let server;
 let base;
 let token;
 
+const ALLE_SKILLS = ['natuerlich-schreiben', 'stilrevision', 'stimmenprofil', 'textpruefung'];
+const REGELN_DATEI = () => path.join(WS, '.facharbeit', 'regeln.md');
+// Regeln ohne den Wortlaut der Skills (wie bei einer Installation, in der er fehlt): Dann gilt der Notweg über das Skill-Werkzeug.
+// Gibt eine Funktion zurück, die die Regeln wiederherstellt.
+function regelnOhneSkillText() {
+  const original = fs.readFileSync(REGELN_DATEI(), 'utf8');
+  const a = original.indexOf('## Schreib-Skills: Wortlaut');
+  const b = original.indexOf('## Kurz und einfach');
+  assert.ok(a > 0 && b > a, 'Regeln enthalten den Wortlaut der Skills');
+  fs.writeFileSync(REGELN_DATEI(), original.slice(0, a) + original.slice(b));
+  return () => fs.writeFileSync(REGELN_DATEI(), original);
+}
+
 function startServer() {
   return new Promise((resolve, reject) => {
     const port = 4800 + Math.floor(Math.random() * 400);
@@ -233,7 +246,8 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(done.message.provider, 'antigravity');
     assert.strictEqual(done.message.model, 'gemini-3.1-pro-high');
     assert.match(done.message.text, /Hallo von Antigravity/);
-    assert.match(done.message.activity[0].label, /Liest 00_vorgaben\/anforderungen\.md/);
+    assert.match(done.message.activity[0].label, /Liest die Schreib-Skills/, 'der erste Arbeitsschritt ist das Lesen der Schreib-Skills');
+    assert.match(done.message.activity[1].label, /Liest 00_vorgaben\/anforderungen\.md/);
     assert.ok(events.some((e) => e.type === 'activity'));
     const chat = await call('GET', `/api/chats/${chatId}`);
     assert.strictEqual(chat.sessions.antigravity.id, '055a398f-db14-4c5f-abbb-1bf03f8120a7');
@@ -334,7 +348,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.word[0].ok, 2);
     assert.strictEqual(m.word[0].fehler.length, 1);
     assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung'], vollstaendig: true, nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, Skills waren geladen');
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, der Wortlaut der Skills stand im Kontext');
     // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
     const extract = require('../server/extract');
     const info = await extract.analyse(path.join(WS, ...lt.split('/')));
@@ -360,7 +374,7 @@ test('Kompletter Ablauf', async (t) => {
     const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
     const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
     assert.strictEqual(m.text, 'Eingetragen.', 'Text der Überarbeitung wird nicht angezeigt');
-    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung'], vollstaendig: true, nachgeholt: false });
+    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false });
     assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen zum Prüfen/.test(a.label)));
     const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
     assert.strictEqual(w.ok, 2);
@@ -376,9 +390,11 @@ test('Kompletter Ablauf', async (t) => {
   });
 
   await t.test('Schreib-Skills: nicht geladen → die App lässt sie nachholen', async () => {
+    const wiederherstellen = regelnOhneSkillText();
     const chat = await call('POST', '/api/chats');
     const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
     const m = (await send(chat.id, 'OHNESKILL LERNTAGEBUCH Ergänzung')).done.message;
+    wiederherstellen();
     assert.strictEqual(m.stil.nachgeholt, true);
     assert.deepStrictEqual(m.stil.skills, ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']);
     assert.strictEqual(m.stil.vollstaendig, true);
@@ -391,7 +407,17 @@ test('Kompletter Ablauf', async (t) => {
 
   await t.test('Schreib-Skills: auch ein Entwurf im Chat braucht sie, fehlen sie, wird er neu geschrieben', async () => {
     const lese = () => fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    const skills = ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung'];
+    const skills = ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']; // so viele lädt die Attrappe nach
+    // Wortlaut im Kontext (Normalfall): ein Durchlauf, die Antwort bleibt, auch ohne dass die KI ein Werkzeug aufruft.
+    let chat0 = await call('POST', '/api/chats');
+    let v0 = lese().length;
+    let m0 = (await send(chat0.id, 'Schreib mir CHATENTWURF OHNESKILL einen Absatz')).done.message;
+    assert.match(m0.text, /^Erste Fassung: /, 'keine Neufassung nötig');
+    assert.deepStrictEqual(m0.stil, { gefunden: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false, chat: true });
+    assert.strictEqual(lese().length - v0, 1);
+    // Ab hier ohne Wortlaut in den Regeln: Notweg über das Skill-Werkzeug.
+    const wiederherstellen = regelnOhneSkillText();
+    try {
     // Skills geladen: ein Durchlauf, die Antwort bleibt.
     let chat = await call('POST', '/api/chats');
     let vorher = lese().length;
@@ -417,6 +443,7 @@ test('Kompletter Ablauf', async (t) => {
     m = (await send(chat.id, 'Schreib mir bitte kurz hallo')).done.message;
     assert.strictEqual(m.stil, undefined);
     assert.strictEqual(lese().length - vorher, 1);
+    } finally { wiederherstellen(); }
   });
 
   await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {
@@ -425,7 +452,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.ok(!/```erstellen/.test(m.text), 'Block wird nicht angezeigt');
     assert.deepStrictEqual(m.word.map((x) => [x.datei, x.aktion, x.ok]), [['abgabe/Praesentation.pptx', 'neu', 1], ['abgabe/Info.pdf', 'neu', 1]]);
     assert.ok(m.files.some((f) => f.path === 'abgabe/Praesentation.pptx' && f.aktion === 'neu' && f.kind === 'praesentation'));
-    assert.strictEqual(m.stil.nachgeholt, false, 'Skills waren geladen');
+    assert.strictEqual(m.stil.nachgeholt, false, 'Skills standen im Kontext');
     const v = await call('GET', '/api/files/vorschau?path=abgabe/Praesentation.pptx');
     assert.strictEqual(v.typ, 'folien');
     assert.strictEqual(v.folien[1].notizen, 'Das sage ich dazu.');

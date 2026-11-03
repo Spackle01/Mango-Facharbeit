@@ -569,6 +569,52 @@ test('Schreib-Skills: bestehende Arbeitsräume bekommen die neuen und verlieren 
   assert.match(fs.readFileSync(path.join(dir, '.claude', 'skills', 'textpruefung', 'SKILL.md'), 'utf8'), /^---\nname: textpruefung\n/);
 });
 
+test('Schreib-Skills: Wortlaut steht vollständig und zuerst in den Regeln', async () => {
+  const text = await wsLib.regelnText();
+  const titel = text.indexOf(schreibskills.BLOCK_TITEL);
+  assert.ok(titel > 0, 'Abschnitt mit dem Wortlaut vorhanden');
+  assert.ok(titel < text.indexOf('## Kurz und einfach'), 'steht vor allen anderen Regeln');
+  assert.ok(!text.includes(schreibskills.PLATZHALTER), 'Platzhalter ist ersetzt');
+  assert.ok(!text.includes('mango-facharbeit:verwaltet'), 'Verwaltungszeile der Skills steht nicht im Systemprompt');
+  // Alle vier Skills in der Reihenfolge Stimme, Schreiben, Überarbeiten, Prüfen, jeweils vollständig und ohne Kopfblock.
+  let pos = titel;
+  for (const name of schreibskills.REIHENFOLGE) {
+    const i = text.indexOf(`### Skill \`${name}\``, pos);
+    assert.ok(i > pos, `${name} in der richtigen Reihenfolge`);
+    pos = i;
+    const original = fs.readFileSync(path.join(ROOT, 'ressourcen/skills', name, 'SKILL.md'), 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '').replace(/<!--[^>]*-->\n?/, '').trim();
+    assert.ok(text.includes(original), `${name}: Wortlaut vollständig und unverändert`);
+  }
+  assert.ok(!/^name: (stimmenprofil|textpruefung)$/m.test(text), 'kein Kopfblock der Skills');
+  assert.ok(text.length > 30000, 'ist lang genug, um Windows-Kommandozeilen zu sprengen: muss als Datei gehen');
+  // Die Datei im Arbeitsraum enthält denselben Text (für Claude als Datei, für Antigravity als always-on-Regel).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-regeln-'));
+  await Project.create(dir, { name: 'Test' });
+  await wsLib.syncManagedFiles(dir);
+  assert.ok(fs.readFileSync(path.join(dir, '.facharbeit', 'regeln.md'), 'utf8').includes(schreibskills.BLOCK_TITEL));
+  assert.ok(fs.readFileSync(path.join(dir, '.agents', 'rules', 'mango-facharbeit.md'), 'utf8').includes('### Skill `textpruefung`'));
+});
+
+test('Claude-Anbindung: lange Regeln gehen als Datei, kurze als Argument', async () => {
+  const claude = require('../server/providers/claude');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-cl-'));
+  const log = path.join(dir, 'calls.ndjson');
+  const bin = path.join(ROOT, 'test', 'fixtures', 'bin', 'claude');
+  const info = { bin, caps: { appendPrompt: true, appendFile: true, partial: true, allowedTools: true } };
+  const alt = process.env.FAKE_LOG;
+  process.env.FAKE_LOG = log;
+  try {
+    const lauf = (rulesText) => claude.run(info, { cwd: dir, prompt: 'Hallo', rulesText, rulesFile: path.join(dir, 'regeln.md'), sessionId: 's1', onEvent: () => {} }).done;
+    await lauf('x'.repeat(30000));
+    await lauf('Kurze Regeln');
+  } finally { if (alt === undefined) delete process.env.FAKE_LOG; else process.env.FAKE_LOG = alt; }
+  const [lang, kurz] = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l).args);
+  assert.ok(lang.includes('--append-system-prompt-file') && lang.includes(path.join(dir, 'regeln.md')), 'lange Regeln als Datei');
+  assert.ok(!lang.includes('--append-system-prompt'), 'nicht zusätzlich als Argument');
+  assert.ok(!lang.some((a) => a.length > 1000), 'kein langes Argument auf der Kommandozeile');
+  assert.strictEqual(kurz[kurz.indexOf('--append-system-prompt') + 1], 'Kurze Regeln', 'kurze Regeln als Argument');
+});
+
 test('Sprachprüfung: harte Treffer müssen geändert werden, Prüfhinweise entscheidet der Assistent', () => {
   const stellen = stil.pruefen('Gerne! Hier ist dein Text. Darüber hinaus ist das gut — sehr gut.');
   const nach = (g) => stellen.find((x) => x.grund === g);
