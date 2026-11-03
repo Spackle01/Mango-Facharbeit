@@ -768,7 +768,8 @@ function stilEl(st) {
   }
   const skills = st.skills || [];
   const vollstaendig = st.vollstaendig != null ? st.vollstaendig : skills.length >= 2; // ältere Nachrichten ohne Feld
-  const skillText = vollstaendig ? `Schreib-Skills ${st.nachgeholt ? 'nachgeholt' : 'gelesen'}` : st.skills ? 'Schreib-Skills nicht vollständig geladen' : '';
+  const was = st.werkzeuge ? 'Schreibwerkzeuge' : 'Schreib-Skills'; // DeepSeek nutzt Werkzeuge statt der Skills
+  const skillText = vollstaendig ? `${was} ${st.nachgeholt ? 'nachgeholt' : st.werkzeuge ? 'genutzt' : 'gelesen'}` : st.skills ? `${was} nicht vollständig ${st.werkzeuge ? 'genutzt' : 'geladen'}` : '';
   const warn = offen.length || !vollstaendig;
   const el = h('div', { class: `stil-note${warn ? ' warn' : ''}` }, iconEl(warn ? 'alert' : 'check', 14), h('span', {}, [text, skillText].filter(Boolean).join(' · ')));
   if (!offen.length) return el;

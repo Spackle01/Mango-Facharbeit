@@ -494,6 +494,10 @@ test('Regeln: Schreibregeln der Skills und „kurz und einfach“ werden immer m
   // Die Erinnerung „wie ein Mensch schreiben“ kommt bei jeder Nachricht, auch wenn keine Schreibaufgabe erkannt wird („im chat“).
   for (const text of ['im chat', 'Hallo', 'Und jetzt?']) assert.match(ctx.buildPrompt({ context: '', text }), /<menschlich>.*Schreib-Skills.*wie ein Mensch.*Erkennungsprogramme/, `bei „${text}“`);
   assert.match(ctx.buildPrompt({ context: '', text: 'Hallo' }), /<antwortstil>.*höchstens drei kurze Sätze/, 'Antwortstil steht bei jeder Nachricht');
+  // Die Kürze-Regel gilt für das Gespräch, nicht für bestellte Texte: Sonst schreiben kleine Modelle lauter gleich kurze Sätze.
+  const stilHinweis = /<antwortstil>([^<]*)<\/antwortstil>/.exec(ctx.buildPrompt({ context: '', text: 'im chat' }))[1];
+  assert.match(stilHinweis, /^Deine Antworten im Gespräch[\s\S]*Das gilt nicht für Texte, die du für die Person schreibst[\s\S]*nicht aus lauter gleich kurzen Sätzen/);
+  assert.match(regeln, /Das gilt nicht für Texte, die du für die Person schreibst\*\* \(Entwurf, Absatz, Mail, Lerntagebuch-Eintrag, auch wenn er im Chat steht\)/);
 });
 
 // ---------- Schreib-Skills (Paket „Huminizer GER V2“) ----------
