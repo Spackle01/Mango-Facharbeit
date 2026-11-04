@@ -50,6 +50,12 @@ function describeTool(name, input, cwd) {
     case 'WebFetch': return { kind: 'web', label: `Öffnet ${host(url) || 'eine Webseite'}` };
     case 'TodoWrite': return { kind: 'planen', label: 'Plant die Arbeitsschritte' };
     case 'Skill': { const sk = String(pick(input, ['skill', 'name', 'command']) || '').replace(/^.*:/, ''); return { kind: 'skill', label: `Nutzt den Skill ${sk}`.trim(), skill: sk }; }
+    case 'voice_profile': return { kind: 'skill', werkzeug: n, label: 'Liest dein Stimmenprofil' };
+    case 'voice_import': return { kind: 'skill', werkzeug: n, label: 'Lernt deine Schreibweise aus eigenen Texten' };
+    case 'humanize_rewrite': return { kind: 'skill', werkzeug: n, label: 'Holt die Umschreib-Anleitung' };
+    case 'voice_rewrite': return { kind: 'skill', werkzeug: n, label: 'Holt die Umschreib-Anleitung im Stil deiner Texte' };
+    case 'humanize_scan': return { kind: 'skill', werkzeug: n, label: 'Prüft den Text auf Schablonen' };
+    case 'voice_score': return { kind: 'skill', werkzeug: n, label: 'Vergleicht den Text mit deiner Schreibweise' };
     case 'Task': case 'Agent': return { kind: 'planen', label: 'Bearbeitet eine Teilaufgabe' };
     case 'Bash': return { kind: 'befehl', label: 'Führt einen Befehl aus' };
     default: break;

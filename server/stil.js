@@ -141,9 +141,11 @@ function neueZeilen(vorher, nachher) {
 
 // Nachricht an den Assistenten mit den gefundenen Stellen (für den Überarbeitungsdurchlauf).
 // `fehlendeSkills`: Beschreibungen der Pflicht-Skills, die nicht geladen wurden (siehe schreibskills.js).
-function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = [] } = {}) {
+function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = [], anbieter = '' } = {}) {
   const L = [];
-  if (fehlendeSkills.length) {
+  if (fehlendeSkills.length && anbieter === 'deepseek') {
+    L.push(`Du hast für den eben eingetragenen Text die Pflicht-Werkzeuge nicht aufgerufen (${fehlendeSkills.join(', ')}). Rufe sie jetzt auf, in dieser Reihenfolge: \`voice_profile\` (gibt es kein Profil: \`voice_import\` mit eigenen Texten der Person), dann \`voice_rewrite\` bzw. \`humanize_rewrite\` mit dem Text, dann \`humanize_scan\` mit dem überarbeiteten Text. Überarbeite den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} nach der Anleitung direkt in der Datei: Stimme der Person, Fakten und Unsicherheit erhalten, nichts Neues erfinden, kurz und einfach. Ist der Text schon passend, lass ihn unverändert. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
+  } else if (fehlendeSkills.length) {
     L.push(`Du hast für den eben eingetragenen Text die Pflicht-Skills nicht geladen (${fehlendeSkills.join(', ')}). Lade sie jetzt mit dem Skill-Werkzeug, in dieser Reihenfolge: \`stimmenprofil\`, dann \`natuerlich-schreiben\` bzw. \`stilrevision\`, dann \`textpruefung\`. Überarbeite den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} mit ihnen direkt in der Datei: Stimme der Person, Fakten und Unsicherheit erhalten, nichts Neues erfinden, kurz und einfach. Ist der Text schon passend, lass ihn unverändert. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
   }
   if (funde.length) {
@@ -162,7 +164,10 @@ function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = 
 
 // Nachricht, wenn der Assistent einen Text im Chat geschrieben hat, ohne die Pflicht-Skills zu laden:
 // Er soll sie laden und den Text komplett neu ausgeben (die App ersetzt die erste Fassung).
-function chatNachholenPrompt(fehlendeSkills) {
+function chatNachholenPrompt(fehlendeSkills, anbieter = '') {
+  if (anbieter === 'deepseek') {
+    return `Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Werkzeuge aufzurufen (${fehlendeSkills.join(', ')}). Rufe sie jetzt auf, in dieser Reihenfolge: \`voice_profile\` (gibt es kein Profil: \`voice_import\` mit eigenen Texten der Person), dann \`voice_rewrite\` bzw. \`humanize_rewrite\` mit deinem Entwurf, dann \`humanize_scan\` mit dem überarbeiteten Text. Schreib den Text nach der Anleitung um: Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Behebe die Befunde des Scans. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.`;
+  }
   return `Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden (${fehlendeSkills.join(', ')}). Lade jetzt alle drei Schritte mit dem Skill-Werkzeug, in dieser Reihenfolge: \`stimmenprofil\`, dann \`natuerlich-schreiben\` bzw. \`stilrevision\`, dann \`textpruefung\`. Schreib den Text mit ihnen neu bzw. überarbeite ihn: Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Prüfe ihn danach mit \`textpruefung\` und behebe die Befunde. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.`;
 }
 
