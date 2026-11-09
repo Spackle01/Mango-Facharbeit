@@ -97,8 +97,15 @@ async function applyPlan(project, plan) {
         version = await ws.saveVersion(workspace, target, await fsp.readFile(abs));
       }
       await ensureDir(path.dirname(abs));
+      // Das Ziel ist eine Arbeitsdatei: Eine vorhandene, schreibgeschützte Datei freigeben, sonst scheitert das Überschreiben (Windows).
+      if (vorhanden) await fsp.chmod(abs, 0o644).catch(() => {});
       if (umwandeln) await fsp.writeFile(abs, await convert(srcAbs, e.von, extSrc), 'utf8');
-      else await fsp.copyFile(srcAbs, abs);
+      else {
+        await fsp.copyFile(srcAbs, abs);
+        // copyFile nimmt den Schreibschutz des Originals (uebernommen/ ist 0o444) mit. Die Arbeitskopie soll beschreibbar sein,
+        // sonst lässt sie sich später nicht mehr eintragen: unter Windows meldet das Überschreiben „Datei gesperrt“, unter Mac „keine Berechtigung“.
+        await fsp.chmod(abs, 0o644).catch(() => {});
+      }
       used.add(target);
       Object.assign(r, { nach: toPosix(target), aktion: umwandeln ? 'umgewandelt' : 'kopiert' });
       if (version) Object.assign(r, { ersetzt: true, version });

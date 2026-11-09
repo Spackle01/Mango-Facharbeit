@@ -194,6 +194,7 @@ class Werkzeuge {
     const { rel, abs } = this.schreibCheck(p);
     if (typeof content !== 'string') throw new Error('content fehlt');
     await ensureDir(path.dirname(abs));
+    await fsp.chmod(abs, 0o644).catch(() => {}); // schreibCheck lässt nur Arbeitsdateien zu: Schreibschutz einer Kopie aufheben
     await fsp.writeFile(abs, content, 'utf8');
     return `Geschrieben: ${rel} (${content.split('\n').length} Zeilen)`;
   }
@@ -206,6 +207,7 @@ class Werkzeuge {
     const n = text.split(alt).length - 1;
     if (!n) throw new Error('old_string kommt in der Datei nicht vor');
     if (n > 1 && !alle) throw new Error(`old_string kommt ${n}-mal vor. Gib mehr Umgebungstext an oder setze replace_all.`);
+    await fsp.chmod(abs, 0o644).catch(() => {});
     await fsp.writeFile(abs, alle ? text.split(alt).join(neu) : text.replace(alt, () => neu), 'utf8');
     return `Bearbeitet: ${rel}${alle ? ` (${n} Stellen)` : ''}`;
   }

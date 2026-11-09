@@ -641,6 +641,11 @@ test('Kompletter Ablauf', async (t) => {
     const byTarget = Object.fromEntries(r.einsortiert.filter((x) => !x.fehler).map((x) => [x.nach, x]));
     assert.strictEqual(byTarget['02_expose_und_zeitplan/expose.md'].aktion, 'kopiert');
     assert.strictEqual(fs.readFileSync(path.join(WS, '02_expose_und_zeitplan/expose.md'), 'utf8'), fs.readFileSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md'), 'utf8'));
+    if (process.platform !== 'win32') {
+      // Die Kopie nimmt den Schreibschutz des Originals nicht mit: Sonst lässt sie sich später nicht mehr eintragen.
+      assert.ok(fs.statSync(path.join(WS, '02_expose_und_zeitplan/expose.md')).mode & 0o200, 'Arbeitskopie ist beschreibbar');
+      assert.strictEqual(fs.statSync(path.join(WS, importOrdner, 'Meine Facharbeit/Facharbeit/Expose_v2.md')).mode & 0o222, 0, 'das Original bleibt schreibgeschützt');
+    }
     assert.strictEqual(byTarget['06_lerntagebuch_und_konsultationen/lerntagebuch.md'].aktion, 'umgewandelt');
     const lt = fs.readFileSync(path.join(WS, '06_lerntagebuch_und_konsultationen/lerntagebuch.md'), 'utf8');
     assert.match(lt, /^<!-- Arbeitskopie von „Lerntagebuch\.docx“/);
