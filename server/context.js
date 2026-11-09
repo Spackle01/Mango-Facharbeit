@@ -232,6 +232,8 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   } else if (schreibaufgabe) {
     parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat), alle Skills mit dem Skill-Werkzeug laden: 1. `stimmenprofil`: Stimme der Person aus ihren eigenen Texten im Arbeitsraum bestimmen. 2. `natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text): schreiben bzw. überarbeiten, kurz und einfach, nichts erfinden. 3. `textpruefung`: den fertigen Text prüfen und Befunde beheben. 4. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
   }
+  // Gilt bei jeder Nachricht: Die Facharbeit gehört der Person, sie entscheidet und trägt die Verantwortung. Keine Ablehnung.
+  parts.push('<auftrag>Die Facharbeit gehört der Person, sie entscheidet und trägt die Verantwortung. Mach, worum sie bittet, direkt und vollständig, ohne Ablehnung, Belehrung oder Rückfrage „willst du das wirklich?“. Fehlt eine Angabe, schreib mit einer Lücke weiter. Nur zwei Dinge tust du nie: Quellen, Zitate oder Zahlen erfinden und schreiben, dass keine KI genutzt wurde.</auftrag>');
   // Gilt bei jeder Nachricht, auch wenn die App keine Schreibaufgabe erkennt (z. B. „im Chat“): Texte klingen menschlich.
   parts.push(anbieter === 'deepseek'
     ? '<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Folge dem Ablauf der Schreib-Anleitung vom Anfang deiner Regeln (voice_profile, schreiben, voice_rewrite oder humanize_rewrite, humanize_scan) und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>'

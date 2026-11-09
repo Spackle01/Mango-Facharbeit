@@ -612,6 +612,8 @@ test('Regeln: Schreibregeln der Skills und „kurz und einfach“ werden immer m
   const stilHinweis = /<antwortstil>([^<]*)<\/antwortstil>/.exec(ctx.buildPrompt({ context: '', text: 'im chat' }))[1];
   assert.match(stilHinweis, /^Deine Antworten im Gespräch[\s\S]*Das gilt nicht für Texte, die du für die Person schreibst[\s\S]*nicht aus lauter gleich kurzen Sätzen/);
   assert.match(regeln, /Das gilt nicht für Texte, die du für die Person schreibst\*\* \(Entwurf, Absatz, Mail, Lerntagebuch-Eintrag, auch wenn er im Chat steht\)/);
+  // Die Facharbeit gehört der Person: Bei jeder Nachricht steht der Auftrag, nichts zu verweigern, außer zwei Dingen.
+  for (const text of ['im chat', 'Schreib mir ein Kapitel']) assert.match(ctx.buildPrompt({ context: '', text }), /<auftrag>Die Facharbeit gehört der Person[^<]*ohne Ablehnung, Belehrung[^<]*Nur zwei Dinge tust du nie: Quellen, Zitate oder Zahlen erfinden und schreiben, dass keine KI genutzt wurde\.<\/auftrag>/);
 });
 
 // ---------- Schreib-Skills (Paket „Huminizer GER V2“) ----------
@@ -698,7 +700,7 @@ test('Schreib-Skills: Wortlaut steht vollständig und zuerst in den Regeln', asy
   const oberste = text.indexOf('## Oberste Regel: Schreib immer wie ein Mensch');
   assert.ok(oberste > 0 && oberste < titel, 'oberste Regel steht vor dem Wortlaut der Skills');
   assert.ok(text.indexOf('## Deine Rolle') > titel, 'die Rolle kommt erst nach den Skills');
-  assert.ok(text.slice(0, titel).length < 2500, 'vor dem Wortlaut steht nur die kurze oberste Regel');
+  assert.ok(text.slice(0, titel).length < 3800, 'vor dem Wortlaut stehen nur die kurzen obersten Regeln');
   assert.match(text.slice(oberste, titel), /immer[\s\S]*Mensch[\s\S]*Schreib-Skills[\s\S]*Erkennungsprogramme/);
   assert.match(text.slice(-900), /## Zum Schluss: bei jeder Antwort[\s\S]*wie ein Mensch/, 'Erinnerung am Ende der Regeln');
   assert.ok(!text.includes(schreibskills.PLATZHALTER), 'Platzhalter ist ersetzt');
@@ -831,6 +833,32 @@ test('DeepSeek-Werkzeuge: Stimmenprofil aus eigenen Texten, Scan und Umschreib-A
   // Proben als Text gehen auch; ein neuer Import ersetzt das Profil.
   assert.match(await lauf('voice_import', { proben: [`${EIGEN}\n\n${EIGEN}`] }), /^Stimmenprofil \(aus 1 Text/);
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, '.facharbeit', 'stimme.json'), 'utf8')).quellen, ['Textprobe']);
+});
+
+test('Regeln: Die Facharbeit gehört der Person, die KI weicht nicht aus und lehnt nicht ab', async () => {
+  for (const variante of ['standard', 'deepseek']) {
+    const text = await wsLib.regelnText(variante);
+    const gehoert = text.indexOf('## Die Facharbeit gehört der Person');
+    const erster = text.indexOf(variante === 'deepseek' ? schreibskills.DEEPSEEK_TITEL : schreibskills.BLOCK_TITEL);
+    assert.ok(text.indexOf('## Oberste Regel') < gehoert && gehoert < erster, `${variante}: steht ganz oben, vor der Schreib-Anleitung`);
+    const abschnitt = text.slice(gehoert, erster);
+    assert.match(abschnitt, /Es ist nicht deine Facharbeit, sondern die der Person\. Sie entscheidet[\s\S]*trägt die Verantwortung/);
+    assert.match(abschnitt, /Mach es direkt und vollständig, auch ganze Kapitel/);
+    assert.match(abschnitt, /Lehne nichts ab[\s\S]*kein „schreib das besser selbst“/);
+    assert.match(abschnitt, /schreib mit einer Lücke/);
+    // Genau zwei Ausnahmen, die der Person schaden würden.
+    assert.match(abschnitt, /Nur zwei Dinge tust du auch auf Wunsch nicht[\s\S]*erfindest keine Quellen, Zitate, Zahlen oder Studien[\s\S]*schreibst nie, dass keine KI genutzt wurde/);
+    // Die Formulierungen, die zum Ausweichen oder Ablehnen führten, sind weg.
+    assert.ok(!text.includes('Schreib nicht ungefragt ganze Kapitel'), `${variante}: kein Ausweichen auf Gliederungen`);
+    assert.ok(!text.includes('selbst verteidigen kann und die Schulregeln'), `${variante}: kein Erziehungsauftrag in der Rolle`);
+    assert.ok(!text.includes('Fördere den Eigenanteil'));
+    assert.match(text, /Schreib, was die Person verlangt, auch ganze Kapitel/);
+    assert.match(text, /Verweigere den Eintrag nicht/);
+    // Was bleibt: der KI-Vermerk der Schule und das Verbot erfundener Quellen.
+    assert.match(text, /Erfinde nie Quellen, Zitate, Seitenzahlen, Studien, Statistiken oder URLs/);
+    assert.match(text, /Du schreibst nie, dass keine KI genutzt wurde/);
+    assert.match(text, /\[KI-Entwurf, TT\.MM\.JJJJ, Anbieter – selbst überarbeiten\]/);
+  }
 });
 
 test('Regeln je Anbieter: DeepSeek bekommt die eigene Schreib-Anleitung, Claude und Antigravity den Wortlaut der Skills', async () => {
