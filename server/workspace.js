@@ -141,6 +141,19 @@ async function regelnText(variante = 'standard') {
   return regeln.replace(schreibskills.PLATZHALTER, block);
 }
 
+// Arbeitsdateien (abgabe/, 01_ bis 08_) dürfen nie schreibgeschützt sein: Ältere Versionen haben beim Einsortieren den Schreibschutz der
+// Originale in die Kopien mitgenommen, danach ließen sie sich nicht mehr ändern. Originale (00_vorgaben, uebernommen, anhaenge) bleiben geschützt.
+async function arbeitsdateienFreigeben(ws) {
+  let n = 0;
+  for (const f of await listFiles(ws, { limit: 6000 })) {
+    if (!/^(abgabe|0[1-8]_[^/]+)\//.test(f.path)) continue;
+    const abs = path.join(ws, ...f.path.split('/'));
+    const st = await fsp.stat(abs).catch(() => null);
+    if (st && st.isFile() && !(st.mode & 0o200)) { await fsp.chmod(abs, 0o644).catch(() => {}); n += 1; }
+  }
+  return n;
+}
+
 async function syncManagedFiles(ws) {
   const regeln = await regelnText();
   await writeManaged(path.join(internalDir(ws), 'regeln.md'), `<!-- ${MARKER} -->\n${regeln}`);
@@ -160,6 +173,7 @@ async function syncManagedFiles(ws) {
   }
 
   await entferneVeraltete(ws);
+  await arbeitsdateienFreigeben(ws).catch(() => {});
 
   const vorgabenSrc = path.join(RES, 'vorgaben');
   const vorgabenDest = path.join(ws, '00_vorgaben');
@@ -445,7 +459,7 @@ async function finalizeAttachment(ws, stagedId) {
 }
 
 module.exports = {
-  MARKER, internalDir, suggestWorkspacePath, setupWorkspace, syncManagedFiles, isWorkspace, regelnText,
+  MARKER, internalDir, suggestWorkspacePath, setupWorkspace, syncManagedFiles, isWorkspace, regelnText, arbeitsdateienFreigeben,
   listFiles, snapshot, diffAndBackup, restoreChanges, saveVersion, listVersions, restoreVersionAsCopy, stageUpload,
   discardStaged, cleanupStaging, ensureExtract, finalizeAttachment, defaultWorkspaceParent, RES, ROOT,
 };

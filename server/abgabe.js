@@ -125,15 +125,54 @@ function gesperrt(err) {
   return ['EBUSY', 'EPERM', 'EACCES'].includes(err && err.code);
 }
 
-async function schreiben(abs, buf) {
+// Pausen zwischen den Versuchen, wenn Windows das Umbenennen kurz verweigert (Virenscanner, OneDrive, Suchindex halten
+// eine Datei oft für Sekundenbruchteile fest). Insgesamt gut zwei Sekunden.
+const PAUSEN = [40, 100, 250, 500, 1000];
+const warte = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Schreibt eine Datei sicher (erst .tmp, dann umbenennen). Unter Windows scheitert das Umbenennen nicht nur, wenn Word die
+// Datei offen hat, sondern auch bei Schreibschutz der Zieldatei und bei kurz festhaltenden Programmen. Deshalb: Schreibschutz
+// aufheben (Mango schreibt hier nur in Arbeitsdateien; Originale sperrt anwenden() vorher), bei Sperren kurz wiederholen und
+// zuletzt direkt überschreiben. Hält Word die Datei wirklich offen, scheitern alle Wege, und der Fehler geht an den Aufrufer.
+async function schreiben(abs, buf, { pausen = PAUSEN } = {}) {
+  const st = await fsp.stat(abs).catch(() => null);
+  if (st && !(st.mode & 0o200)) await fsp.chmod(abs, 0o644).catch(() => {});
   const tmp = `${abs}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   await fsp.writeFile(tmp, buf);
-  try {
-    await fsp.rename(tmp, abs);
-  } catch (err) {
-    await fsp.rm(tmp, { force: true }).catch(() => {});
-    throw err;
+  let letzter = null;
+  for (let i = 0; i <= pausen.length; i++) {
+    try {
+      await fsp.rename(tmp, abs);
+      return;
+    } catch (err) {
+      letzter = err;
+      if (!gesperrt(err)) break;
+      if (i < pausen.length) await warte(pausen[i]);
+    }
   }
+  try {
+    if (!gesperrt(letzter)) throw letzter;
+    await fsp.writeFile(abs, buf);
+  } catch (err) {
+    throw err.code ? err : letzter;
+  } finally {
+    await fsp.unlink(tmp).catch(() => {});
+  }
+}
+
+// Word legt neben eine geöffnete Datei eine Sperrdatei „~$…“. Nur dann ist die Datei wirklich in Word geöffnet.
+async function inWordOffen(abs) {
+  const dir = path.dirname(abs);
+  const name = path.basename(abs);
+  for (const kandidat of [`~$${name}`, `~$${name.slice(2)}`]) {
+    if (await exists(path.join(dir, kandidat))) return true;
+  }
+  return false;
+}
+
+async function hinweisGesperrt(abs, err) {
+  if (await inWordOffen(abs)) return 'Die Datei ist gerade geöffnet (z. B. in Word). Schließe sie und trage die Änderungen erneut ein.';
+  return `Windows lässt das Überschreiben der Datei nicht zu (${err.code}), obwohl sie in Word nicht geöffnet scheint. Meist hält ein anderes Programm sie kurz fest, etwa Virenscanner, OneDrive oder die Vorschau im Explorer. Versuche es gleich noch einmal mit „Erneut eintragen“.`;
 }
 
 async function bildLaden(workspace, rel) {
@@ -193,7 +232,7 @@ async function anwenden(project, dateien) {
         else if (ext === '.xlsx') buf = markdownToXlsx(e.text, { title: titel, author: autor });
         else buf = await markdownToPptx(e.text, { title: titel, author: autor, bildLaden: (rel) => bildLaden(workspace, rel) });
         await schreiben(abs, buf);
-        if (alt) { r.aktion = 'bearbeitet'; r.version = await ws.saveVersion(workspace, e.datei, alt); }
+        if (alt) { r.aktion = 'bearbeitet'; r.version = await ws.saveVersion(workspace, e.datei, alt).catch(() => undefined); }
         r.ok = 1;
       } else {
         const alt = await fsp.readFile(abs).catch(() => null);
@@ -204,7 +243,8 @@ async function anwenden(project, dateien) {
         r.fehler = res.results.filter((x) => x.fehler).map((x) => ({ was: x.was, fehler: x.fehler }));
         if (res.buffer) {
           await schreiben(abs, res.buffer);
-          r.version = await ws.saveVersion(workspace, e.datei, alt);
+          // Die Sicherung der vorherigen Fassung darf die Meldung nicht kippen: Die Datei ist geschrieben.
+          r.version = await ws.saveVersion(workspace, e.datei, alt).catch(() => undefined);
         }
       }
       await ws.ensureExtract(workspace, e.datei).catch(() => {});
@@ -212,7 +252,7 @@ async function anwenden(project, dateien) {
       if (gesperrt(err)) {
         r.gesperrt = true;
         r.ok = 0;
-        r.hinweis = 'Die Datei ist gerade geöffnet (z. B. in Word). Schließe sie und trage die Änderungen erneut ein.';
+        r.hinweis = await hinweisGesperrt(resolveInside(workspace, e.datei) || e.datei, err);
       } else {
         r.hinweis = err.message;
       }
@@ -222,4 +262,4 @@ async function anwenden(project, dateien) {
   return results;
 }
 
-module.exports = { ORDNER, BEARBEITBAR, ensureAbgabe, anwenden, listeFuerKontext, namensteil };
+module.exports = { ORDNER, BEARBEITBAR, ensureAbgabe, anwenden, listeFuerKontext, namensteil, schreiben, inWordOffen };

@@ -453,6 +453,120 @@ test('Abgabe-Dateien: Namensteil wie von der Schule empfohlen', () => {
   assert.strictEqual(abgabe.namensteil(''), '');
 });
 
+// ---------- Abgabe-Dateien: Schreiben trotz Schreibschutz und kurzer Sperren ----------
+
+test('Abgabe: Schreiben überwindet Schreibschutz und kurze Sperren, echte Sperren bleiben Fehler', async () => {
+  const abgabe = require('../server/abgabe');
+  const fsp = fs.promises;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-sperre-'));
+  const echteUmbenennung = fsp.rename;
+  const echtesSchreiben = fsp.writeFile;
+  const tmpDateien = () => fs.readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+  const fehler = (code) => Object.assign(new Error(`${code}: simuliert`), { code });
+  try {
+    const ziel = path.join(dir, 'Lerntagebuch.docx');
+    // 1. Schreibgeschützte Zieldatei (z. B. eine Kopie aus uebernommen/): wird freigegeben und überschrieben.
+    fs.writeFileSync(ziel, 'alt');
+    fs.chmodSync(ziel, 0o444);
+    await abgabe.schreiben(ziel, Buffer.from('neu1'));
+    assert.strictEqual(fs.readFileSync(ziel, 'utf8'), 'neu1');
+    if (process.platform !== 'win32') assert.ok(fs.statSync(ziel).mode & 0o200, 'danach beschreibbar');
+    // 2. Kurze Sperre (Virenscanner, OneDrive): zwei Fehlversuche, beim dritten klappt es.
+    let aufrufe = 0;
+    fsp.rename = async (...a) => { aufrufe += 1; if (aufrufe <= 2) throw fehler('EPERM'); return echteUmbenennung(...a); };
+    await abgabe.schreiben(ziel, Buffer.from('neu2'), { pausen: [1, 1, 1] });
+    assert.strictEqual(aufrufe, 3);
+    assert.strictEqual(fs.readFileSync(ziel, 'utf8'), 'neu2');
+    // 3. Umbenennen geht nie, direktes Überschreiben schon.
+    fsp.rename = async () => { throw fehler('EBUSY'); };
+    await abgabe.schreiben(ziel, Buffer.from('neu3'), { pausen: [1] });
+    assert.strictEqual(fs.readFileSync(ziel, 'utf8'), 'neu3');
+    assert.deepStrictEqual(tmpDateien(), [], 'keine Reste');
+    // 4. Datei wirklich gesperrt (auch das direkte Schreiben scheitert): Der Fehler geht weiter, Inhalt unverändert, nichts bleibt liegen.
+    fsp.writeFile = async (p, ...r) => { if (p === ziel) throw fehler('EBUSY'); return echtesSchreiben(p, ...r); };
+    await assert.rejects(abgabe.schreiben(ziel, Buffer.from('neu4'), { pausen: [1] }), (e) => e.code === 'EBUSY');
+    assert.strictEqual(fs.readFileSync(ziel, 'utf8'), 'neu3');
+    assert.deepStrictEqual(tmpDateien(), []);
+    // 5. Andere Fehler werden nicht wiederholt.
+    fsp.writeFile = echtesSchreiben;
+    aufrufe = 0;
+    fsp.rename = async () => { aufrufe += 1; throw fehler('ENOENT'); };
+    await assert.rejects(abgabe.schreiben(ziel, Buffer.from('neu5'), { pausen: [1, 1, 1] }), (e) => e.code === 'ENOENT');
+    assert.strictEqual(aufrufe, 1);
+  } finally {
+    fsp.rename = echteUmbenennung;
+    fsp.writeFile = echtesSchreiben;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Abgabe: „gerade geöffnet“ nur bei Sperrdatei von Word, sonst ehrlicher Hinweis; Sicherung kippt die Meldung nicht', async () => {
+  const abgabe = require('../server/abgabe');
+  const fsp = fs.promises;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-sperre2-'));
+  const echteUmbenennung = fsp.rename;
+  const echtesSchreiben = fsp.writeFile;
+  const echteSicherung = wsLib.saveVersion;
+  try {
+    const p = await Project.create(path.join(dir, 'neu'), { name: 'Alex Beispiel' });
+    const rel = 'abgabe/Lerntagebuch_Beispiel_Alex.docx';
+    const abs = path.join(p.workspace, ...rel.split('/'));
+    const ops = () => [{ ersetzen: nummer(word.nummeriert(fs.readFileSync(abs)), 'Alex Beispiel'), text: 'Kim' }];
+    const gesperrt = () => { const e = Object.assign(new Error('EPERM: simuliert'), { code: 'EPERM' }); throw e; };
+    fsp.rename = async () => gesperrt();
+    fsp.writeFile = async (pfad, ...r) => { if (pfad === abs) gesperrt(); return echtesSchreiben(pfad, ...r); };
+    // Keine Sperrdatei von Word: Die App behauptet nicht, die Datei sei geöffnet.
+    let [r] = await abgabe.anwenden(p, [{ datei: rel, ops: ops() }]);
+    assert.strictEqual(r.gesperrt, true);
+    assert.strictEqual(r.ok, 0);
+    assert.match(r.hinweis, /Windows lässt das Überschreiben der Datei nicht zu \(EPERM\)/);
+    assert.ok(!/gerade geöffnet/.test(r.hinweis), 'ohne Sperrdatei kein „geöffnet“');
+    assert.match(r.hinweis, /Erneut eintragen/);
+    // Mit Sperrdatei (Word hat die Datei offen): die bekannte Meldung. Word nennt sie „~$“ plus Name ab dem dritten Zeichen.
+    fs.writeFileSync(path.join(path.dirname(abs), `~$${path.basename(abs).slice(2)}`), '');
+    [r] = await abgabe.anwenden(p, [{ datei: rel, ops: ops() }]);
+    assert.match(r.hinweis, /^Die Datei ist gerade geöffnet \(z\. B\. in Word\)\. Schließe sie/);
+    assert.strictEqual(await abgabe.inWordOffen(abs), true);
+    fs.unlinkSync(path.join(path.dirname(abs), `~$${path.basename(abs).slice(2)}`));
+    assert.strictEqual(await abgabe.inWordOffen(abs), false);
+    // Läuft alles, ist es eingetragen, auch wenn die Sicherung der alten Fassung scheitert.
+    fsp.rename = echteUmbenennung;
+    fsp.writeFile = echtesSchreiben;
+    wsLib.saveVersion = async () => { throw Object.assign(new Error('EACCES: simuliert'), { code: 'EACCES' }); };
+    [r] = await abgabe.anwenden(p, [{ datei: rel, ops: ops() }]);
+    assert.strictEqual(r.ok, 1);
+    assert.ok(!r.gesperrt && !r.hinweis, 'eingetragen, keine Fehlermeldung');
+    assert.match(word.nummeriert(fs.readFileSync(abs)), /^\[\d+\] Kim$/m, 'die Änderung steht in der Datei');
+  } finally {
+    fsp.rename = echteUmbenennung;
+    fsp.writeFile = echtesSchreiben;
+    wsLib.saveVersion = echteSicherung;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Arbeitsdateien: schreibgeschützte Kopien werden beim Öffnen freigegeben, Originale bleiben geschützt', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-frei-'));
+  try {
+    await Project.create(dir, { name: 'Test' });
+    const lege = (rel) => { const f = path.join(dir, ...rel.split('/')); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x'); fs.chmodSync(f, 0o444); return f; };
+    const arbeit = [lege('abgabe/Lerntagebuch_Test.docx'), lege('02_expose_und_zeitplan/expose.md'), lege('06_lerntagebuch_und_konsultationen/lt.docx')];
+    const original = [lege('uebernommen/2026-01-01_0000/Aufsatz.docx'), lege('00_vorgaben/Handreichung.pdf'), lege('anhaenge/2026-01-01/foto.png')];
+    const n = await wsLib.arbeitsdateienFreigeben(dir);
+    if (process.platform !== 'win32') {
+      assert.ok(n >= 3);
+      for (const f of arbeit) assert.ok(fs.statSync(f).mode & 0o200, `${path.relative(dir, f)} ist beschreibbar`);
+      for (const f of original) assert.strictEqual(fs.statSync(f).mode & 0o222, 0, `${path.relative(dir, f)} bleibt schreibgeschützt`);
+    }
+    // Beim Öffnen des Arbeitsraums geschieht das von selbst.
+    fs.chmodSync(arbeit[0], 0o444);
+    await wsLib.syncManagedFiles(dir);
+    if (process.platform !== 'win32') assert.ok(fs.statSync(arbeit[0]).mode & 0o200, 'auch beim Öffnen');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------- Sprachprüfung (Schreib-Skills) ----------
 
 const stil = require('../server/stil');
