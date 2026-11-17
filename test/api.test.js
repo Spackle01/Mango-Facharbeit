@@ -348,7 +348,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.word[0].ok, 2);
     assert.strictEqual(m.word[0].fehler.length, 1);
     assert.ok(m.word[0].version, 'vorherige Fassung gesichert');
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, der Wortlaut der Skills stand im Kontext');
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: 0, rest: 0, durchlaeufe: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false }, 'unauffälliger Text wird nicht überarbeitet, der Wortlaut der Skills stand im Kontext');
     // Die als Text geschriebene Datei wurde zurückgesetzt, dann hat die App eingetragen.
     const extract = require('../server/extract');
     const info = await extract.analyse(path.join(WS, ...lt.split('/')));
@@ -374,8 +374,8 @@ test('Kompletter Ablauf', async (t) => {
     const vorher = fs.readFileSync(LOG, 'utf8').trim().split('\n').length;
     const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
     assert.strictEqual(m.text, 'Eingetragen.', 'Text der Überarbeitung wird nicht angezeigt');
-    assert.deepStrictEqual(m.stil, { gefunden: 2, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false });
-    assert.ok(m.activity.some((a) => /Sprachprüfung: 2 Stellen zum Prüfen/.test(a.label)));
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: 2, rest: 0, durchlaeufe: 1, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false });
+    assert.ok(m.activity.some((a) => /Scan: 2 Stellen zum Prüfen/.test(a.label)));
     const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
     assert.strictEqual(w.ok, 2);
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
@@ -413,7 +413,7 @@ test('Kompletter Ablauf', async (t) => {
     let v0 = lese().length;
     let m0 = (await send(chat0.id, 'Schreib mir CHATENTWURF OHNESKILL einen Absatz')).done.message;
     assert.match(m0.text, /^Erste Fassung: /, 'keine Neufassung nötig');
-    assert.deepStrictEqual(m0.stil, { gefunden: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false, chat: true });
+    assert.deepStrictEqual(m0.stil, { scan: true, gefunden: 0, rest: 0, durchlaeufe: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false, chat: true });
     assert.strictEqual(lese().length - v0, 1);
     // Ab hier ohne Wortlaut in den Regeln: Notweg über das Skill-Werkzeug.
     const wiederherstellen = regelnOhneSkillText();
@@ -423,7 +423,7 @@ test('Kompletter Ablauf', async (t) => {
     let vorher = lese().length;
     let m = (await send(chat.id, 'Schreib mir CHATENTWURF einen Absatz für das Lerntagebuch')).done.message;
     assert.match(m.text, /^Erste Fassung: /);
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills, vollstaendig: true, nachgeholt: false, chat: true });
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: 0, rest: 0, durchlaeufe: 0, offen: [], skills, vollstaendig: true, nachgeholt: false, chat: true });
     assert.strictEqual(lese().length - vorher, 1, 'kein zweiter Durchlauf');
     // Skills nicht geladen: Die App fordert sie ein, die neue Fassung ersetzt die erste.
     chat = await call('POST', '/api/chats');
@@ -431,7 +431,7 @@ test('Kompletter Ablauf', async (t) => {
     m = (await send(chat.id, 'Schreib mir CHATENTWURF OHNESKILL einen Absatz für das Lerntagebuch')).done.message;
     assert.match(m.text, /^Neue Fassung: /, 'zweite Fassung ersetzt die erste');
     assert.ok(!/Erste Fassung/.test(m.text));
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills, vollstaendig: true, nachgeholt: true, chat: true });
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: 0, rest: 0, durchlaeufe: 1, offen: [], skills, vollstaendig: true, nachgeholt: true, chat: true });
     assert.ok(m.activity.some((a) => /Schreib-Skills nachholen und Text neu schreiben/.test(a.label)));
     const calls = lese().slice(vorher);
     assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
@@ -453,7 +453,8 @@ test('Kompletter Ablauf', async (t) => {
     const m = (await send(chat.id, 'Schreib mir CHATKI einen Absatz über Nachhaltigkeit')).done.message;
     assert.match(m.text, /^Neue Fassung: /, 'die zweite Fassung ersetzt die erste');
     assert.ok(!/heutigen Welt/.test(m.text));
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false, chat: true }, 'Skills waren da, also nicht „nachgeholt“');
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: m.stil.gefunden, rest: 0, durchlaeufe: 1, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false, chat: true }, 'Skills waren da, also nicht „nachgeholt“');
+    assert.ok(m.stil.gefunden >= 5, 'der Scan fand viele Stellen im ersten Entwurf');
     assert.ok(m.activity.some((a) => a.label === 'Scan: Text überarbeiten'));
     const calls = lese().slice(vorher);
     assert.strictEqual(calls.length, 2, 'ein Durchlauf zur Überarbeitung');
@@ -461,6 +462,41 @@ test('Kompletter Ablauf', async (t) => {
     assert.match(calls[1].input, /^Du hast in deiner Antwort einen Text geschrieben\. Der Scan von `ai-tell-audit`[\s\S]*findet darin noch Muster\./);
     assert.match(calls[1].input, /Fundstellen[\s\S]*„Zusammenfassend lässt sich sagen[^“]*“ – Schlussfloskel/);
     assert.ok(!/ohne dass folgendes erfüllt war/.test(calls[1].input), 'nichts nachzuholen');
+  });
+
+  await t.test('Scan: Bleibt die Überarbeitung auffällig, scannt Mango die neue Fassung und lässt ein zweites Mal überarbeiten', async () => {
+    const lese = () => fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    // Datei: Die erste Überarbeitung enthält noch Geviertstrich und Floskeln, die zweite ist sauber.
+    let chat = await call('POST', '/api/chats');
+    let vorher = lese().length;
+    let m = (await send(chat.id, 'Schreib FLOSKEL2 meine Lernziele ins Lerntagebuch')).done.message;
+    assert.strictEqual(m.text, 'Eingetragen.');
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: 2, rest: 0, durchlaeufe: 2, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false });
+    assert.deepStrictEqual(m.activity.filter((a) => /^Scan:/.test(a.label)).map((a) => a.label), ['Scan: 2 Stellen zum Prüfen', 'Scan: 3 Stellen bleiben auffällig, zweiter Durchlauf']);
+    let calls = lese().slice(vorher);
+    assert.strictEqual(calls.length, 3, 'Schreiben plus zwei Überarbeitungen');
+    assert.ok(calls[2].args.includes('--resume'));
+    assert.match(calls[2].input, /„Darüber hinaus ist das wichtig[^“]*“ – Geviertstrich[^\n]*\(ändern\)/, 'Fundstellen der neuen Fassung');
+    const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
+    const text = require('../server/extract').docxToText(fs.readFileSync(path.join(WS, ...w.datei.split('/'))));
+    assert.match(text, /Ich habe über Windkraft geschrieben\./);
+    assert.ok(!/heutigen Zeit|Darüber hinaus ist das wichtig/.test(text), 'am Ende steht die saubere Fassung');
+    // Chat: dasselbe für einen Entwurf, einmal sauber nach der zweiten Fassung ...
+    chat = await call('POST', '/api/chats');
+    vorher = lese().length;
+    m = (await send(chat.id, 'Schreib mir CHATKI2 einen Absatz über Nachhaltigkeit')).done.message;
+    assert.match(m.text, /^Neue Fassung: /, 'dritte Fassung ist sauber');
+    assert.strictEqual(m.stil.durchlaeufe, 2);
+    assert.strictEqual(m.stil.rest, 0);
+    assert.strictEqual(lese().length - vorher, 3);
+    // ... und einmal nach zwei Durchläufen noch auffällig: Mango hört auf und sagt es, statt endlos zu wiederholen.
+    chat = await call('POST', '/api/chats');
+    vorher = lese().length;
+    m = (await send(chat.id, 'Schreib mir CHATKI3 einen Absatz über Nachhaltigkeit')).done.message;
+    assert.match(m.text, /^Weitere Fassung: /);
+    assert.strictEqual(m.stil.durchlaeufe, 2, 'höchstens zwei Durchläufe');
+    assert.ok(m.stil.rest > 0, 'bleibt auffällig und wird so gemeldet');
+    assert.strictEqual(lese().length - vorher, 3, 'kein dritter Durchlauf');
   });
 
   await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {

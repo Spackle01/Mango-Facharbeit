@@ -219,7 +219,7 @@ test('Nur DeepSeek: Ruft die KI den Scan nicht auf, holt die App ihn nach', asyn
     const m = (await srv.send(chat.id, 'Schreib eine Notiz zur Umfrage.')).message;
     assert.strictEqual(m.status, 'fertig');
     assert.strictEqual(m.text, 'Notiz angelegt.', 'der Text der Überarbeitung wird nicht angezeigt');
-    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['human-voice', 'humanize-rewrite', 'ai-tell-audit', 'ai_tell_scan'], vollstaendig: true, nachgeholt: true });
+    assert.deepStrictEqual(m.stil, { scan: true, gefunden: 0, rest: 0, durchlaeufe: 1, offen: [], skills: ['human-voice', 'humanize-rewrite', 'ai-tell-audit', 'ai_tell_scan'], vollstaendig: true, nachgeholt: true });
     assert.ok(m.activity.some((a) => a.label === 'Schreib-Skills nachholen und Text prüfen'));
     assert.ok(m.activity.some((a) => a.werkzeug === 'ai_tell_scan' && a.label === 'Prüft den Text mit dem Scan (ai-tell-audit)'));
     const aufforderung = fake.calls.map((c) => c.messages.filter((x) => x.role === 'user').pop().content).find((x) => /fehlt noch/.test(x));
