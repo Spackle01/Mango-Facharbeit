@@ -760,17 +760,28 @@ function wordEl(m, isLast) {
 // Ergebnis der automatischen Sprachprüfung (Scan von ai-tell-audit) und der Schreib-Skills für Texte, die in Dateien oder im Chat entstanden sind.
 function stilEl(st) {
   const offen = st.offen || [];
+  const rest = st.rest || 0;
   const behoben = Math.max(0, st.gefunden - offen.length);
-  let text = st.chat ? '' : 'Sprachprüfung: unauffällig';
-  if (!st.chat) {
-    if (st.gefunden && !offen.length) text = `Sprachprüfung: ${st.gefunden} ${st.gefunden === 1 ? 'Stelle' : 'Stellen'} geprüft`;
-    else if (offen.length) text = `Sprachprüfung: ${behoben ? `${behoben} geprüft, ` : ''}${offen.length} ${offen.length === 1 ? 'Stelle' : 'Stellen'} noch ändern`;
+  const stellen = (n) => `${n} ${n === 1 ? 'Stelle' : 'Stellen'}`;
+  let text;
+  if (st.scan) {
+    // Mango hat den Scan von ai-tell-audit auf den Text angewendet (bei Bedarf mit Überarbeitung und erneutem Scan).
+    if (rest || offen.length) text = `Scan: ${stellen(Math.max(rest, offen.length))} noch auffällig`;
+    else if (st.gefunden) text = `Scan: ${stellen(st.gefunden)} gefunden, Text überarbeitet`;
+    else text = 'Scan: unauffällig';
+  } else {
+    // Ältere Nachrichten (vor dem Scan von ai-tell-audit)
+    text = st.chat ? '' : 'Sprachprüfung: unauffällig';
+    if (!st.chat) {
+      if (st.gefunden && !offen.length) text = `Sprachprüfung: ${stellen(st.gefunden)} geprüft`;
+      else if (offen.length) text = `Sprachprüfung: ${behoben ? `${behoben} geprüft, ` : ''}${stellen(offen.length)} noch ändern`;
+    }
   }
   const skills = st.skills || [];
   const vollstaendig = st.vollstaendig != null ? st.vollstaendig : skills.length >= 2; // ältere Nachrichten ohne Feld
-  const scan = skills.includes('ai_tell_scan') ? ', Scan ausgeführt' : '';
+  const scan = skills.includes('ai_tell_scan') ? ', Scan-Werkzeug aufgerufen' : '';
   const skillText = vollstaendig ? `Schreib-Skills ${st.nachgeholt ? 'nachgeholt' : 'gelesen'}${scan}` : st.skills ? 'Schreib-Skills nicht vollständig genutzt' : '';
-  const warn = offen.length || !vollstaendig;
+  const warn = offen.length || rest || !vollstaendig;
   const el = h('div', { class: `stil-note${warn ? ' warn' : ''}` }, iconEl(warn ? 'alert' : 'check', 14), h('span', {}, [text, skillText].filter(Boolean).join(' · ')));
   if (!offen.length) return el;
   return h('details', { class: 'stil-details' }, h('summary', {}, el),

@@ -18,6 +18,7 @@ const { GRUENDLICHKEIT } = require('./providers/models');
 // Ein Chat-Entwurf (Text in der Antwort statt in einer Datei) braucht mindestens so viele Wörter, damit die App
 // die Schreib-Skills einfordert. Normale Chat-Antworten sind kürzer (höchstens 40 Wörter).
 const CHAT_ENTWURF_WOERTER = 60;
+const MAX_NACHARBEIT = 2; // Überarbeitungsdurchläufe nach dem Scan, je Antwort
 const MAX_ARG_PROMPT = 24000;
 const RETRY_DELAY_MS = Number(process.env.MANGO_RETRY_DELAY_MS || 3000);
 
@@ -425,55 +426,76 @@ class RunManager {
         const texte = await geschriebeneTexte(project, { dateien: wp.dateien, ergebnisse: msg.word, changes, before, ausgenommen });
         if (texte.length) {
           // Nur auffällige Texte (harte Treffer, mehrere Stellen oder Urteil „reads as AI“) gehen zur Überarbeitung zurück.
-          const funde = texte.map((t) => ({ datei: t.datei, ...stil.bewerten(t.text) })).filter((f) => f.schwer).map((f) => ({ datei: f.datei, stellen: f.stellen }));
-          const gefunden = funde.reduce((n, f) => n + f.stellen.length, 0);
+          const auffaellig = (liste) => liste.map((t) => ({ datei: t.datei, ...stil.bewerten(t.text) })).filter((f) => f.schwer).map((f) => ({ datei: f.datei, stellen: f.stellen }));
+          const zaehle = (liste) => liste.reduce((n, f) => n + f.stellen.length, 0);
+          const fehlendTexte = () => schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
+          const funde = auffaellig(texte);
+          const gefunden = zaehle(funde);
           // Pflicht-Skills: Wurden sie nicht geladen, holt der Assistent das in einem stillen Durchlauf nach.
-          const fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
-          msg.stil = { gefunden, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false };
-          if (gefunden || fehlend.length) {
-            const info = { kind: 'info', label: gefunden ? `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Prüfen` : 'Schreib-Skills nachholen und Text prüfen' };
+          let fehlend = fehlendTexte();
+          const fehlteAnfangs = fehlend.length > 0;
+          msg.stil = { scan: true, gefunden, rest: 0, durchlaeufe: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false };
+          // Nach jeder Überarbeitung scannt Mango die neue Fassung noch einmal. Bleibt sie auffällig, folgt ein zweiter Durchlauf.
+          let aktuell = funde;
+          let dateienNr = texte.map((t) => t.datei);
+          let alleWord = wp.dateien;
+          while ((aktuell.length || fehlend.length) && msg.stil.durchlaeufe < MAX_NACHARBEIT) {
+            msg.stil.durchlaeufe += 1;
+            const n = zaehle(aktuell);
+            const info = { kind: 'info', label: msg.stil.durchlaeufe > 1 ? `Scan: ${n} ${n === 1 ? 'Stelle bleibt' : 'Stellen bleiben'} auffällig, zweiter Durchlauf` : (n ? `Scan: ${n} ${n === 1 ? 'Stelle' : 'Stellen'} zum Prüfen` : 'Schreib-Skills nachholen und Text prüfen') };
             msg.activity.push(info);
             broadcast({ type: 'activity', item: info });
             const extrakte = {};
-            for (const f of texte) {
-              if (!/\.docx$/i.test(f.datei)) continue;
-              const e = await ws.ensureExtract(project.workspace, f.datei).catch(() => null);
-              if (e && e.extrakt) extrakte[f.datei] = e.extrakt;
+            for (const d of dateienNr) {
+              if (!/\.docx$/i.test(d)) continue;
+              const e = await ws.ensureExtract(project.workspace, d).catch(() => null);
+              if (e && e.extrakt) extrakte[d] = e.extrakt;
             }
             const before2 = await ws.snapshot(project.workspace);
             sessionId = res.sessionId || sessionId;
             resume = true;
             still = true;
-            const res2 = await launch(stil.korrekturPrompt(funde, extrakte, { fehlendeSkills: fehlend, dateien: texte.map((t) => t.datei), anbieter: providerId })).catch((err) => ({ error: err.message }));
+            const res2 = await launch(stil.korrekturPrompt(aktuell, extrakte, { fehlendeSkills: fehlend, dateien: dateienNr, anbieter: providerId })).catch((err) => ({ error: err.message }));
             still = false;
             if (res2.error || res2.canceled) {
-              msg.activity.push({ kind: 'info', label: 'Überarbeitung nach der Sprachprüfung nicht abgeschlossen' });
-            } else {
-              if (fehlend.length) {
-                msg.stil.nachgeholt = true;
-                msg.stil.skills = schreibskills.geladene(skillsGeladen, providerId);
-                msg.stil.vollstaendig = !schreibskills.fehlend(skillsGeladen, providerId).length;
-              }
-              if (res2.sessionId) res.sessionId = res2.sessionId;
-              let ch2 = [];
-              try { ch2 = await ws.restoreChanges(project.workspace, await ws.diffAndBackup(project.workspace, before2)); } catch { ch2 = []; }
-              for (const c of ch2) if (!changes.some((x) => x.path === c.path)) changes.push(c);
-              const wp2 = word.parseBlock(res2.text || '');
-              if (wp2.dateien.length) {
-                wordZusammenfuehren(msg, await abgabe.anwenden(project, wp2.dateien));
-                merkeWord(msg, [...wp.dateien, ...wp2.dateien], changes);
-              }
+              msg.activity.push({ kind: 'info', label: 'Überarbeitung nach dem Scan nicht abgeschlossen' });
+              break;
             }
-            msg.stil.offen = await nochVorhanden(project, funde);
+            if (res2.sessionId) res.sessionId = res2.sessionId;
+            let ch2 = [];
+            try { ch2 = await ws.restoreChanges(project.workspace, await ws.diffAndBackup(project.workspace, before2)); } catch { ch2 = []; }
+            for (const c of ch2) if (!changes.some((x) => x.path === c.path)) changes.push(c);
+            const wp2 = word.parseBlock(res2.text || '');
+            let ergebnisse2 = [];
+            if (wp2.dateien.length) {
+              ergebnisse2 = await abgabe.anwenden(project, wp2.dateien);
+              wordZusammenfuehren(msg, ergebnisse2);
+              alleWord = [...alleWord, ...wp2.dateien];
+              merkeWord(msg, alleWord, changes);
+            }
+            // Die neue Fassung scannen: Was in diesem Durchlauf geschrieben wurde, wird wie der erste Text geprüft.
+            const neu = await geschriebeneTexte(project, { dateien: wp2.dateien, ergebnisse: ergebnisse2, changes: ch2, before: before2, ausgenommen });
+            aktuell = auffaellig(neu);
+            dateienNr = aktuell.map((f) => f.datei);
+            fehlend = fehlendTexte();
+            msg.stil.nachgeholt = fehlteAnfangs;
+            msg.stil.skills = schreibskills.geladene(skillsGeladen, providerId);
+            msg.stil.vollstaendig = !fehlend.length;
           }
+          msg.stil.rest = zaehle(aktuell);
+          if (msg.stil.durchlaeufe) msg.stil.offen = await nochVorhanden(project, [...funde, ...aktuell]);
         } else if (schreibaufgabe && chatWoerter(wp.text) >= CHAT_ENTWURF_WOERTER) {
-          // Entwurf im Chat statt in einer Datei: Auch dafür sind die Skills Pflicht. Fehlen sie, lädt der Assistent sie
-          // nach und gibt die Antwort mit der neuen Fassung noch einmal aus (sie ersetzt die erste).
-          const fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
-          const chatBewertung = stil.bewerten(wp.text.replace(/```[\s\S]*?(?:```|$)/g, ' '));
-          msg.stil = { gefunden: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
-          if (fehlend.length || chatBewertung.schwer) {
-            const info = { kind: 'info', label: fehlend.length ? 'Schreib-Skills nachholen und Text neu schreiben' : 'Scan: Text überarbeiten' };
+          // Entwurf im Chat statt in einer Datei: Auch dafür sind die Skills Pflicht und der Scan läuft. Fehlen Skills oder ist
+          // der Entwurf auffällig, gibt der Assistent die Antwort mit der neuen Fassung noch einmal aus (sie ersetzt die erste).
+          // Auch die neue Fassung wird gescannt, höchstens zweimal.
+          const chatBewerten = (text) => stil.bewerten(text.replace(/```[\s\S]*?(?:```|$)/g, ' '));
+          let fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
+          const fehlteAnfangs = fehlend.length > 0;
+          let bew = chatBewerten(wp.text);
+          msg.stil = { scan: true, gefunden: bew.schwer ? bew.stellen.length : 0, rest: 0, durchlaeufe: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
+          while ((fehlend.length || bew.schwer) && msg.stil.durchlaeufe < MAX_NACHARBEIT) {
+            msg.stil.durchlaeufe += 1;
+            const info = { kind: 'info', label: msg.stil.durchlaeufe > 1 ? 'Scan: Text bleibt auffällig, zweiter Durchlauf' : (fehlend.length ? 'Schreib-Skills nachholen und Text neu schreiben' : 'Scan: Text überarbeiten') };
             msg.activity.push(info);
             broadcast({ type: 'activity', item: info });
             const alterText = msg.text;
@@ -481,21 +503,24 @@ class RunManager {
             broadcast({ type: 'snapshot', message: msg });
             sessionId = res.sessionId || sessionId;
             resume = true;
-            const res2 = await launch(stil.chatNachholenPrompt(fehlend, providerId, chatBewertung.stellen)).catch((err) => ({ error: err.message }));
+            const res2 = await launch(stil.chatNachholenPrompt(fehlend, providerId, bew.schwer ? bew.stellen : [])).catch((err) => ({ error: err.message }));
             const neuerText = res2.text || msg.text;
             if (res2.error || res2.canceled || !neuerText.trim()) {
               Object.assign(msg, { text: alterText });
               broadcast({ type: 'snapshot', message: msg });
               msg.activity.push({ kind: 'info', label: 'Neufassung mit den Schreib-Skills nicht abgeschlossen' });
-            } else {
-              if (res2.sessionId) res.sessionId = res2.sessionId;
-              // Blöcke aus der neuen Antwort wurden schon aus der ersten angewendet: nur entfernen.
-              restText = word.parseBlock(sortieren.parsePlan(neuerText).text).text;
-              msg.stil.nachgeholt = fehlend.length > 0;
-              msg.stil.skills = schreibskills.geladene(skillsGeladen, providerId);
-              msg.stil.vollstaendig = !schreibskills.fehlend(skillsGeladen, providerId).length;
+              break;
             }
+            if (res2.sessionId) res.sessionId = res2.sessionId;
+            // Blöcke aus der neuen Antwort wurden schon aus der ersten angewendet: nur entfernen.
+            restText = word.parseBlock(sortieren.parsePlan(neuerText).text).text;
+            bew = chatBewerten(restText);
+            fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
+            msg.stil.nachgeholt = fehlteAnfangs;
+            msg.stil.skills = schreibskills.geladene(skillsGeladen, providerId);
+            msg.stil.vollstaendig = !fehlend.length;
           }
+          msg.stil.rest = bew.schwer ? bew.stellen.length : 0;
         }
       }
 

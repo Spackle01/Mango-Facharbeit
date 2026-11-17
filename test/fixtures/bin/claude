@@ -99,9 +99,20 @@ process.stdin.on('end', () => {
     for (const chunk of t.match(/[\s\S]{1,60}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: chunk } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
   };
+  // Datei „<Protokoll>.noch“: Wie oft noch eine auffällige Fassung geliefert wird, bevor eine saubere kommt (Tests des zweiten Durchlaufs).
+  const nochDatei = `${process.env.FAKE_LOG}.noch`;
+  const noch = () => { try { return +fs.readFileSync(nochDatei, 'utf8') || 0; } catch { return 0; } };
+  const nochSetzen = (n) => fs.writeFileSync(nochDatei, String(n));
   if (msg.includes('Du hast in deiner Antwort einen Text geschrieben')) {
     if (msg.includes('ohne dass folgendes erfüllt war')) skills();
+    if (noch() > 0) { nochSetzen(noch() - 1); streame(entwurfKi('Weitere Fassung')); return; }
     streame(entwurf('Neue Fassung'));
+    return;
+  }
+  if (msg.includes('CHATKI2') || msg.includes('CHATKI3')) {
+    nochSetzen(msg.includes('CHATKI3') ? 2 : 1);
+    skills();
+    streame(entwurfKi('Erste Fassung'));
     return;
   }
   if (msg.includes('CHATKI')) {
@@ -119,8 +130,12 @@ process.stdin.on('end', () => {
     if (msg.includes('fehlt noch:')) skills();
     const m = /^(abgabe\/\S+\.docx) \(Word: Block `word`, aktuelle Absatznummern in (\S+?)\)/m.exec(msg);
     const nummern = fs.readFileSync(path.join(process.cwd(), ...m[2].split('/')), 'utf8');
-    const n = +/^\[(\d+)\] In der heutigen Zeit/m.exec(nummern)[1];
-    const t = `Überarbeitet.\n\n\`\`\`word\n${JSON.stringify({ datei: m[1], aenderungen: [{ ersetzen: n, text: 'Ich habe über Windkraft geschrieben. Ich habe zu spät angefangen.' }] })}\n\`\`\``;
+    const n = +/^\[(\d+)\] (?:In der heutigen Zeit|Darüber hinaus)/m.exec(nummern)[1];
+    // FLOSKEL2: Die erste Überarbeitung bleibt auffällig (Geviertstrich, Floskeln), erst die zweite ist sauber.
+    const weiter = noch() > 0;
+    if (weiter) nochSetzen(noch() - 1);
+    const neuerAbsatz = weiter ? 'Darüber hinaus ist das wichtig — und in der heutigen Zeit zählt es mehr denn je.' : 'Ich habe über Windkraft geschrieben. Ich habe zu spät angefangen.';
+    const t = `Überarbeitet.\n\n\`\`\`word\n${JSON.stringify({ datei: m[1], aenderungen: [{ ersetzen: n, text: neuerAbsatz }] })}\n\`\`\``;
     out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
     out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
@@ -128,6 +143,7 @@ process.stdin.on('end', () => {
   }
   if (msg.includes('FLOSKEL')) {
     if (!msg.includes('OHNESKILL')) skills();
+    if (msg.includes('FLOSKEL2')) nochSetzen(1);
     const m = /- (abgabe\/Lerntagebuch[^ ]*\.docx) \(Stand [^)]*\) → Absätze: (\S+)/.exec(input);
     const nummern = fs.readFileSync(path.join(process.cwd(), ...m[2].split('/')), 'utf8');
     const frage = +/^\[(\d+)\] Das sind meine drei/m.exec(nummern)[1];
