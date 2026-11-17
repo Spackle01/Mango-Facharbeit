@@ -200,12 +200,12 @@ test('Antigravity: verweigerte Aktionen und Text am Schrittende', { skip: SYSTEM
   assert.strictEqual(r.done.message.text, 'Vollständige Antwort am Schrittende.');
 });
 
-test('Nur DeepSeek: Überspringt die KI die Schreibwerkzeuge, holt die App sie nach', async () => {
+test('Nur DeepSeek: Ruft die KI den Scan nicht auf, holt die App ihn nach', async () => {
   const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
     const letzte = req.messages[req.messages.length - 1];
-    const nachgeholt = req.messages.some((x) => x.role === 'user' && /Pflicht-Werkzeuge nicht aufgerufen/.test(x.content));
-    if (letzte.role === 'user' && /Pflicht-Werkzeuge nicht aufgerufen/.test(letzte.content)) return { tools: [{ name: 'voice_profile', args: {} }, { name: 'humanize_rewrite', args: { text: 'Meine Notiz zur Umfrage.' } }, { name: 'humanize_scan', args: { text: 'Meine Notiz zur Umfrage.' } }] };
-    // Erste Antwort: schreibt eine Datei und überspringt alle Schreibwerkzeuge.
+    const nachgeholt = req.messages.some((x) => x.role === 'user' && /fehlt noch/.test(x.content));
+    if (letzte.role === 'user' && /fehlt noch/.test(letzte.content)) return { tools: [{ name: 'ai_tell_scan', args: { text: 'Meine Notiz zur Umfrage.' } }] };
+    // Erste Antwort: schreibt eine Datei und ruft den Scan nicht auf.
     if (letzte.role === 'user') return { tools: [{ name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/dsnotiz2.md', content: 'Meine Notiz zur Umfrage.' } }] };
     return { text: nachgeholt ? 'Überarbeitet.' : 'Notiz angelegt.' };
   } });
@@ -219,13 +219,12 @@ test('Nur DeepSeek: Überspringt die KI die Schreibwerkzeuge, holt die App sie n
     const m = (await srv.send(chat.id, 'Schreib eine Notiz zur Umfrage.')).message;
     assert.strictEqual(m.status, 'fertig');
     assert.strictEqual(m.text, 'Notiz angelegt.', 'der Text der Überarbeitung wird nicht angezeigt');
-    assert.deepStrictEqual(m.stil, { werkzeuge: true, gefunden: 0, offen: [], skills: ['voice_profile', 'humanize_scan', 'humanize_rewrite'], vollstaendig: true, nachgeholt: true });
-    assert.ok(m.activity.some((a) => a.label === 'Schreibwerkzeuge nachholen und Text prüfen'));
-    for (const l of ['Liest dein Stimmenprofil', 'Holt die Umschreib-Anleitung', 'Prüft den Text auf Schablonen']) assert.ok(m.activity.some((a) => a.label === l), l);
-    const aufforderung = fake.calls.map((c) => c.messages.filter((x) => x.role === 'user').pop().content).find((x) => /Pflicht-Werkzeuge nicht aufgerufen/.test(x));
-    assert.match(aufforderung, /Pflicht-Werkzeuge nicht aufgerufen \(`voice_profile` \(gibt es kein Profil: `voice_import`\), `voice_rewrite` \(mit Profil\) oder `humanize_rewrite`, `humanize_scan`\)/);
-    assert.match(aufforderung, /`voice_profile`[\s\S]*dann `voice_rewrite` bzw\. `humanize_rewrite`[\s\S]*dann `humanize_scan`/);
-    assert.ok(!/Skill-Werkzeug|stimmenprofil/.test(aufforderung), 'keine Verweise auf die Skills');
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ['human-voice', 'humanize-rewrite', 'ai-tell-audit', 'ai_tell_scan'], vollstaendig: true, nachgeholt: true });
+    assert.ok(m.activity.some((a) => a.label === 'Schreib-Skills nachholen und Text prüfen'));
+    assert.ok(m.activity.some((a) => a.werkzeug === 'ai_tell_scan' && a.label === 'Prüft den Text mit dem Scan (ai-tell-audit)'));
+    const aufforderung = fake.calls.map((c) => c.messages.filter((x) => x.role === 'user').pop().content).find((x) => /fehlt noch/.test(x));
+    assert.match(aufforderung, /fehlt noch: das Werkzeug `ai_tell_scan` mit dem fertigen Text\. Ruf `ai_tell_scan` mit dem fertigen Text auf/);
+    assert.ok(!/Skill-Werkzeug/.test(aufforderung), 'die Skills standen im Systemprompt, nur der Scan fehlte');
     await srv.stop();
   } finally {
     fake.close();
@@ -235,7 +234,7 @@ test('Nur DeepSeek: Überspringt die KI die Schreibwerkzeuge, holt die App sie n
 test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
   const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
     const letzte = req.messages[req.messages.length - 1];
-    if (letzte.role === 'user') return { tools: [{ name: 'voice_profile', args: {} }, { name: 'humanize_rewrite', args: { text: 'Meine Notiz.' } }, { name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/dsnotiz.md', content: 'Meine Notiz.' } }, { name: 'humanize_scan', args: { text: 'Meine Notiz.' } }] };
+    if (letzte.role === 'user') return { tools: [{ name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/dsnotiz.md', content: 'Meine Notiz.' } }, { name: 'ai_tell_scan', args: { text: 'Meine Notiz.' } }] };
     return { text: 'Notiz angelegt.' };
   } });
   try {
@@ -266,27 +265,26 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
     assert.strictEqual(m.status, 'fertig');
     assert.strictEqual(m.text, 'Notiz angelegt.');
     assert.ok(m.files.some((f) => f.path === '01_themenfindung_und_mindmap/dsnotiz.md' && f.aktion === 'neu'));
-    // DeepSeek nutzt Schreibwerkzeuge statt der Skills; die App zählt, welche aufgerufen wurden.
-    assert.deepStrictEqual(m.stil.skills, ['voice_profile', 'humanize_scan', 'humanize_rewrite']);
-    assert.strictEqual(m.stil.werkzeuge, true);
+    // DeepSeek bekommt dieselben Skills im Systemprompt und ruft den Scan als Werkzeug auf; die App zählt, was genutzt wurde.
+    assert.deepStrictEqual(m.stil.skills, ['human-voice', 'humanize-rewrite', 'ai-tell-audit', 'ai_tell_scan']);
+    assert.strictEqual(m.stil.werkzeuge, undefined);
     assert.strictEqual(m.stil.vollstaendig, true);
     assert.strictEqual(m.stil.nachgeholt, false);
-    assert.deepStrictEqual(m.activity.filter((a) => a.werkzeug).map((a) => a.label), ['Liest dein Stimmenprofil', 'Holt die Umschreib-Anleitung', 'Prüft den Text auf Schablonen'], 'Werkzeuge sind im Chat klar beschriftet');
-    assert.ok(!m.activity.some((a) => /Schreibt eine Datei/.test(a.label) && !a.path), 'humanize_rewrite erscheint nicht als „Schreibt eine Datei“');
+    assert.deepStrictEqual(m.activity.filter((a) => a.werkzeug).map((a) => a.label), ['Prüft den Text mit dem Scan (ai-tell-audit)'], 'das Werkzeug ist im Chat klar beschriftet');
+    assert.ok(!m.activity.some((a) => /Schreibt eine Datei/.test(a.label) && !a.path), 'ai_tell_scan erscheint nicht als „Schreibt eine Datei“');
     assert.match(fake.calls[0].messages[0].content, /Arbeitsregeln/, 'Regeln der App gehen als Systemnachricht mit');
     const system = fake.calls[0].messages[0].content;
-    // DeepSeek bekommt eigene Regeln: kurze Schreib-Anleitung mit Werkzeugen statt des Wortlauts der vier Skills.
-    assert.ok(system.indexOf('## Oberste Regel: Schreib immer wie ein Mensch') < system.indexOf('## Schreib-Anleitung für DeepSeek (zuerst lesen)'), 'oberste Regel steht ganz oben');
-    assert.ok(system.indexOf('## Schreib-Anleitung für DeepSeek (zuerst lesen)') < system.indexOf('## Kurz und einfach'), 'die Anleitung steht vor allen anderen Regeln');
-    for (const w of ['voice_profile', 'voice_import', 'humanize_scan', 'humanize_rewrite', 'voice_score', 'voice_rewrite']) {
-      assert.ok(system.includes(`\`${w}\``), `${w} steht in der Anleitung`);
-      assert.ok(fake.calls[0].tools.some((x) => x.function.name === w), `${w} ist als Werkzeug angeboten`);
-    }
-    assert.ok(!system.includes('## Schreib-Skills: Wortlaut') && !system.includes('### Skill `stimmenprofil`') && !/# Natürlich schreiben/.test(system), 'nicht der Wortlaut der vier Skills');
+    // DeepSeek bekommt die drei Skills im Wortlaut vor allen anderen Regeln, wie Claude, dazu den Scan als Werkzeug.
+    assert.ok(system.indexOf('## Oberste Regel: Schreib immer wie ein Mensch') < system.indexOf('## Schreib-Skills: Wortlaut (zuerst lesen)'), 'oberste Regel steht ganz oben');
+    assert.ok(system.indexOf('## Schreib-Skills: Wortlaut (zuerst lesen)') < system.indexOf('## Kurz und einfach'), 'die Skills stehen vor allen anderen Regeln');
+    for (const s of ['human-voice', 'humanize-rewrite', 'ai-tell-audit']) assert.ok(system.includes(`### Skill \`${s}\``), `${s} steht im Wortlaut im Systemprompt`);
+    assert.match(system, /startest du mit dem Werkzeug `ai_tell_scan`/);
+    assert.deepStrictEqual(fake.calls[0].tools.map((x) => x.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch', 'ai_tell_scan']);
+    assert.ok(!/stimmenprofil|natuerlich-schreiben|voice_profile|humanize_scan/.test(system), 'keine Reste des alten Pakets');
     assert.ok(!/<!--NUR/.test(system), 'keine Reste der Anbieter-Blöcke');
-    assert.match(system.slice(-600), /Folge dafür dem Ablauf der Schreib-Anleitung vom Anfang deiner Regeln/, 'Erinnerung am Ende des Systemprompts');
-    assert.ok(m.activity[0].label.startsWith('Liest die Schreib-Anleitung für DeepSeek'), 'erster Arbeitsschritt');
-    assert.match(fake.calls[0].messages[1].content, /<menschlich>.*voice_profile.*humanize_scan/, 'Erinnerung steht bei jeder Nachricht');
+    assert.match(system.slice(-700), /Folge dafür den Schreib-Skills vom Anfang deiner Regeln: human-voice bzw\. humanize-rewrite, dann ai-tell-audit mit dem Werkzeug ai_tell_scan/, 'Erinnerung am Ende des Systemprompts');
+    assert.strictEqual(m.activity[0].label, 'Liest die Schreib-Skills (Schreiben, Umschreiben, Prüfen)', 'erster Arbeitsschritt');
+    assert.match(fake.calls[0].messages[1].content, /<menschlich>.*Schreib-Skills.*ai-tell-audit/, 'Erinnerung steht bei jeder Nachricht');
     // Zweite Nachricht setzt den Verlauf fort (nur eine neue Nachricht, kein neuer System-Verlauf)
     const done2 = await srv.send(chat.id, 'Danke.');
     assert.strictEqual(done2.message.status, 'fertig');

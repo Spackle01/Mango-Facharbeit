@@ -76,11 +76,11 @@ process.stdin.on('end', () => {
   }
   // Schreib-Skills: wie die echte CLI über das Skill-Werkzeug laden (außer bei OHNESKILL).
   const skills = () => {
-    for (const [i, name] of ['stimmenprofil', 'natuerlich-schreiben', 'textpruefung'].entries()) {
+    for (const [i, name] of ['human-voice', 'ai-tell-audit'].entries()) {
       out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: `s${i}`, name: 'Skill', input: { skill: name } }] } });
     }
   };
-  if (msg.includes('Pflicht-Skills nicht geladen') && !msg.includes('Automatische Prüfung hat außerdem')) {
+  if (msg.includes('fehlt noch:') && !msg.includes('hat außerdem diese Stellen')) {
     skills();
     const t = 'Überarbeitet.';
     out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
@@ -90,15 +90,23 @@ process.stdin.on('end', () => {
   }
   // Entwurf im Chat (keine Datei): ohne OHNESKILL werden die Schreib-Skills geladen, sonst nicht. Nach der Aufforderung der
   // App (Skills nachholen) lädt der Assistent sie und gibt eine neue Fassung aus.
-  const entwurf = (fassung) => `${fassung}: ${'Ich habe in der Woche zuerst die Quellen gesammelt und danach die Fragen für die Umfrage geschrieben. '.repeat(6)}`;
+  // Der Entwurf ist abwechslungsreich geschrieben, damit der Scan nichts findet (sonst gäbe es immer einen zweiten Durchlauf).
+  const entwurf = (fassung) => `${fassung}: Am Montag habe ich zuerst die Quellen gesammelt. Das war mühsam. In der SLUB fand ich zwei Bücher zum Thema, eins davon war leider ausgeliehen. Danach schrieb ich die Fragen für die Umfrage, weil ich bis Freitag fertig sein will. Ich glaube, die Umfrage wird gut, aber ich bin mir nicht sicher, ob 40 Leute reichen. Frau Meier meinte, das geht. Nächste Woche werte ich aus.`;
+  // Ein Entwurf voller Muster: Der Scan von Mango findet sie, auch wenn alle Skills gelesen wurden.
+  const entwurfKi = (fassung) => `${fassung}: In der heutigen Welt spielt Nachhaltigkeit eine entscheidende Rolle. Darüber hinaus ist es wichtig zu beachten, dass Unternehmen innovative Lösungen entwickeln. Zudem unterstreicht dies die Bedeutung von Bildung und Forschung. Zusammenfassend lässt sich sagen, dass die Zukunft nicht nur Chancen, sondern auch Herausforderungen bringt, und das ist ein Meilenstein für alle Beteiligten in der Gesellschaft von heute. Insgesamt lässt sich festhalten, dass sich das Engagement in jedem Fall lohnt.`;
   const streame = (t) => {
     out({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'text', text: '' } } });
     for (const chunk of t.match(/[\s\S]{1,60}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: chunk } } });
     out({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: sid });
   };
-  if (msg.includes('Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden')) {
-    skills();
+  if (msg.includes('Du hast in deiner Antwort einen Text geschrieben')) {
+    if (msg.includes('ohne dass folgendes erfüllt war')) skills();
     streame(entwurf('Neue Fassung'));
+    return;
+  }
+  if (msg.includes('CHATKI')) {
+    skills();
+    streame(entwurfKi('Erste Fassung'));
     return;
   }
   if (msg.includes('CHATENTWURF')) {
@@ -107,8 +115,8 @@ process.stdin.on('end', () => {
     return;
   }
   // Sprachprüfung: erst Floskeln eintragen, nach der Rückmeldung der App die Stellen überarbeiten.
-  if (msg.includes('Automatische Sprachprüfung') || msg.includes('Automatische Prüfung hat außerdem')) {
-    if (msg.includes('Pflicht-Skills nicht geladen')) skills();
+  if (msg.includes('Mango hat den Scan von `ai-tell-audit`') || msg.includes('hat außerdem diese Stellen')) {
+    if (msg.includes('fehlt noch:')) skills();
     const m = /^(abgabe\/\S+\.docx) \(Word: Block `word`, aktuelle Absatznummern in (\S+?)\)/m.exec(msg);
     const nummern = fs.readFileSync(path.join(process.cwd(), ...m[2].split('/')), 'utf8');
     const n = +/^\[(\d+)\] In der heutigen Zeit/m.exec(nummern)[1];

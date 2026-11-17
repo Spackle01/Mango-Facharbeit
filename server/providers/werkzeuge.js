@@ -6,7 +6,8 @@ const dns = require('dns').promises;
 const net = require('net');
 const { fsp, path, ensureDir, exists, toPosix, resolveInside } = require('../util');
 const extract = require('../extract');
-const stimme = require('../stimme');
+const aitell = require('../aitell');
+const stil = require('../stil');
 
 const MAX_LINIEN = 2000;
 const MAX_ZEICHEN = 60000;
@@ -15,10 +16,6 @@ const ORIGINALE = /^(00_vorgaben|uebernommen|anhaenge)(\/|$)/;
 const NICHT_SCHREIBEN = /\.(docx|docm|dotx|pptx|xlsx|pdf|png|jpe?g|gif|zip|exe)$/i;
 const TEXT_ENDUNGEN = /\.(md|markdown|txt|csv|tsv|json|html?|xml|ya?ml|tex|bib|rtf)$/i;
 const SKILL_NAME = /^[\w-]{1,60}$/;
-const PROFIL_DATEI = '.facharbeit/stimme.json';
-const KEINE_PROBEN = /^(00_vorgaben|\.facharbeit|\.agents|\.claude)(\/|$)|^FACHARBEIT\.md$/; // Schuldokumente und interne Dateien sind keine eigenen Texte
-const MAX_PROBEN = 20;
-const MAX_PROBE_ZEICHEN = 30000;
 
 // Werkzeugdefinitionen im Format der Chat-API (OpenAI-kompatibel).
 const DEFINITIONEN = [
@@ -36,19 +33,9 @@ const DEFINITIONEN = [
     parameters: { type: 'object', properties: { skill: { type: 'string' } }, required: ['skill'] } },
   { name: 'WebFetch', description: 'Ruft eine öffentliche Webseite (http/https) ab und liefert den Text. Nur für Quellen, die die Person nennt oder die du prüfen willst.',
     parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
-  // Schreibwerkzeuge (siehe server/stimme.js): deterministisch, ohne Modellaufruf. Du schreibst selbst um.
-  { name: 'voice_profile', description: 'Zeigt das gespeicherte Stimmenprofil der Person (Satzlänge, Rhythmus, Haltung, typische Wörter). Rufe es vor jedem Text auf.',
-    parameters: { type: 'object', properties: {} } },
-  { name: 'voice_import', description: 'Lernt die Schreibweise der Person aus ihren EIGENEN Texten und speichert das Stimmenprofil. Gib Dateien aus dem Arbeitsraum (z. B. uebernommen/…, frühere Einträge) und/oder Textproben an. Nie Texte, die eine KI geschrieben hat. Importiere alle Proben auf einmal, ein neuer Import ersetzt das Profil.',
-    parameters: { type: 'object', properties: { dateien: { type: 'array', items: { type: 'string' }, description: 'Pfade im Arbeitsraum' }, proben: { type: 'array', items: { type: 'string' }, description: 'Textproben der Person als Text' } } } },
-  { name: 'humanize_scan', description: 'Prüft einen Text auf typische KI-Muster (Floskeln, Stilwörter, Absicherungen, gleichförmiger Rhythmus, Dreierreihen). Liefert Befunde mit der Textstelle, keinen Prozentwert. Rufe es für jeden fertigen Text auf, bevor du ihn einträgst oder ausgibst.',
-    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
-  { name: 'humanize_rewrite', description: 'Liefert eine Umschreib-Anleitung für einen Text: Regeln und die gefundenen Stellen. Du schreibst danach selbst um. Nutze sie, wenn kein Stimmenprofil vorhanden ist.',
-    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
-  { name: 'voice_score', description: 'Misst, wie nah ein Text an der Schreibweise der Person liegt (0 bis 100, mit Aufschlüsselung). Das ist Stilnähe, kein Urteil eines Erkennungsprogramms. Braucht ein Stimmenprofil.',
-    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
-  { name: 'voice_rewrite', description: 'Liefert eine Umschreib-Anleitung im Stil der Person: ihre Kennzahlen, Beispiele aus ihren Texten, die Regeln und die gefundenen Stellen. Du schreibst danach selbst um. Braucht ein Stimmenprofil.',
-    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
+  // Scan des Skills ai-tell-audit (Nachbau von ai_tell_scan.py, server/aitell.js): rechnet nur, ohne Modellaufruf.
+  { name: 'ai_tell_scan', description: 'Führt den Scan des Skills ai-tell-audit aus (Skript ai_tell_scan.py): Rhythmus, Formatierung, Dreierreihen und Treffer typischer KI-Muster mit Kennzahlen und Urteil, dazu die betroffenen Sätze. Gib den fertigen Text als `text` an oder eine Datei im Arbeitsraum als `datei`. Rufe es für jeden fertigen Text auf, bevor du ihn einträgst oder ausgibst.',
+    parameters: { type: 'object', properties: { text: { type: 'string', description: 'Der Text' }, datei: { type: 'string', description: 'Pfad einer Textdatei im Arbeitsraum (statt text)' } } } },
 ];
 
 function relativ(cwd, p) {
@@ -235,69 +222,21 @@ class Werkzeuge {
     return out.length ? out.join('\n') : 'Keine Treffer.';
   }
 
-  // ---------- Schreibwerkzeuge (Stimmenprofil, Scan, Umschreib-Anleitungen) ----------
+  // ---------- Scan (Skill ai-tell-audit) ----------
 
-  async profilLaden() {
-    try { return JSON.parse(await fsp.readFile(path.join(this.cwd, ...PROFIL_DATEI.split('/')), 'utf8')); } catch { return null; }
-  }
-
-  async profilBrauchen() {
-    const p = await this.profilLaden();
-    if (!p || !p.fingerabdruck) throw new Error('Es gibt noch kein Stimmenprofil. Rufe zuerst voice_import mit eigenen Texten der Person auf (Dateien aus dem Arbeitsraum oder Textproben). Hat die Person noch keine, frag einmal nach ein bis zwei eigenen Absätzen.');
-    return p;
-  }
-
-  textEingabe(text) {
-    if (typeof text !== 'string' || !text.trim()) throw new Error('Der Text fehlt.');
-    return text;
-  }
-
-  async _voice_profile() {
-    const p = await this.profilLaden();
-    return p && p.fingerabdruck ? stimme.profilText(p) : 'Es gibt noch kein Stimmenprofil. Rufe voice_import mit eigenen Texten der Person auf. Hat die Person noch keine, frag einmal nach ein bis zwei eigenen Absätzen und nutze bis dahin humanize_rewrite.';
-  }
-
-  async _voice_import({ dateien, proben }) {
-    const texte = [];
-    const quellen = [];
-    for (const s of (Array.isArray(proben) ? proben : []).slice(0, MAX_PROBEN)) {
-      if (typeof s === 'string' && s.trim()) { texte.push(s.slice(0, MAX_PROBE_ZEICHEN)); quellen.push('Textprobe'); }
+  async _ai_tell_scan({ text, datei }) {
+    let inhalt = text;
+    if ((typeof inhalt !== 'string' || !inhalt.trim()) && datei) {
+      const { rel, abs } = aufloesen(this.cwd, datei);
+      const st = await fsp.stat(abs).catch(() => null);
+      if (!st || st.isDirectory()) throw new Error(`Datei „${rel}“ nicht gefunden`);
+      inhalt = await this.dateiText(rel, abs);
     }
-    const fehler = [];
-    for (const d of (Array.isArray(dateien) ? dateien : []).slice(0, MAX_PROBEN)) {
-      try {
-        const { rel, abs } = aufloesen(this.cwd, d);
-        if (KEINE_PROBEN.test(rel)) throw new Error('Schuldokumente und interne Dateien sind keine eigenen Texte');
-        const st = await fsp.stat(abs).catch(() => null);
-        if (!st || st.isDirectory()) throw new Error('Datei nicht gefunden');
-        // KI-Vermerke gehören nicht zur Stimme der Person.
-        const text = (await this.dateiText(rel, abs)).split('\n').filter((z) => !/^\s*\[KI-Entwurf/i.test(z)).join('\n');
-        texte.push(text.slice(0, MAX_PROBE_ZEICHEN));
-        quellen.push(rel);
-      } catch (err) { fehler.push(`${d}: ${err.message}`); }
-    }
-    const profil = stimme.neuesProfil(texte, quellen);
-    const f = profil.fingerabdruck;
-    if (f.woerter < 40) {
-      throw new Error(`Zu wenig Text für ein Stimmenprofil (${f.woerter} Wörter, nötig sind mindestens etwa 40, besser ab 300).${fehler.length ? ` Nicht lesbar: ${fehler.join('; ')}.` : ''} Frag die Person nach ein bis zwei eigenen Absätzen.`);
-    }
-    await ensureDir(path.join(this.cwd, '.facharbeit'));
-    await fsp.writeFile(path.join(this.cwd, ...PROFIL_DATEI.split('/')), JSON.stringify(profil, null, 2), 'utf8');
-    return `${stimme.profilText(profil)}${fehler.length ? `\nNicht gelesen: ${fehler.join('; ')}.` : ''}\nNimm nur eigene Texte der Person als Proben, keine von einer KI geschriebenen.`;
-  }
-
-  async _humanize_scan({ text }) { return stimme.scanText(stimme.scan(this.textEingabe(text))); }
-
-  async _humanize_rewrite({ text }) { return kuerzen(stimme.umschreibAnleitung(this.textEingabe(text))); }
-
-  async _voice_score({ text }) {
-    const profil = await this.profilBrauchen();
-    const f = stimme.fingerabdruck([this.textEingabe(text)]);
-    return stimme.aehnlichkeitText(stimme.aehnlichkeit(f, profil.fingerabdruck), f, profil);
-  }
-
-  async _voice_rewrite({ text }) {
-    return kuerzen(stimme.stimmeAnleitung(this.textEingabe(text), await this.profilBrauchen()));
+    if (typeof inhalt !== 'string' || !inhalt.trim()) throw new Error('Der Text fehlt. Gib `text` oder `datei` an.');
+    const bericht = aitell.bericht(aitell.scan(inhalt));
+    const { stellen } = stil.bewerten(inhalt);
+    const zeilen = stellen.slice(0, 15).map((s) => (s.satz ? `- „${s.satz}“ – ${s.grund}${s.hart ? ' (ändern)' : ''}` : `- Ganzer Text – ${s.grund}`));
+    return kuerzen(`${bericht}\n\nStellen zum Prüfen (Suchhilfen; „(ändern)“ immer ändern, die übrigen nach dem Zusammenhang; bei „reads as AI“ den Text neu bauen statt Wörter zu tauschen):\n${zeilen.length ? zeilen.join('\n') : '- keine'}`);
   }
 
   async _Skill({ skill }) {

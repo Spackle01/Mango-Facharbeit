@@ -286,12 +286,12 @@ class RunManager {
       let history = !sessionId && earlier.length ? ctx.historyTranscript(earlier) : '';
       const schreibaufgabe = !inv && SCHREIBAUFGABE.test(cleanText);
       // Regeln der App; enthalten sie den Wortlaut der Schreib-Skills (Normalfall), liest die KI sie vor allem anderen.
-      // DeepSeek bekommt eigene Regeln (kurze Schreib-Anleitung mit Schreibwerkzeugen), die anderen Anbieter die mit den Skills.
+      // DeepSeek bekommt eigene Regeln (gleiche Skills, der Scan läuft dort als Werkzeug), die anderen Anbieter die mit der Mango-Prüfung.
       const regelnName = providerId === 'deepseek' ? 'regeln-deepseek.md' : 'regeln.md';
       let rulesFile = path.join(ws.internalDir(project.workspace), regelnName);
       let rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => '');
       if (!rulesText && regelnName !== 'regeln.md') { rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md'); rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => ''); }
-      const skillsImKontext = rulesText.includes(schreibskills.BLOCK_TITEL) || rulesText.includes(schreibskills.DEEPSEEK_TITEL);
+      const skillsImKontext = rulesText.includes(schreibskills.BLOCK_TITEL);
       const buildPrompt = (unchanged) => ctx.buildPrompt({
         context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe, skillsImKontext, anbieter: providerId,
         text: inv ? `${cleanText}\n\n${importer.importPrompt(inv, { bisher: project.data.uebernahme })}` : cleanText || 'Bitte sieh dir die angehängten Dateien an.',
@@ -309,12 +309,10 @@ class RunManager {
       };
       let still = false; // Überarbeitungsdurchlauf: Text nicht anzeigen, nur Arbeitsschritte
       const skillsGeladen = new Set(); // Skills, die der Assistent in diesem Durchlauf geladen hat
-      // DeepSeek: Die Schreibwerkzeuge müssen wirklich aufgerufen werden (die App kontrolliert das und holt Fehlendes nach).
-      const stilBasis = providerId === 'deepseek' ? { werkzeuge: true } : {};
       if (skillsImKontext) {
         // Der Wortlaut steht am Anfang der Regeln: Das ist der erste „Arbeitsschritt“ jeder Antwort.
-        if (providerId !== 'deepseek') for (const s of schreibskills.ALLE) skillsGeladen.add(s);
-        msg.activity.push({ kind: 'skill', label: providerId === 'deepseek' ? 'Liest die Schreib-Anleitung für DeepSeek (Stimme, Schreiben, Prüfung)' : 'Liest die Schreib-Skills (Stimme, Schreiben, Prüfung)', skill: 'schreib-skills' });
+        for (const s of schreibskills.ALLE) skillsGeladen.add(s);
+        msg.activity.push({ kind: 'skill', label: 'Liest die Schreib-Skills (Schreiben, Umschreiben, Prüfen)', skill: 'schreib-skills' });
       }
       const onEvent = (ev) => {
         if (ev.type === 'init') {
@@ -418,21 +416,22 @@ class RunManager {
       }
       if (wp.invalid) msg.activity.push({ kind: 'info', label: 'Word-Änderungen waren nicht lesbar und wurden ignoriert' });
 
-      // Schreib-Skills (stimmenprofil, natuerlich-schreiben bzw. stilrevision, textpruefung) sind bei jedem Text Pflicht.
-      // Was der Assistent in Dateien geschrieben hat, wird geprüft; gefundene Stellen überarbeitet er einmal selbst
-      // (in derselben Sitzung, ohne neue Antwort). Wurden die Skills nicht geladen, holt er das nach.
+      // Schreib-Skills (human-voice bzw. humanize-rewrite, ai-tell-audit) sind bei jedem Text Pflicht. Was der Assistent in Dateien
+      // geschrieben hat, lässt Mango durch den Scan von ai-tell-audit laufen; auffällige Stellen überarbeitet er einmal selbst
+      // (in derselben Sitzung, ohne neue Antwort). Wurden die Skills (bei DeepSeek: das Scan-Werkzeug) nicht genutzt, holt er das nach.
       let restText = wp.text;
       if (!inv && !res.canceled && !res.error && !run.stopRequested) {
         const ausgenommen = new Set(einsortiert.filter((r) => !r.fehler).map((r) => r.nach));
         const texte = await geschriebeneTexte(project, { dateien: wp.dateien, ergebnisse: msg.word, changes, before, ausgenommen });
         if (texte.length) {
-          const funde = texte.map((t) => ({ datei: t.datei, stellen: stil.pruefen(t.text) })).filter((f) => f.stellen.length);
+          // Nur auffällige Texte (harte Treffer, mehrere Stellen oder Urteil „reads as AI“) gehen zur Überarbeitung zurück.
+          const funde = texte.map((t) => ({ datei: t.datei, ...stil.bewerten(t.text) })).filter((f) => f.schwer).map((f) => ({ datei: f.datei, stellen: f.stellen }));
           const gefunden = funde.reduce((n, f) => n + f.stellen.length, 0);
           // Pflicht-Skills: Wurden sie nicht geladen, holt der Assistent das in einem stillen Durchlauf nach.
           const fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
-          msg.stil = { ...stilBasis, gefunden, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false };
+          msg.stil = { gefunden, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false };
           if (gefunden || fehlend.length) {
-            const info = { kind: 'info', label: gefunden ? `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Prüfen` : (providerId === 'deepseek' ? 'Schreibwerkzeuge nachholen und Text prüfen' : 'Schreib-Skills nachholen und Text prüfen') };
+            const info = { kind: 'info', label: gefunden ? `Sprachprüfung: ${gefunden} ${gefunden === 1 ? 'Stelle' : 'Stellen'} zum Prüfen` : 'Schreib-Skills nachholen und Text prüfen' };
             msg.activity.push(info);
             broadcast({ type: 'activity', item: info });
             const extrakte = {};
@@ -471,9 +470,10 @@ class RunManager {
           // Entwurf im Chat statt in einer Datei: Auch dafür sind die Skills Pflicht. Fehlen sie, lädt der Assistent sie
           // nach und gibt die Antwort mit der neuen Fassung noch einmal aus (sie ersetzt die erste).
           const fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
-          msg.stil = { ...stilBasis, gefunden: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
-          if (fehlend.length) {
-            const info = { kind: 'info', label: providerId === 'deepseek' ? 'Schreibwerkzeuge nachholen und Text neu schreiben' : 'Schreib-Skills nachholen und Text neu schreiben' };
+          const chatBewertung = stil.bewerten(wp.text.replace(/```[\s\S]*?(?:```|$)/g, ' '));
+          msg.stil = { gefunden: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
+          if (fehlend.length || chatBewertung.schwer) {
+            const info = { kind: 'info', label: fehlend.length ? 'Schreib-Skills nachholen und Text neu schreiben' : 'Scan: Text überarbeiten' };
             msg.activity.push(info);
             broadcast({ type: 'activity', item: info });
             const alterText = msg.text;
@@ -481,7 +481,7 @@ class RunManager {
             broadcast({ type: 'snapshot', message: msg });
             sessionId = res.sessionId || sessionId;
             resume = true;
-            const res2 = await launch(stil.chatNachholenPrompt(fehlend, providerId)).catch((err) => ({ error: err.message }));
+            const res2 = await launch(stil.chatNachholenPrompt(fehlend, providerId, chatBewertung.stellen)).catch((err) => ({ error: err.message }));
             const neuerText = res2.text || msg.text;
             if (res2.error || res2.canceled || !neuerText.trim()) {
               Object.assign(msg, { text: alterText });
@@ -491,7 +491,7 @@ class RunManager {
               if (res2.sessionId) res.sessionId = res2.sessionId;
               // Blöcke aus der neuen Antwort wurden schon aus der ersten angewendet: nur entfernen.
               restText = word.parseBlock(sortieren.parsePlan(neuerText).text).text;
-              msg.stil.nachgeholt = true;
+              msg.stil.nachgeholt = fehlend.length > 0;
               msg.stil.skills = schreibskills.geladene(skillsGeladen, providerId);
               msg.stil.vollstaendig = !schreibskills.fehlend(skillsGeladen, providerId).length;
             }
