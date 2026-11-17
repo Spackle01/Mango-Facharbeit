@@ -118,27 +118,30 @@ function regelnVariante(text, variante) {
   return text.replace(/<!--NUR:(\w+)-->\n([\s\S]*?)\n<!--\/NUR-->\n?/g, (m, v, inhalt) => (v === variante ? `${inhalt}\n` : ''));
 }
 
-// Der Wortlaut der vier Schreib-Skills (Standard).
-async function skillsBlock() {
+// Der Wortlaut der drei Schreib-Skills. Beim Prüf-Skill fällt das eingebettete Skript weg (es liegt unter
+// `.claude/skills/ai-tell-audit/scripts/` und Mango führt es selbst aus), die Beschreibung des Ablaufs bleibt.
+async function skillsBlock(variante = 'standard') {
   const teile = [];
   for (const name of schreibskills.REIHENFOLGE) {
     const roh = await fsp.readFile(path.join(RES, 'skills', name, 'SKILL.md'), 'utf8');
-    const text = roh.replace(/^---\n[\s\S]*?\n---\n/, '').replace(/<!--[^>]*mango-facharbeit:verwaltet[^>]*-->\n?/, '').trim();
+    let text = roh.replace(/^---\n[\s\S]*?\n---\n/, '').replace(/<!--[^>]*mango-facharbeit:verwaltet[^>]*-->\n?/, '').trim();
+    if (name === 'ai-tell-audit') text = text.replace(/\n## Scan script[\s\S]*$/, '').trim();
     teile.push(`### Skill \`${name}\`\n\n${text}`);
   }
-  const kopf = `${schreibskills.BLOCK_TITEL}\n\nDie vier Schreib-Skills stehen hier vollständig. Lies sie, bevor du irgendetwas schreibst, überarbeitest oder prüfst, und wende sie bei jedem Text in dieser Reihenfolge an: \`stimmenprofil\`, dann \`natuerlich-schreiben\` (neuer Text) oder \`stilrevision\` (vorhandener Text), dann \`textpruefung\`. Du musst sie nicht mehr mit dem Skill-Werkzeug laden. Dateien unter \`references/\` liegen im Arbeitsraum unter \`.claude/skills/<Skill>/references/\`; lies sie bei Bedarf dort. Was die Schulvorgaben und die übrigen Regeln unten verlangen, geht den Skills vor.\n\n`;
+  const scan = variante === 'deepseek'
+    ? 'Den Scan des Skills (`ai_tell_scan.py`) startest du mit dem Werkzeug `ai_tell_scan` (Text oder Datei übergeben). Es gibt dieselben Kennzahlen und Treffer aus wie das Skript. Danach liest du den Text selbst nach der Checkliste („Read for what a script can\'t catch“).'
+    : 'Das Skript `ai_tell_scan.py` kannst du nicht starten, du hast kein Terminal. Mango führt denselben Scan nach dem Schreiben selbst aus und gibt dir die Fundstellen zurück. Lies den Text trotzdem selbst nach der Checkliste („Read for what a script can\'t catch“) und behebe, was du findest, bevor du ihn einträgst oder ausgibst.';
+  const kopf = `${schreibskills.BLOCK_TITEL}\n\nDie drei Schreib-Skills stehen hier vollständig. Lies sie, bevor du irgendetwas schreibst, überarbeitest oder prüfst, und wende sie bei jedem Text in dieser Reihenfolge an: \`human-voice\` (neuer Text) oder \`humanize-rewrite\` (vorhandener Text), dann \`ai-tell-audit\`. Du musst sie nicht mehr mit dem Skill-Werkzeug laden.\n\n${scan}\n\nWas in dieser App anders gilt als in den Skills: Die Skills raten, bei fehlenden Angaben nachzufragen. Hier schreibst du mit Lücken („[Zahl ergänzen]“) weiter und fragst höchstens in einem Satz. Das Ergebnis trägst du in die Datei ein (oder gibst es als Entwurf aus), im Chat steht nur ein Satz dazu. Einen Prüfbericht zeigst du nur, wenn die Person ihn will. Was die Schulvorgaben und die übrigen Regeln unten verlangen, geht den Skills vor.\n\n`;
   return kopf + teile.join('\n\n');
 }
 
-// Arbeitsregeln für einen Anbieter, mit der Schreibanleitung ganz vorn. Claude und Antigravity bekommen den vollständigen
-// Wortlaut der vier Schreib-Skills. DeepSeek folgt langen Prosa-Regeln weniger zuverlässig und bekommt deshalb eine kurze,
-// eigene Anleitung mit Werkzeugen (Stimmenprofil, Scan, Umschreib-Anleitungen, siehe server/stimme.js).
-// Beides steht im Systemprompt: Die KI liest es vor allem anderen und muss nichts laden.
+// Arbeitsregeln für einen Anbieter, mit dem Wortlaut der drei Schreib-Skills ganz vorn. Er steht im Systemprompt:
+// Die KI liest ihn vor allem anderen und muss nichts laden. Die Varianten unterscheiden sich nur darin, wie der Scan läuft.
 async function regelnText(variante = 'standard') {
   const regeln = regelnVariante(await fsp.readFile(path.join(RES, 'regeln.md'), 'utf8'), variante);
   if (!regeln.includes(schreibskills.PLATZHALTER)) return regeln;
-  const block = variante === 'deepseek' ? (await fsp.readFile(path.join(RES, 'deepseek', 'schreiben.md'), 'utf8')).trim() : await skillsBlock();
-  return regeln.replace(schreibskills.PLATZHALTER, block);
+  const block = await skillsBlock(variante);
+  return regeln.replace(schreibskills.PLATZHALTER, () => block);
 }
 
 // Arbeitsdateien (abgabe/, 01_ bis 08_) dürfen nie schreibgeschützt sein: Ältere Versionen haben beim Einsortieren den Schreibschutz der
@@ -157,7 +160,7 @@ async function arbeitsdateienFreigeben(ws) {
 async function syncManagedFiles(ws) {
   const regeln = await regelnText();
   await writeManaged(path.join(internalDir(ws), 'regeln.md'), `<!-- ${MARKER} -->\n${regeln}`);
-  // Eigene Regeln für DeepSeek (kurze Anleitung mit Schreibwerkzeugen statt des Wortlauts der Skills).
+  // Eigene Regeln für DeepSeek (gleiche Skills, aber mit dem Scan als Werkzeug statt als Mango-Prüfung).
   await writeManaged(path.join(internalDir(ws), 'regeln-deepseek.md'), `<!-- ${MARKER} -->\n${await regelnText('deepseek')}`);
   // Antigravity lädt Regeln aus .agents/rules/ automatisch.
   await writeManaged(path.join(ws, '.agents', 'rules', 'mango-facharbeit.md'),

@@ -1,44 +1,42 @@
 'use strict';
-// Die Schreib-Skills (Paket „Huminizer GER V2“) und die Pflicht, sie bei jedem Text zu nutzen.
-// Ein Text braucht drei Schritte: Stimme klären, schreiben oder überarbeiten, prüfen.
+// Die Schreib-Skills (Paket „human-voice“, „humanize-rewrite“, „ai-tell-audit“) und die Pflicht, sie bei jedem Text zu nutzen.
+// Ein Text braucht zwei Schritte: schreiben bzw. umschreiben, dann prüfen. Den Scan des Prüf-Skills (ai_tell_scan.py)
+// führt Mango selbst aus (server/aitell.js); DeepSeek kann ihn zusätzlich als Werkzeug `ai_tell_scan` aufrufen.
+
+const SCAN_WERKZEUG = 'ai_tell_scan';
 
 const ANFORDERUNGEN = [
-  { id: 'stimme', skills: ['stimmenprofil'], text: '`stimmenprofil`' },
-  { id: 'schreiben', skills: ['natuerlich-schreiben', 'stilrevision'], text: '`natuerlich-schreiben` (neuer Text) oder `stilrevision` (vorhandener Text)' },
-  { id: 'pruefung', skills: ['textpruefung'], text: '`textpruefung`' },
+  { id: 'schreiben', skills: ['human-voice', 'humanize-rewrite'], text: '`human-voice` (neuer Text) oder `humanize-rewrite` (vorhandener Text)' },
+  { id: 'pruefung', skills: ['ai-tell-audit'], text: '`ai-tell-audit`' },
 ];
 
-const ALLE = ['natuerlich-schreiben', 'stilrevision', 'stimmenprofil', 'textpruefung'];
+// DeepSeek hat kein Terminal: Der Scan läuft dort über das Werkzeug und muss wirklich aufgerufen werden.
+const DEEPSEEK_ANFORDERUNGEN = [
+  ...ANFORDERUNGEN,
+  { id: 'scan', skills: [SCAN_WERKZEUG], text: 'das Werkzeug `ai_tell_scan` mit dem fertigen Text' },
+];
 
-// Reihenfolge, in der die Skills in den Regeln stehen und angewendet werden: Stimme, schreiben bzw. überarbeiten, prüfen.
-const REIHENFOLGE = ['stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung'];
+const ALLE = ['human-voice', 'humanize-rewrite', 'ai-tell-audit'];
+
+// Reihenfolge, in der die Skills in den Regeln stehen und angewendet werden: schreiben, umschreiben, prüfen.
+const REIHENFOLGE = ['human-voice', 'humanize-rewrite', 'ai-tell-audit'];
 
 // Platzhalter in ressourcen/regeln.md und Überschrift des Abschnitts, der ihn ersetzt (daran erkennt die App,
 // dass der Wortlaut der Skills schon im Systemprompt steht).
 const PLATZHALTER = '<!-- MANGO:SCHREIB-SKILLS -->';
 const BLOCK_TITEL = '## Schreib-Skills: Wortlaut (zuerst lesen)';
-// Für DeepSeek steht statt der vier Skills die eigene Schreib-Anleitung mit Werkzeugen (ressourcen/deepseek/schreiben.md).
-const DEEPSEEK_TITEL = '## Schreib-Anleitung für DeepSeek (zuerst lesen)';
 
-// Frühere Skills: Die App entfernt sie aus bestehenden Arbeitsräumen, damit niemand sie mehr nutzt.
-const VERALTET = ['wissenschaftlich-schreiben', 'sprachpruefung'];
-
-// DeepSeek: Statt der Skills gelten Schreibwerkzeuge (server/stimme.js). Pflicht bei jedem Text sind dieselben drei Schritte.
-const DEEPSEEK_WERKZEUGE = ['voice_profile', 'voice_import', 'humanize_scan', 'humanize_rewrite', 'voice_score', 'voice_rewrite'];
-const DEEPSEEK_ANFORDERUNGEN = [
-  { id: 'stimme', skills: ['voice_profile', 'voice_import'], text: '`voice_profile` (gibt es kein Profil: `voice_import`)' },
-  { id: 'schreiben', skills: ['voice_rewrite', 'humanize_rewrite'], text: '`voice_rewrite` (mit Profil) oder `humanize_rewrite`' },
-  { id: 'pruefung', skills: ['humanize_scan'], text: '`humanize_scan`' },
-];
+// Frühere Skills: Die App entfernt sie aus bestehenden Arbeitsräumen (nur von der App verwaltete Kopien), damit niemand sie mehr nutzt.
+const VERALTET = ['wissenschaftlich-schreiben', 'sprachpruefung', 'stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung'];
 
 // Anforderungen, für die in `geladen` (Menge von Skill- bzw. Werkzeugnamen) noch nichts Passendes vorkommt.
 function fehlend(geladen, anbieter = '') {
   return (anbieter === 'deepseek' ? DEEPSEEK_ANFORDERUNGEN : ANFORDERUNGEN).filter((a) => !a.skills.some((s) => geladen.has(s)));
 }
 
-// Geladene Schreib-Skills bzw. genutzte Schreibwerkzeuge in fester Reihenfolge.
+// Geladene Schreib-Skills (bei DeepSeek zusätzlich das Scan-Werkzeug) in fester Reihenfolge.
 function geladene(geladen, anbieter = '') {
-  return (anbieter === 'deepseek' ? DEEPSEEK_WERKZEUGE : ALLE).filter((s) => geladen.has(s));
+  return [...ALLE, ...(anbieter === 'deepseek' ? [SCAN_WERKZEUG] : [])].filter((s) => geladen.has(s));
 }
 
-module.exports = { ANFORDERUNGEN, DEEPSEEK_ANFORDERUNGEN, DEEPSEEK_WERKZEUGE, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, DEEPSEEK_TITEL, VERALTET, fehlend, geladene };
+module.exports = { ANFORDERUNGEN, DEEPSEEK_ANFORDERUNGEN, SCAN_WERKZEUG, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, VERALTET, fehlend, geladene };

@@ -20,7 +20,7 @@ let server;
 let base;
 let token;
 
-const ALLE_SKILLS = ['natuerlich-schreiben', 'stilrevision', 'stimmenprofil', 'textpruefung'];
+const ALLE_SKILLS = ['human-voice', 'humanize-rewrite', 'ai-tell-audit'];
 const REGELN_DATEI = () => path.join(WS, '.facharbeit', 'regeln.md');
 // Regeln ohne den Wortlaut der Skills (wie bei einer Installation, in der er fehlt): Dann gilt der Notweg über das Skill-Werkzeug.
 // Gibt eine Funktion zurück, die die Regeln wiederherstellt.
@@ -127,12 +127,12 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(state.project.aufgaben.length, 27);
     assert.ok(fs.existsSync(path.join(WS, '00_vorgaben', 'anforderungen.md')));
     assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', 'quellenrecherche', 'SKILL.md')));
-    for (const s of ['stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung']) {
+    for (const s of ['human-voice', 'humanize-rewrite', 'ai-tell-audit']) {
       assert.ok(fs.existsSync(path.join(WS, '.agents', 'skills', s, 'SKILL.md')), `Schreib-Skill ${s} liegt im Arbeitsraum`);
       assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', s, 'SKILL.md')));
     }
-    assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', 'textpruefung', 'references', 'pruefraster.md')), 'Referenzen der Skills sind dabei');
-    for (const alt of ['wissenschaftlich-schreiben', 'sprachpruefung']) assert.ok(!fs.existsSync(path.join(WS, '.claude', 'skills', alt)), `alter Skill ${alt} ist nicht mehr da`);
+    assert.ok(fs.existsSync(path.join(WS, '.claude', 'skills', 'ai-tell-audit', 'scripts', 'ai_tell_scan.py')), 'das Scan-Skript liegt beim Prüf-Skill');
+    for (const alt of ['wissenschaftlich-schreiben', 'sprachpruefung', 'stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung']) assert.ok(!fs.existsSync(path.join(WS, '.claude', 'skills', alt)), `alter Skill ${alt} ist nicht mehr da`);
     assert.ok(fs.existsSync(path.join(WS, '.agents', 'rules', 'mango-facharbeit.md')));
     assert.ok(fs.existsSync(path.join(WS, 'FACHARBEIT.md')));
     assert.strictEqual(state.chats.length, 1);
@@ -380,7 +380,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(w.ok, 2);
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
     assert.strictEqual(calls.length, 2, 'ein Überarbeitungsdurchlauf');
-    assert.match(calls[0].input, /<schreibregeln>.*stimmenprofil.*natuerlich-schreiben.*textpruefung/);
+    assert.match(calls[0].input, /<schreibregeln>.*human-voice.*humanize-rewrite.*ai-tell-audit/);
     assert.ok(calls[1].args.includes('--resume'), 'Überarbeitung in derselben Sitzung');
     assert.match(calls[1].input, /„In der heutigen Zeit spielt Zeitmanagement eine entscheidende Rolle\.“ – Aufwärm-Einstieg/);
     assert.match(calls[1].input, /Suchhilfen, keine Urteile/, 'Treffer sind Prüfhinweise, der Assistent entscheidet');
@@ -396,18 +396,18 @@ test('Kompletter Ablauf', async (t) => {
     const m = (await send(chat.id, 'OHNESKILL LERNTAGEBUCH Ergänzung')).done.message;
     wiederherstellen();
     assert.strictEqual(m.stil.nachgeholt, true);
-    assert.deepStrictEqual(m.stil.skills, ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']);
+    assert.deepStrictEqual(m.stil.skills, ['human-voice', 'ai-tell-audit']);
     assert.strictEqual(m.stil.vollstaendig, true);
     assert.ok(m.activity.some((a) => /Schreib-Skills nachholen/.test(a.label)));
     const calls = fs.readFileSync(LOG, 'utf8').trim().split('\n').slice(vorher).map((l) => JSON.parse(l));
     assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
-    assert.match(calls[1].input, /Pflicht-Skills nicht geladen \(`stimmenprofil`, `natuerlich-schreiben` \(neuer Text\) oder `stilrevision` \(vorhandener Text\), `textpruefung`\)/);
+    assert.match(calls[1].input, /fehlt noch: `human-voice` \(neuer Text\) oder `humanize-rewrite` \(vorhandener Text\), `ai-tell-audit`\./);
     assert.match(calls[1].input, /aktuelle Absatznummern in \.facharbeit\/extrakte\/abgabe\//);
   });
 
   await t.test('Schreib-Skills: auch ein Entwurf im Chat braucht sie, fehlen sie, wird er neu geschrieben', async () => {
     const lese = () => fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    const skills = ['natuerlich-schreiben', 'stimmenprofil', 'textpruefung']; // so viele lädt die Attrappe nach
+    const skills = ['human-voice', 'ai-tell-audit']; // so viele lädt die Attrappe nach
     // Wortlaut im Kontext (Normalfall): ein Durchlauf, die Antwort bleibt, auch ohne dass die KI ein Werkzeug aufruft.
     let chat0 = await call('POST', '/api/chats');
     let v0 = lese().length;
@@ -436,7 +436,7 @@ test('Kompletter Ablauf', async (t) => {
     const calls = lese().slice(vorher);
     assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
     assert.ok(calls[1].args.includes('--resume'), 'in derselben Sitzung');
-    assert.match(calls[1].input, /^Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden \(`stimmenprofil`, `natuerlich-schreiben` \(neuer Text\) oder `stilrevision` \(vorhandener Text\), `textpruefung`\)/);
+    assert.match(calls[1].input, /^Du hast in deiner Antwort einen Text geschrieben, ohne dass folgendes erfüllt war: `human-voice` \(neuer Text\) oder `humanize-rewrite` \(vorhandener Text\), `ai-tell-audit`\./);
     // Kurze Chat-Antworten sind kein Entwurf: keine Prüfung, kein zweiter Durchlauf.
     chat = await call('POST', '/api/chats');
     vorher = lese().length;
@@ -444,6 +444,23 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(m.stil, undefined);
     assert.strictEqual(lese().length - vorher, 1);
     } finally { wiederherstellen(); }
+  });
+
+  await t.test('Scan: Ein Entwurf im Chat voller Muster wird neu geschrieben, auch wenn die Skills gelesen wurden', async () => {
+    const lese = () => fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const chat = await call('POST', '/api/chats');
+    const vorher = lese().length;
+    const m = (await send(chat.id, 'Schreib mir CHATKI einen Absatz über Nachhaltigkeit')).done.message;
+    assert.match(m.text, /^Neue Fassung: /, 'die zweite Fassung ersetzt die erste');
+    assert.ok(!/heutigen Welt/.test(m.text));
+    assert.deepStrictEqual(m.stil, { gefunden: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false, chat: true }, 'Skills waren da, also nicht „nachgeholt“');
+    assert.ok(m.activity.some((a) => a.label === 'Scan: Text überarbeiten'));
+    const calls = lese().slice(vorher);
+    assert.strictEqual(calls.length, 2, 'ein Durchlauf zur Überarbeitung');
+    assert.ok(calls[1].args.includes('--resume'), 'in derselben Sitzung');
+    assert.match(calls[1].input, /^Du hast in deiner Antwort einen Text geschrieben\. Der Scan von `ai-tell-audit`[\s\S]*findet darin noch Muster\./);
+    assert.match(calls[1].input, /Fundstellen[\s\S]*„Zusammenfassend lässt sich sagen[^“]*“ – Schlussfloskel/);
+    assert.ok(!/ohne dass folgendes erfüllt war/.test(calls[1].input), 'nichts nachzuholen');
   });
 
   await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {

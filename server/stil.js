@@ -1,88 +1,66 @@
 'use strict';
-// Automatische Sprachprüfung zum Skill `textpruefung`.
-// Prüft Texte, die der Assistent in Dateien schreibt, auf Chatbot-Reste, Floskeln, Stilwörter und lange Sätze.
-// Eine Heuristik: Sie findet Stellen zum Prüfen, kein Urteil über die Autorschaft. Wortlisten sind nur Suchhilfen
-// (so auch die Skills): Nur Chatbot-Reste und falsche Anführungszeichen müssen immer geändert werden, bei allen
-// anderen Treffern entscheidet der Assistent im Zusammenhang des Textes.
+// Automatische Sprachprüfung zum Skill `ai-tell-audit`: Mango lässt nach dem Schreiben den Scan des Skills laufen
+// (server/aitell.js, Nachbau von ai_tell_scan.py) und gibt die Fundstellen mit dem Satz an die KI zurück.
+// Eine Heuristik: Sie findet Stellen zum Prüfen, kein Urteil über die Autorschaft. Nur Chatbot-Reste, Geviertstriche
+// und falsche Anführungszeichen müssen immer geändert werden; über alle anderen Treffer entscheidet die KI im Zusammenhang.
+const aitell = require('./aitell');
 
-const MAX_WOERTER = 25;
+// Bezeichnungen des Scans auf Deutsch (so stehen sie in der Rückmeldung an die KI und in der App).
+const GRUND = {
+  "negative parallelism: 'not just X but Y'": '„nicht nur X, sondern Y“-Muster',
+  "negative parallelism: 'it's not X, it's Y'": '„nicht X, sondern Y“-Muster',
+  "negative parallelism: 'isn't X. It's Y'": '„nicht X, sondern Y“-Muster',
+  "DE: 'nicht nur ... sondern auch'": '„nicht nur …, sondern auch“',
+  "DE: 'es geht nicht um X, es geht um Y'": '„es geht nicht um X, sondern um Y“',
+  "participle tail (', highlighting ...')": 'Anhängsel am Satzende („…, was unterstreicht“)',
+  'significance inflation': 'aufgeblähte Bedeutung',
+  'DE significance inflation': 'aufgeblähte Bedeutung',
+  "'important to note' hedge": 'Absicherungsfloskel',
+  'warm-up opener / signposting': 'Aufwärm-Einstieg',
+  'summary / moral ending': 'Schlussfloskel',
+  'chatbot leftovers': 'Chatbot-Rest',
+  'vague attribution': 'vager Beleg ohne Quelle',
+  'colon / question reveal': 'Enthüllungstrick („Das Ergebnis:“)',
+  "false range 'from X to Y'": 'falsche Spannweite („von … bis …“)',
+  'stock transition': 'Floskel-Übergang',
+  "'This + verb' sentence opener": 'Satzanfang „Dies zeigt/unterstreicht …“',
+};
 
-// Stilwörter: einzeln unproblematisch, gehäuft auffällig.
-const STIL_DE = ['maßgeblich', 'vielfältig', 'nahtlos', 'ganzheitlich', 'facettenreich', 'Meilenstein', 'unterstreicht', 'unterstreichen',
-  'Bereicherung', 'Mehrwert', 'essenziell', 'essentiell', 'zudem', 'somit', 'letztendlich', 'gewährleisten', 'gewährleistet', 'innovativ',
-  'zukunftsweisend', 'wegweisend'];
-const STIL_EN = ['delve', 'tapestry', 'testament', 'intricate', 'meticulous', 'pivotal', 'realm', 'showcase', 'underscore', 'crucial',
-  'foster', 'leverage', 'seamless', 'holistic', 'multifaceted', 'nuanced', 'elevate', 'empower', 'unlock', 'harness', 'embark', 'bustling',
-  'vibrant', 'garner', 'interplay', 'streamline', 'cutting-edge', 'game-changer', 'paramount', 'noteworthy', 'invaluable', 'ever-evolving',
-  'synergy', 'spearhead', 'bolster', 'groundbreaking', 'transformative', 'furthermore', 'moreover', 'additionally', 'notably'];
+// Deutsche Chatbot-Reste, die das Skript nicht kennt: müssen immer geändert werden.
+const CHATBOT_DE = /\b(?:Gerne!|Sehr gerne!|Gute Frage|Lass mich wissen|Sag Bescheid, wenn)/i;
 
-// Floskeln und Strukturen: Prüfhinweise. Ein dritter Eintrag `true` markiert Treffer, die immer geändert werden müssen.
-const MUSTER = [
-  [/\bin der heutigen (?:Zeit|Welt|Gesellschaft)\b/i, 'Aufwärm-Einstieg'],
-  [/\bin einer (?:Welt|Zeit), in der\b/i, 'Aufwärm-Einstieg'],
-  [/\bdarüber hinaus\b/i, 'Floskel-Übergang'],
-  [/\bdes Weiteren\b/i, 'Floskel-Übergang'],
-  [/\bin diesem Zusammenhang\b/i, 'Floskel-Übergang'],
-  [/\bes ist (?:wichtig|erwähnenswert) zu (?:beachten|erwähnen|betonen)\b/i, 'Absicherungsfloskel'],
-  [/\bes sei (?:darauf hingewiesen|erwähnt)\b/i, 'Absicherungsfloskel'],
-  [/\bzusammenfassend lässt sich (?:sagen|festhalten)\b/i, 'Schlussfloskel'],
-  [/\bspielt(?:\s+\S+){0,3}\s+eine (?:entscheidende|zentrale|wichtige|wesentliche|bedeutende) Rolle\b/i, 'aufgeblähte Bedeutung'],
-  [/\b(?:ist|sind) von (?:zentraler|entscheidender|großer) Bedeutung\b/i, 'aufgeblähte Bedeutung'],
-  [/\bein (?:Zeugnis|Beweis) für\b/i, 'aufgeblähte Bedeutung'],
-  [/\bnicht zu unterschätzen\b/i, 'aufgeblähte Bedeutung'],
-  [/\bnicht nur\b[^.!?]{1,80}\bsondern auch\b/i, '„nicht nur …, sondern auch“'],
-  [/,\s*was (?:die|den|das)? ?\w+ (?:unterstreicht|verdeutlicht|hervorhebt)\b/i, 'Anhängsel'],
-  [/\b(?:Experten|Fachleute|Studien|Forscher) (?:sagen|zeigen|belegen|meinen)\b(?![^.!?]*\((?:Vgl\.\s*)?[A-ZÄÖÜ][^)]*\d{4})/i, 'vager Beleg ohne Kurzbeleg'],
-  [/\btauchen wir ein\b|\blass(?:t)? uns eintauchen\b/i, 'Wegweiser-Floskel'],
-  [/\b(?:Gerne!|Ich hoffe, (?:das|dies) hilft|Lass mich wissen|Gute Frage)/i, 'Chatbot-Rest', true],
-  [/\[(?:Dein|Ihr) Name\]/i, 'Chatbot-Rest', true],
-  [/\bin today's (?:world|digital age)\b|\bit is important to note\b|\bin conclusion\b/i, 'Floskel (Englisch)'],
-];
+// Weitere deutsche Muster, die das Skript nicht erfasst (Wörter zwischen „spielt“ und „eine Rolle“).
+const BEDEUTUNG_DE = /\bspielt(?:\s+\S+){1,3}\s+eine (?:entscheidende|zentrale|wichtige|wesentliche|bedeutende) Rolle\b/gi;
 
-const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const STIL_DE_RE = new RegExp(`(?<![\\wäöüß])(${STIL_DE.map(esc).join('|')})(?![\\wäöüß])`, 'gi');
-const STIL_EN_RE = new RegExp(`\\b(${STIL_EN.map(esc).join('|')})\\w*\\b`, 'gi');
-
-const ABK = /(?:^|[\s(])(?:Vgl|vgl|S|bzw|ca|Abb|Tab|Nr|Hrsg|Aufl|Kap|usw|etc|Dr|Prof|z\. ?B|u\. ?a|d\. ?h|o\. ?J|ebd)\.$/;
-
+// Deutsch ist die Voreinstellung; nur ein Text mit mehr englischen als deutschen Funktionswörtern gilt als englisch.
 function englisch(text) {
   const en = (text.match(/\b(the|and|of|is|are|with)\b/gi) || []).length;
   const de = (text.match(/\b(der|die|das|und|ist|sind|mit)\b/gi) || []).length;
   return en > de;
 }
 
-// Sätze ohne direkte Zitate „…“ und ohne Markdown-Zeichen.
-function saetze(text) {
-  const clean = String(text)
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/„[^“]{0,400}“\s*(\([^)]*\))?/g, ' Zitat ')
-    .replace(/^\s*#{1,6}\s.*$/gm, ' ')
-    .replace(/^\s*\[KI-Entwurf[^\]]*\]\s*$/gm, ' ')
-    .replace(/[*_`>|]/g, ' ');
-  const out = [];
-  for (const block of clean.split(/\n\s*\n|\n(?=\s*(?:[-•]|\d+[.)])\s)/)) {
-    const parts = block.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+(?=[A-ZÄÖÜ„"(])/);
-    // Abkürzungen („Vgl.“, „S.“, „z. B.“) und offene Klammern beenden keinen Satz.
-    const merged = [];
-    for (const p of parts) {
-      const prev = merged[merged.length - 1];
-      const offen = prev && (prev.match(/\(/g) || []).length > (prev.match(/\)/g) || []).length;
-      if (prev && (ABK.test(prev) || offen)) merged[merged.length - 1] = `${prev} ${p}`;
-      else merged.push(p);
-    }
-    for (const p of merged) if (p.trim()) out.push(p.trim());
-  }
-  return out;
-}
+// Ein Kurzbeleg im Satz (Autor Jahr) macht „Studien zeigen“ zu einem belegten Satz.
+const KURZBELEG = /\((?:Vgl\.\s*)?[A-ZÄÖÜ][^)]*\d{4}/;
 
 function kurz(s, max = 140) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-// Liefert gefundene Stellen: [{ satz, grund, hart? }]. Höchstens eine Meldung je Satz und Grund.
-// `hart`: muss geändert werden; alle anderen Stellen sind Prüfhinweise.
-function pruefen(text) {
-  const raw = String(text || '');
+// Text für den Scan: ohne Kommentare, KI-Vermerk und Überschriften; direkte Zitate „…“ zählen nicht als eigene Sprache.
+function bereinigen(text) {
+  return String(text || '')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/^\s*\[KI-Entwurf[^\]]*\]\s*$/gm, '')
+    .replace(/„[^“]{0,400}“\s*(\([^)]*\))?/g, ' Zitat ')
+    .replace(/^\s*#{1,6}\s.*$/gm, '');
+}
+
+// Auswertung eines Textes: { stellen: [{ satz, grund, hart? }], urteil, schwer }.
+// `schwer`: lohnt eine Überarbeitung (harte Treffer, mindestens zwei Stellen (bei längeren Texten eine je 100 Wörter) oder bei Texten ab 40 Wörtern das Urteil „reads as AI“ des Scans).
+// Stellen ohne `satz` betreffen den ganzen Text (Rhythmus).
+function bewerten(text) {
+  const t = bereinigen(text);
+  const s = aitell.scan(t);
   const stellen = [];
   const seen = new Set();
   const add = (satz, grund, hart = false) => {
@@ -91,29 +69,45 @@ function pruefen(text) {
     seen.add(key);
     stellen.push(hart ? { satz: kurz(satz), grund, hart: true } : { satz: kurz(satz), grund });
   };
-  const list = saetze(raw);
-  const woerter = list.reduce((n, s) => n + s.split(/\s+/).length, 0);
-  const istEn = englisch(raw);
 
-  for (const s of list) {
-    for (const [re, grund, hart] of MUSTER) if (re.test(s)) add(s, grund, !!hart);
-    if (s.includes('—')) add(s, 'Geviertstrich (—)');
-    if (!istEn && /["“”]/.test(s) && !/[„]/.test(s)) add(s, 'englische Anführungszeichen statt „…“', true);
-    const n = s.split(/\s+/).filter((w) => /[\wäöüß]/i.test(w)).length;
-    if (n > MAX_WOERTER) add(s, `Satz zu lang (${n} Wörter) – teilen`);
+  // Musterfunde. Stilwörter zählen erst gehäuft (mindestens zwei, bzw. mehr als eins je 150 Wörter): Eines ist unproblematisch.
+  const stil = s.hits.filter((h) => h.label === 'style word');
+  const stilMeldet = stil.length >= Math.max(2, Math.ceil(s.nWords / 150));
+  for (const h of s.hits) {
+    if (h.label === 'style word') { if (stilMeldet) add(aitell.satzUm(t, h.index), `Stilwort „${h.text}“`); continue; }
+    const satz = aitell.satzUm(t, h.index);
+    if (h.label === 'vague attribution' && KURZBELEG.test(satz)) continue;
+    add(satz, GRUND[h.label] || h.label, h.hart);
   }
 
-  // Stilwörter: gehäuft (mindestens zwei, bzw. mehr als eins je 150 Wörter).
-  const stil = [];
-  for (const s of list) {
-    const re = istEn ? STIL_EN_RE : STIL_DE_RE;
-    re.lastIndex = 0;
-    for (const m of s.matchAll(re)) stil.push({ s, wort: m[1] });
+  for (const m of t.matchAll(new RegExp(CHATBOT_DE.source, 'gi'))) add(aitell.satzUm(t, m.index), 'Chatbot-Rest', true);
+
+  for (const m of t.matchAll(BEDEUTUNG_DE)) add(aitell.satzUm(t, m.index), 'aufgeblähte Bedeutung');
+
+  // Form: Geviertstriche, falsche Anführungszeichen, fette Etiketten, Emojis.
+  const deutsch = !englisch(t);
+  for (const m of t.matchAll(/—/g)) add(aitell.satzUm(t, m.index), 'Geviertstrich (—): Komma, Punkt, Doppelpunkt oder Klammer', true);
+  if (deutsch) {
+    for (const m of t.matchAll(/["“”]/g)) add(aitell.satzUm(t, m.index), 'englische Anführungszeichen statt „…“', true);
   }
-  if (stil.length >= Math.max(2, Math.ceil(woerter / 150))) {
-    for (const x of stil) add(x.s, `Stilwort „${x.wort}“`);
-  }
-  return stellen;
+  for (const m of t.matchAll(/^\s*(?:[-*•]|\d+\.)\s+\*\*[^*]+:?\*\*:?.*$/gm)) add(m[0].trim(), 'Stichpunkt mit fettem Etikett');
+  for (const m of t.matchAll(/[\u{1F300}-\u{1FAFF}☀-➿]/gu)) add(aitell.satzUm(t, m.index), 'Emoji');
+
+  // Dreierreihen: erst gehäuft ein Hinweis.
+  if (s.triplets.length >= 3) for (const x of s.triplets.slice(0, 4)) add(x, 'Dreierreihe: zwei, vier oder ein Beispiel statt drei');
+
+  // Rhythmus des ganzen Textes.
+  if (s.flach) add('', `Satzlängen zu gleichförmig (Variation ${s.cvSaetze.toFixed(2)}, gut ab 0,40): kurze und lange Sätze mischen`);
+  if (s.absaetzeUngleich) add('', 'Absätze alle ähnlich lang: ungleiche Längen, auch einzeilige Absätze');
+  for (const [wort, n] of s.repStarts) add('', `${n} Sätze beginnen mit „${wort}“: Satzanfänge ändern`);
+
+  const schwer = stellen.some((x) => x.hart) || stellen.length >= Math.max(2, Math.ceil(s.nWords / 100)) || (s.nWords >= 40 && s.urteil === 'reads as AI, rewrite rather than patch');
+  return { stellen, urteil: s.urteil, schwer };
+}
+
+// Liefert gefundene Stellen: [{ satz, grund, hart? }].
+function pruefen(text) {
+  return bewerten(text).stellen;
 }
 
 // Text aus den Änderungen eines ```word-Blocks (nur der neue Text).
@@ -139,36 +133,55 @@ function neueZeilen(vorher, nachher) {
   return String(nachher || '').split('\n').filter((l) => l.trim() && !alt.has(l.trim())).join('\n');
 }
 
-// Nachricht an den Assistenten mit den gefundenen Stellen (für den Überarbeitungsdurchlauf).
-// `fehlendeSkills`: Beschreibungen der Pflicht-Skills, die nicht geladen wurden (siehe schreibskills.js).
-function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = [], anbieter = '' } = {}) {
+// Anweisung für fehlende Pflichtschritte, je nach Anbieter und danach, was fehlt (Skills und/oder das Scan-Werkzeug).
+function schritte(fehlend, anbieter) {
+  const skills = fehlend.some((x) => !x.includes('ai_tell_scan'));
+  const scan = fehlend.some((x) => x.includes('ai_tell_scan'));
+  const teile = [];
+  if (skills) teile.push(`${anbieter === 'deepseek' ? 'Lies' : 'Lade'} dafür \`human-voice\` (neuer Text) bzw. \`humanize-rewrite\` (vorhandener Text) und \`ai-tell-audit\` mit dem Skill-Werkzeug.`);
+  if (scan) teile.push('Ruf `ai_tell_scan` mit dem fertigen Text auf und behebe die Befunde.');
+  return teile.join(' ');
+}
+
+function stellenZeilen(funde, extrakte) {
   const L = [];
-  if (fehlendeSkills.length && anbieter === 'deepseek') {
-    L.push(`Du hast für den eben eingetragenen Text die Pflicht-Werkzeuge nicht aufgerufen (${fehlendeSkills.join(', ')}). Rufe sie jetzt auf, in dieser Reihenfolge: \`voice_profile\` (gibt es kein Profil: \`voice_import\` mit eigenen Texten der Person), dann \`voice_rewrite\` bzw. \`humanize_rewrite\` mit dem Text, dann \`humanize_scan\` mit dem überarbeiteten Text. Überarbeite den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} nach der Anleitung direkt in der Datei: Stimme der Person, Fakten und Unsicherheit erhalten, nichts Neues erfinden, kurz und einfach. Ist der Text schon passend, lass ihn unverändert. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
-  } else if (fehlendeSkills.length) {
-    L.push(`Du hast für den eben eingetragenen Text die Pflicht-Skills nicht geladen (${fehlendeSkills.join(', ')}). Lade sie jetzt mit dem Skill-Werkzeug, in dieser Reihenfolge: \`stimmenprofil\`, dann \`natuerlich-schreiben\` bzw. \`stilrevision\`, dann \`textpruefung\`. Überarbeite den Text in ${dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ')} mit ihnen direkt in der Datei: Stimme der Person, Fakten und Unsicherheit erhalten, nichts Neues erfinden, kurz und einfach. Ist der Text schon passend, lass ihn unverändert. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
-  }
-  if (funde.length) {
-    L.push(fehlendeSkills.length
-      ? 'Die automatische Prüfung hat außerdem diese Stellen gefunden. Sie sind Suchhilfen: Stellen mit „(ändern)“ änderst du immer, bei den übrigen änderst du nur, wenn sie in diesem Text schlechter sind als eine Alternative.'
-      : 'Automatische Sprachprüfung (Skill `textpruefung`) deines gerade eingetragenen Textes. Die Treffer sind Suchhilfen, keine Urteile: Stellen mit „(ändern)“ änderst du immer. Die übrigen prüfst du im Zusammenhang und änderst sie nur, wenn sie in diesem Text schlechter sind als eine Alternative (kleinster Eingriff, Skill `stilrevision`). Eine passende Stelle bleibt, wie sie ist. Keine neuen Inhalte, Stimme der Person und Fakten erhalten. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.');
-  }
   for (const f of funde) {
     const hinweis = extrakte[f.datei] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[f.datei]})`
       : /\.(pdf|pptx|xlsx)$/i.test(f.datei) ? ' (Block `erstellen` mit "ersetzen": true und dem vollständigen überarbeiteten Text)' : ' (Edit)';
     L.push('', `${f.datei}${hinweis}:`);
-    for (const s of f.stellen.slice(0, 12)) L.push(`- „${s.satz}“ – ${s.grund}${s.hart ? ' (ändern)' : ''}`);
+    for (const s of f.stellen.slice(0, 12)) L.push(s.satz ? `- „${s.satz}“ – ${s.grund}${s.hart ? ' (ändern)' : ''}` : `- Ganzer Text – ${s.grund}`);
+  }
+  return L;
+}
+
+// Nachricht an den Assistenten mit den gefundenen Stellen (für den Überarbeitungsdurchlauf).
+// `fehlendeSkills`: Beschreibungen der Pflichtschritte, die nicht erfüllt wurden (siehe schreibskills.js).
+function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = [], anbieter = '' } = {}) {
+  const L = [];
+  const orte = dateien.map((d) => `\`${d}\`${extrakte[d] ? ` (Word: Block \`word\`, aktuelle Absatznummern in ${extrakte[d]})` : ''}`).join(', ');
+  if (fehlendeSkills.length) {
+    L.push(`Für den eben eingetragenen Text fehlt noch: ${fehlendeSkills.join(', ')}. ${schritte(fehlendeSkills, anbieter)} Überarbeite den Text in ${orte} danach direkt in der Datei: nach \`humanize-rewrite\` (Inhalt herausziehen, Form neu bauen, nicht Satz für Satz ändern), Stimme der Person, Fakten und Unsicherheit erhalten, nichts Neues erfinden, kurz und einfach. Ist der Text schon passend, lass ihn unverändert. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.`);
+  }
+  if (funde.length) {
+    L.push(fehlendeSkills.length
+      ? 'Der Scan von `ai-tell-audit` (Mango hat ihn für dich ausgeführt) hat außerdem diese Stellen gefunden. Sie sind Suchhilfen: Stellen mit „(ändern)“ änderst du immer, die übrigen nur, wenn sie in diesem Text schlechter sind als eine Alternative.'
+      : 'Mango hat den Scan von `ai-tell-audit` auf deinen gerade eingetragenen Text angewendet. Die Treffer sind Suchhilfen, keine Urteile: Stellen mit „(ändern)“ änderst du immer. Die übrigen prüfst du im Zusammenhang und änderst sie nur, wenn sie in diesem Text schlechter sind als eine Alternative. Stellen, die den ganzen Text betreffen (Rhythmus, Absätze), löst du durch Umbauen, nicht durch Austauschen einzelner Wörter (`humanize-rewrite`). Keine neuen Inhalte, Stimme der Person und Fakten erhalten. Antworte danach nur mit „Überarbeitet.“ und dem nötigen Block.');
+    L.push(...stellenZeilen(funde, extrakte));
   }
   return L.join('\n');
 }
 
-// Nachricht, wenn der Assistent einen Text im Chat geschrieben hat, ohne die Pflicht-Skills zu laden:
-// Er soll sie laden und den Text komplett neu ausgeben (die App ersetzt die erste Fassung).
-function chatNachholenPrompt(fehlendeSkills, anbieter = '') {
-  if (anbieter === 'deepseek') {
-    return `Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Werkzeuge aufzurufen (${fehlendeSkills.join(', ')}). Rufe sie jetzt auf, in dieser Reihenfolge: \`voice_profile\` (gibt es kein Profil: \`voice_import\` mit eigenen Texten der Person), dann \`voice_rewrite\` bzw. \`humanize_rewrite\` mit deinem Entwurf, dann \`humanize_scan\` mit dem überarbeiteten Text. Schreib den Text nach der Anleitung um: Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Behebe die Befunde des Scans. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.`;
+// Nachricht, wenn der Assistent einen Text im Chat geschrieben hat, ohne die Pflichtschritte zu erfüllen oder mit auffälligem Scan:
+// Er soll sie nachholen und den Text komplett neu ausgeben (die App ersetzt die erste Fassung).
+function chatNachholenPrompt(fehlendeSkills, anbieter = '', stellen = []) {
+  const teile = [];
+  if (fehlendeSkills.length) teile.push(`Du hast in deiner Antwort einen Text geschrieben, ohne dass folgendes erfüllt war: ${fehlendeSkills.join(', ')}. ${schritte(fehlendeSkills, anbieter)}`);
+  else teile.push('Du hast in deiner Antwort einen Text geschrieben. Der Scan von `ai-tell-audit` (Mango hat ihn für dich ausgeführt) findet darin noch Muster.');
+  if (stellen.length) {
+    teile.push(`Fundstellen (Suchhilfen; „(ändern)“ immer ändern):\n${stellen.slice(0, 12).map((s) => (s.satz ? `- „${s.satz}“ – ${s.grund}${s.hart ? ' (ändern)' : ''}` : `- Ganzer Text – ${s.grund}`)).join('\n')}`);
   }
-  return `Du hast in deiner Antwort einen Text geschrieben, ohne die Pflicht-Skills zu laden (${fehlendeSkills.join(', ')}). Lade jetzt alle drei Schritte mit dem Skill-Werkzeug, in dieser Reihenfolge: \`stimmenprofil\`, dann \`natuerlich-schreiben\` bzw. \`stilrevision\`, dann \`textpruefung\`. Schreib den Text mit ihnen neu bzw. überarbeite ihn: Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Prüfe ihn danach mit \`textpruefung\` und behebe die Befunde. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.`;
+  teile.push('Schreib den Text mit `humanize-rewrite` neu bzw. überarbeite ihn: Inhalt herausziehen, Form neu bauen, Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Prüfe ihn danach mit `ai-tell-audit` und behebe die Befunde. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.');
+  return teile.join('\n\n');
 }
 
-module.exports = { pruefen, textAusWord, neueZeilen, korrekturPrompt, chatNachholenPrompt, saetze, MAX_WOERTER };
+module.exports = { pruefen, bewerten, textAusWord, neueZeilen, korrekturPrompt, chatNachholenPrompt };
