@@ -4,6 +4,7 @@
 const { formatDateDE, parseLocalDate, daysUntil, sha1, truncate, humanSize } = require('./util');
 const { STATUS_INFO, PHASEN, AUFGABEN_BY_ID, STATUS } = require('./aufgaben');
 const { kindLabel } = require('./extract');
+const schreibskills = require('./schreibskills');
 
 const MARKER = 'mango-facharbeit:verwaltet';
 
@@ -215,7 +216,7 @@ function historyTranscript(messages, maxChars = 24000) {
   return out.join('\n\n');
 }
 
-// anbieter: 'deepseek' erinnert zusätzlich an das Scan-Werkzeug (die anderen Anbieter haben kein Terminal, Mango scannt selbst).
+// anbieter mit Scan-Werkzeug (DeepSeek, OpenCode Go) erinnert zusätzlich an das Scan-Werkzeug (die anderen Anbieter haben kein Terminal, Mango scannt selbst).
 function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false, skillsImKontext = false, anbieter = '' }) {
   const parts = [];
   parts.push(contextUnchanged ? '<projektkontext>unverändert seit der letzten Nachricht</projektkontext>' : context);
@@ -225,7 +226,7 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   if (attachments.length) {
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
   }
-  const scanSchritt = anbieter === 'deepseek' ? ' Das Werkzeug `ai_tell_scan` mit dem fertigen Text aufrufen und die Befunde beheben.' : '';
+  const scanSchritt = schreibskills.hatScanWerkzeug(anbieter) ? ' Das Werkzeug `ai_tell_scan` mit dem fertigen Text aufrufen und die Befunde beheben.' : '';
   if (schreibaufgabe && skillsImKontext) {
     parts.push(`<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat). Der Wortlaut der Schreib-Skills steht am Anfang deiner Regeln: 1. \`human-voice\` (neuer Text) oder \`humanize-rewrite\` (vorhandener Text): schreiben bzw. umbauen, in der Stimme der Person, kurz und einfach, nichts erfinden. 2. \`ai-tell-audit\`: den fertigen Text prüfen und Befunde beheben.${scanSchritt} 3. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>`);
   } else if (schreibaufgabe) {

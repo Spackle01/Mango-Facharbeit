@@ -209,7 +209,7 @@ test('Einstellungen: automatische Wahl überschreibt keine eigene Wahl', async (
     let st = new AppStore();
     await st.load();
     assert.strictEqual(st.settings.provider, 'claude');
-    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '' });
+    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '', opencodego: '' });
     assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt);
     await st.updateSettings({ provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } }, { auto: true });
     assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt, 'automatisch heißt nicht gewählt');

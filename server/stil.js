@@ -4,6 +4,7 @@
 // Eine Heuristik: Sie findet Stellen zum Prüfen, kein Urteil über die Autorschaft. Nur Chatbot-Reste, Geviertstriche
 // und falsche Anführungszeichen müssen immer geändert werden; über alle anderen Treffer entscheidet die KI im Zusammenhang.
 const aitell = require('./aitell');
+const schreibskills = require('./schreibskills');
 
 // Bezeichnungen des Scans auf Deutsch (so stehen sie in der Rückmeldung an die KI und in der App).
 const GRUND = {
@@ -138,7 +139,7 @@ function schritte(fehlend, anbieter) {
   const skills = fehlend.some((x) => !x.includes('ai_tell_scan'));
   const scan = fehlend.some((x) => x.includes('ai_tell_scan'));
   const teile = [];
-  if (skills) teile.push(`${anbieter === 'deepseek' ? 'Lies' : 'Lade'} dafür \`human-voice\` (neuer Text) bzw. \`humanize-rewrite\` (vorhandener Text) und \`ai-tell-audit\` mit dem Skill-Werkzeug.`);
+  if (skills) teile.push(`${schreibskills.hatScanWerkzeug(anbieter) ? 'Lies' : 'Lade'} dafür \`human-voice\` (neuer Text) bzw. \`humanize-rewrite\` (vorhandener Text) und \`ai-tell-audit\` mit dem Skill-Werkzeug.`);
   if (scan) teile.push('Ruf `ai_tell_scan` mit dem fertigen Text auf und behebe die Befunde.');
   return teile.join(' ');
 }

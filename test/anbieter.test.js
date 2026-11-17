@@ -28,7 +28,8 @@ async function starte(name, programme, env = {}) {
     fs.symlinkSync(process.execPath, path.join(bin, 'node'));
     for (const p of programme) fs.symlinkSync(path.join(FIXTURES, p), path.join(bin, p));
   }
-  const port = 5200 + Math.floor(Math.random() * 400);
+  // Eindeutiger Port je Server dieser Datei (Zufallsports stießen gelegentlich zusammen und ließen Tests scheitern).
+  const port = 5200 + servers.length * 7 + (process.pid % 7);
   const proc = spawn(process.execPath, [path.join(ROOT, 'server/index.js'), '--no-open', '--port', String(port)], {
     env: { ...process.env, HOME: home, USERPROFILE: home, MANGO_DATA_DIR: path.join(dir, 'data'), PATH: bin, ANTHROPIC_API_KEY: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -108,7 +109,7 @@ test('Nur Antigravity installiert: App wechselt zu Antigravity mit dem besten Ge
 test('Kein Anbieter installiert: Hinweise mit Anleitung und Installationsbefehl', { skip: SYSTEMWEIT && 'CLI systemweit installiert' }, async () => {
   const srv = await starte('keiner', []);
   let s = await fertig(srv.call);
-  assert.deepStrictEqual(s.providers.map((p) => p.status), ['nicht_installiert', 'nicht_installiert', 'anmeldung_noetig'], 'DeepSeek wartet auf den Schlüssel');
+  assert.deepStrictEqual(s.providers.map((p) => p.status), ['nicht_installiert', 'nicht_installiert', 'anmeldung_noetig', 'anmeldung_noetig'], 'DeepSeek und OpenCode Go warten auf den Schlüssel');
   assert.strictEqual(s.settings.provider, 'claude', 'Voreinstellung bleibt');
   const [claude, agy] = s.providers;
   assert.strictEqual(claude.hint.link, 'https://code.claude.com/docs/en/setup');
@@ -231,6 +232,82 @@ test('Nur DeepSeek: Ruft die KI den Scan nicht auf, holt die App ihn nach', asyn
   }
 });
 
+test('OpenCode Go: Schlüssel verbinden, Modellliste vom Anbieter, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
+  const key = 'ocg-test-0123456789abcdef';
+  const fake = await require('./fixtures/fake-deepseek').start({ key, modelle: ['kimi-test', 'glm-test'], skript: (req) => {
+    const letzte = req.messages[req.messages.length - 1];
+    if (letzte.role === 'user' && /FEHLER402/.test(letzte.content)) return { status: 402, meldung: 'Quota' };
+    if (letzte.role === 'user') return { tools: [{ name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/ocgnotiz.md', content: 'Meine Notiz.' } }, { name: 'ai_tell_scan', args: { text: 'Meine Notiz.' } }] };
+    return { reasoning: 'Ich denke nach.', text: 'Notiz angelegt.' };
+  } });
+  try {
+    const srv = await starte('opencodego', [], { MANGO_NUR_API: '1', MANGO_OPENCODEGO_URL: fake.url });
+    let s = await fertig(srv.call);
+    const ocg = () => s.providers.find((p) => p.id === 'opencodego');
+    assert.deepStrictEqual(s.providers.map((p) => p.id), ['deepseek', 'opencodego']);
+    assert.strictEqual(ocg().name, 'OpenCode Go');
+    assert.strictEqual(ocg().status, 'anmeldung_noetig');
+    assert.strictEqual(ocg().hint.aktion, 'schluessel');
+    assert.deepStrictEqual(ocg().models, [], 'ohne Schlüssel keine Modellliste');
+    // Schlüssel prüfen: falsches Format, abgelehnt, richtig
+    await assert.rejects(srv.call('POST', '/api/providers/opencodego/schluessel', { schluessel: 'kurz' }), /OpenCode-Go-Schlüssel/);
+    await assert.rejects(srv.call('POST', '/api/providers/opencodego/schluessel', { schluessel: 'ocg-falsch-falsch-falsch-0000' }), /lehnt diesen Schlüssel ab/);
+    const r = await srv.call('POST', '/api/providers/opencodego/schluessel', { schluessel: key });
+    s = { providers: r.providers };
+    assert.strictEqual(ocg().status, 'bereit');
+    assert.strictEqual(r.settings.provider, 'opencodego', 'wer einen Schlüssel verbindet, will ihn nutzen');
+    assert.deepStrictEqual(ocg().models.map((m) => m.id), ['kimi-test', 'glm-test'], 'Modelle kommen vom Anbieter');
+    assert.ok(fake.anfragen.every((a) => a.auth === `Bearer ${key}` || a.auth === 'Bearer ocg-falsch-falsch-falsch-0000'));
+    // DeepSeek bleibt unberührt
+    assert.strictEqual(r.providers.find((p) => p.id === 'deepseek').status, 'anmeldung_noetig');
+    // Der Schlüssel taucht nirgends auf
+    const alles = JSON.stringify([await srv.call('GET', '/api/state'), await srv.call('GET', '/api/settings'), await srv.call('GET', '/api/providers')]);
+    assert.ok(!alles.includes(key), 'kein Schlüssel in Zustand und Einstellungen');
+    // Antwort: erstes Modell der Liste, nur Standardfelder, Skills im Systemprompt, Scan-Werkzeug
+    fs.mkdirSync(path.join(srv.home, 'Dokumente'), { recursive: true });
+    await srv.call('POST', '/api/setup', { workspace: path.join(srv.home, 'Dokumente', 'OCG Test'), angaben: { name: 'Alex Beispiel', titel: 'Test' } });
+    const chat = await srv.call('POST', '/api/chats');
+    const m = (await srv.send(chat.id, 'Lege bitte eine Notiz an.')).message;
+    assert.strictEqual(m.provider, 'opencodego');
+    assert.strictEqual(m.status, 'fertig');
+    assert.strictEqual(m.text, 'Notiz angelegt.');
+    const erste = fake.calls[0];
+    assert.strictEqual(erste.model, 'kimi-test', 'ohne eigene Wahl gilt das erste Modell der Liste');
+    assert.ok(!('thinking' in erste) && !('reasoning_effort' in erste), 'keine DeepSeek-Sonderfelder');
+    assert.strictEqual(erste.temperature, 0.7);
+    assert.deepStrictEqual(erste.tools.map((x) => x.function.name), ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'WebFetch', 'ai_tell_scan']);
+    const system = erste.messages[0].content;
+    assert.ok(system.includes('## Schreib-Skills: Wortlaut (zuerst lesen)') && system.includes('### Skill `ai-tell-audit`') && /startest du mit dem Werkzeug `ai_tell_scan`/.test(system));
+    assert.deepStrictEqual(m.stil.skills, ['human-voice', 'humanize-rewrite', 'ai-tell-audit', 'ai_tell_scan']);
+    assert.strictEqual(m.stil.vollstaendig, true);
+    assert.match(fake.calls[0].messages[1].content, /<menschlich>.*ai-tell-audit/);
+    // Denkprotokoll anderer Anbieter wird nicht in den Verlauf zurückgeschickt
+    await srv.send(chat.id, 'Danke.');
+    const verlauf = fake.calls[fake.calls.length - 1].messages;
+    assert.ok(!verlauf.some((x) => 'reasoning_content' in x), 'kein reasoning_content bei OpenCode Go');
+    assert.ok(fs.existsSync(path.join(srv.home, 'Dokumente', 'OCG Test', '.facharbeit', 'sitzungen')) && fs.readdirSync(path.join(srv.home, 'Dokumente', 'OCG Test', '.facharbeit', 'sitzungen')).some((f) => f.startsWith('opencodego-')));
+    // Eigene Modellwahl (auch mit „/“ in der Kennung)
+    await srv.call('PUT', '/api/settings', { modelle: { opencodego: 'glm-test' } });
+    await srv.send((await srv.call('POST', '/api/chats')).id, 'Noch eine Notiz.');
+    assert.strictEqual(fake.calls[fake.calls.length - 1].model, 'glm-test');
+    const r2 = await srv.call('PUT', '/api/settings', { modelle: { opencodego: 'opencode-go/kimi-test' } });
+    assert.strictEqual(r2.settings.modelle.opencodego, 'opencode-go/kimi-test');
+    // Kontingent erreicht: verständliche Meldung
+    const c3 = await srv.call('POST', '/api/chats');
+    const m3 = (await srv.send(c3.id, 'FEHLER402 bitte')).message;
+    assert.strictEqual(m3.status, 'fehler');
+    assert.match(m3.error, /OpenCode-Go-Kontingent/);
+    assert.strictEqual(m3.errorKind, 'limit');
+    // Schlüssel entfernen
+    const d = await srv.call('DELETE', '/api/providers/opencodego/schluessel');
+    assert.strictEqual(d.providers.find((p) => p.id === 'opencodego').status, 'anmeldung_noetig');
+    assert.deepStrictEqual(d.providers.find((p) => p.id === 'opencodego').models, []);
+    await srv.stop();
+  } finally {
+    fake.close();
+  }
+});
+
 test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
   const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
     const letzte = req.messages[req.messages.length - 1];
@@ -240,7 +317,7 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
   try {
     const srv = await starte('nur-deepseek', [], { MANGO_NUR_API: '1', MANGO_DEEPSEEK_URL: fake.url });
     let s = await fertig(srv.call);
-    assert.deepStrictEqual(s.providers.map((p) => p.id), ['deepseek'], 'auf dem Mac nur DeepSeek');
+    assert.deepStrictEqual(s.providers.map((p) => p.id), ['deepseek', 'opencodego'], 'auf dem Mac nur die Anbieter mit Schlüssel');
     assert.strictEqual(s.settings.provider, 'deepseek', 'Voreinstellung wechselt von selbst');
     const ds = s.providers[0];
     assert.strictEqual(ds.status, 'anmeldung_noetig');

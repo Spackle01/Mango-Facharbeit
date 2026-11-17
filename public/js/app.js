@@ -35,7 +35,7 @@ export function isStreaming(chatId = S.chatId) {
 
 const STATUS_SYMBOL = { offen: '×', in_arbeit: '?', erledigt: '✓' };
 const STATUS_LABEL = { offen: 'Offen', in_arbeit: 'In Arbeit', erledigt: 'Erledigt' };
-const PROVIDER_NAME = { claude: 'Claude Code', antigravity: 'Antigravity', deepseek: 'DeepSeek' };
+const PROVIDER_NAME = { claude: 'Claude Code', antigravity: 'Antigravity', deepseek: 'DeepSeek', opencodego: 'OpenCode Go' };
 
 // ---------- Farbschema ----------
 
@@ -1278,7 +1278,7 @@ function renderProviderBanner() {
     : [h('b', {}, `${prov.name}: ${prov.label}. `), prov.hint ? prov.hint.text : prov.detail || ''];
   const banner = h('div', { class: `provider-banner${bad ? ' danger' : ''}`, role: 'status' }, h('span', { class: 'txt' }, text));
   if (prov.hint && prov.hint.aktion === 'schluessel') {
-    banner.append(schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
+    banner.append(schluesselFormular({ provider: prov.id, kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
   } else {
     if (prov.hint && prov.hint.befehl) {
       banner.append(h('code', { class: 'cmd' }, prov.hint.befehl), btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(prov.hint.befehl) }));
@@ -1294,6 +1294,7 @@ const SETUP_INFO = {
   claude: 'Von Anthropic. Du brauchst ein Claude-Konto mit Abo (z. B. Pro oder Max).',
   antigravity: 'Von Google. Du meldest dich mit deinem Google-Konto an.',
   deepseek: 'Über die DeepSeek-API mit eigenem Schlüssel. Es wird nichts installiert, du zahlst nach Verbrauch.',
+  opencodego: 'Über das OpenCode-Go-Abo mit eigenem Schlüssel. Es wird nichts installiert, die Nutzung ist im Abo enthalten.',
 };
 
 function setupCard() {
@@ -1302,9 +1303,9 @@ function setupCard() {
     const hint = p.hint || {};
     if (p.api) {
       return h('div', { class: 'setup-option' },
-        h('div', { class: 'so-head' }, h('b', {}, 'DeepSeek')),
-        h('p', { class: 'so-info' }, SETUP_INFO.deepseek),
-        schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
+        h('div', { class: 'so-head' }, h('b', {}, p.name)),
+        h('p', { class: 'so-info' }, SETUP_INFO[p.id] || ''),
+        schluesselFormular({ provider: p.id, kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
     }
     return h('div', { class: 'setup-option' },
       h('div', { class: 'so-head' }, h('b', {}, p.name),
@@ -1317,9 +1318,9 @@ function setupCard() {
   return h('div', { class: 'provider-banner setup', role: 'status' },
     S.state.providers.some((p) => !p.api)
       ? h('div', { class: 'setup-head' }, h('b', {}, 'Bitte richte einen KI-Anbieter ein.'),
-        h('span', {}, 'Damit Mango antworten kann, brauchst du Claude Code, Antigravity oder einen DeepSeek-Schlüssel. Einer reicht. Danach hier auf „Erneut prüfen“ klicken.'))
-      : h('div', { class: 'setup-head' }, h('b', {}, 'Bitte verbinde deinen DeepSeek-Schlüssel.'),
-        h('span', {}, 'Damit Mango antworten kann, braucht es einen API-Schlüssel von DeepSeek. Du erstellst ihn in wenigen Minuten auf platform.deepseek.com.')),
+        h('span', {}, 'Damit Mango antworten kann, brauchst du Claude Code, Antigravity oder einen API-Schlüssel (DeepSeek oder OpenCode Go). Einer reicht. Danach hier auf „Erneut prüfen“ klicken.'))
+      : h('div', { class: 'setup-head' }, h('b', {}, 'Bitte verbinde einen API-Schlüssel.'),
+        h('span', {}, 'Damit Mango antworten kann, braucht es einen API-Schlüssel von DeepSeek oder OpenCode Go. Einer reicht.')),
     h('div', { class: 'setup-options' }, S.state.providers.map(option)),
     h('div', { class: 'setup-foot' }, btn('Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: checkAllProviders })));
 }

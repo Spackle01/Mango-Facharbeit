@@ -288,7 +288,7 @@ class RunManager {
       const schreibaufgabe = !inv && SCHREIBAUFGABE.test(cleanText);
       // Regeln der App; enthalten sie den Wortlaut der Schreib-Skills (Normalfall), liest die KI sie vor allem anderen.
       // DeepSeek bekommt eigene Regeln (gleiche Skills, der Scan läuft dort als Werkzeug), die anderen Anbieter die mit der Mango-Prüfung.
-      const regelnName = providerId === 'deepseek' ? 'regeln-deepseek.md' : 'regeln.md';
+      const regelnName = schreibskills.hatScanWerkzeug(providerId) ? 'regeln-deepseek.md' : 'regeln.md'; // Anbieter mit Scan-Werkzeug
       let rulesFile = path.join(ws.internalDir(project.workspace), regelnName);
       let rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => '');
       if (!rulesText && regelnName !== 'regeln.md') { rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md'); rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => ''); }

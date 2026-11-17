@@ -49,7 +49,7 @@ class AppStore {
     // eigene Modellwahl werden einmalig ebenso umgestellt.
     const s = this.data.settings;
     const neu = !s.version || s.version < 2;
-    s.modelle = { claude: neu ? 'sonnet' : '', antigravity: '', deepseek: '', ...(s.modelle || {}) };
+    s.modelle = { claude: neu ? 'sonnet' : '', antigravity: '', deepseek: '', opencodego: '', ...(s.modelle || {}) };
     if (neu && !s.modelle.claude) s.modelle.claude = 'sonnet';
     if (!GRUENDLICHKEIT[s.gruendlichkeit]) s.gruendlichkeit = 'ausgewogen';
     // Ab Version 3 wählt die App Anbieter und Modell selbst, solange die Person nichts festgelegt hat.
@@ -74,7 +74,7 @@ class AppStore {
   // auto: Änderung durch die App (automatische Anbieter- und Modellwahl), nicht durch die Person.
   async updateSettings(patch, { auto = false } = {}) {
     if (patch.theme && ['light', 'dark', 'system'].includes(patch.theme)) this.data.settings.theme = patch.theme;
-    if (patch.provider && ['claude', 'antigravity', 'deepseek'].includes(patch.provider)) {
+    if (patch.provider && ['claude', 'antigravity', 'deepseek', 'opencodego'].includes(patch.provider)) {
       this.data.settings.provider = patch.provider;
       if (!auto) this.data.settings.anbieterGewaehlt = true;
     }
@@ -82,9 +82,9 @@ class AppStore {
     if (typeof patch.updatePruefen === 'boolean') this.data.settings.updatePruefen = patch.updatePruefen;
     if (patch.modelle && typeof patch.modelle === 'object') {
       for (const [anbieter, wert] of Object.entries(patch.modelle)) {
-        if (!['claude', 'antigravity', 'deepseek'].includes(anbieter) || typeof wert !== 'string') continue;
+        if (!['claude', 'antigravity', 'deepseek', 'opencodego'].includes(anbieter) || typeof wert !== 'string') continue;
         const id = wert.trim();
-        if (!validModelId(id)) throw Object.assign(new Error('Diese Modell-ID ist ungültig. Erlaubt sind Buchstaben, Ziffern und . - _ : [ ]'), { status: 400 });
+        if (!validModelId(id)) throw Object.assign(new Error('Diese Modell-ID ist ungültig. Erlaubt sind Buchstaben, Ziffern und . - _ : / [ ]'), { status: 400 });
         this.data.settings.modelle[anbieter] = id;
         // Selbst gewählte Modelle überschreibt die automatische Auswahl nie.
         if (!auto) this.data.settings.modellGewaehlt = { ...(this.data.settings.modellGewaehlt || {}), [anbieter]: true };

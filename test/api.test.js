@@ -116,7 +116,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(claude.label, 'Angemeldet');
     assert.strictEqual(agy.status, 'ungeprueft');
     assert.strictEqual(state.settings.provider, 'claude', 'Claude hat Vorrang, wenn es bereit ist');
-    assert.deepStrictEqual(state.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high', deepseek: '' }, 'neuestes Sonnet und bestes Gemini-Modell');
+    assert.deepStrictEqual(state.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high', deepseek: '', opencodego: '' }, 'neuestes Sonnet und bestes Gemini-Modell');
   });
 
   await t.test('Erster Start: Vorschlag und Einrichtung', async () => {
@@ -257,7 +257,7 @@ test('Kompletter Ablauf', async (t) => {
 
   await t.test('Modellauswahl für beide Anbieter', async () => {
     let s = await call('GET', '/api/state');
-    assert.deepStrictEqual(s.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high', deepseek: '' }, 'sparsame Voreinstellung');
+    assert.deepStrictEqual(s.settings.modelle, { claude: 'sonnet', antigravity: 'gemini-3.1-pro-high', deepseek: '', opencodego: '' }, 'sparsame Voreinstellung');
     assert.strictEqual(s.settings.gruendlichkeit, 'ausgewogen');
     const first = JSON.parse(fs.readFileSync(LOG, 'utf8').trim().split('\n')[0]);
     assert.strictEqual(first.args[first.args.indexOf('--model') + 1], 'sonnet');
@@ -273,7 +273,7 @@ test('Kompletter Ablauf', async (t) => {
     await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus & calc' } }), (e) => e.status === 400);
     await assert.rejects(call('PUT', '/api/settings', { modelle: { claude: 'opus"; rm -rf /' } }), (e) => e.status === 400);
     let r = await call('PUT', '/api/settings', { modelle: { claude: 'opus' }, gruendlichkeit: 'gruendlich' });
-    assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: 'gemini-3.1-pro-high', deepseek: '' });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'opus', antigravity: 'gemini-3.1-pro-high', deepseek: '', opencodego: '' });
     assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich');
     r = await call('PUT', '/api/settings', { gruendlichkeit: 'egal' });
     assert.strictEqual(r.settings.gruendlichkeit, 'gruendlich', 'ungültige Werte werden ignoriert');
@@ -327,7 +327,7 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(lastAgy[lastAgy.indexOf('--model') + 1], 'gemini-3.8-flash');
     assert.strictEqual(lastAgy[lastAgy.indexOf('--effort') + 1], 'high');
     r = await call('PUT', '/api/settings', { provider: 'claude', modelle: { claude: 'sonnet', antigravity: '' }, gruendlichkeit: 'ausgewogen' });
-    assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '' });
+    assert.deepStrictEqual(r.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '', opencodego: '' });
   });
 
   await t.test('Abgabe-Dateien: Originale geschützt, KI arbeitet in der Word-Kopie', async () => {
