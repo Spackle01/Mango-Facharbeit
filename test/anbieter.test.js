@@ -308,6 +308,41 @@ test('OpenCode Go: Schlüssel verbinden, Modellliste vom Anbieter, Antwort mit W
   }
 });
 
+test('Nur DeepSeek: Bei ausgeschaltetem Scan wird das Scan-Werkzeug weder verlangt noch nachgeholt', async () => {
+  let nr = 0;
+  const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
+    const letzte = req.messages[req.messages.length - 1];
+    if (letzte.role === 'user' && !/fehlt noch/.test(letzte.content)) nr += 1;
+    if (letzte.role === 'user') return { tools: [{ name: 'Write', args: { file_path: `01_themenfindung_und_mindmap/dsnotiz3_${nr}.md`, content: 'Darüber hinaus ist das — wichtig. Gerne!' } }] };
+    return { text: 'Notiz angelegt.' };
+  } });
+  try {
+    const srv = await starte('deepseek-scan-aus', [], { MANGO_NUR_API: '1', MANGO_DEEPSEEK_URL: fake.url });
+    await fertig(srv.call);
+    await srv.call('POST', '/api/providers/deepseek/schluessel', { schluessel: fake.key });
+    fs.mkdirSync(path.join(srv.home, 'Dokumente'), { recursive: true });
+    await srv.call('POST', '/api/setup', { workspace: path.join(srv.home, 'Dokumente', 'DS Scan aus'), angaben: { name: 'Alex Beispiel', titel: 'Test' } });
+    await srv.call('PUT', '/api/settings', { scanAn: false });
+    const chat = await srv.call('POST', '/api/chats');
+    const m = (await srv.send(chat.id, 'Schreib eine Notiz zur Umfrage.')).message;
+    assert.strictEqual(m.status, 'fertig');
+    assert.strictEqual(m.text, 'Notiz angelegt.');
+    assert.deepStrictEqual(m.stil, { scan: false, gefunden: 0, rest: 0, durchlaeufe: 0, offen: [], skills: ['human-voice', 'humanize-rewrite', 'ai-tell-audit'], vollstaendig: true, nachgeholt: false }, 'weder Prüfung noch Scan-Aufruf nötig, auch bei Chatbot-Resten im Text');
+    assert.strictEqual(fake.calls.length, 2, 'Schreiben und Antwort, kein Durchlauf zum Nachholen');
+    assert.ok(!fake.calls.some((c) => c.messages.some((x) => x.role === 'user' && /fehlt noch/.test(x.content))));
+    assert.match(fake.calls[0].messages[1].content, /<scan>Die Person hat den KI-Scan ausgeschaltet[^<]*rufe `ai_tell_scan` nicht auf/);
+    // Wieder an: Der fehlende Scan-Aufruf wird nachgeholt, harte Treffer überarbeitet.
+    await srv.call('PUT', '/api/settings', { scanAn: true });
+    const chat2 = await srv.call('POST', '/api/chats');
+    const m2 = (await srv.send(chat2.id, 'Schreib noch eine Notiz zur Umfrage.')).message;
+    assert.strictEqual(m2.stil.scan, true);
+    assert.ok(m2.stil.durchlaeufe >= 1, 'mit Scan wird nachgeholt');
+    await srv.stop();
+  } finally {
+    fake.close();
+  }
+});
+
 test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
   const fake = await require('./fixtures/fake-deepseek').start({ skript: (req) => {
     const letzte = req.messages[req.messages.length - 1];

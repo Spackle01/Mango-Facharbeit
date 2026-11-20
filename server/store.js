@@ -52,6 +52,7 @@ class AppStore {
     s.modelle = { claude: neu ? 'sonnet' : '', antigravity: '', deepseek: '', opencodego: '', ...(s.modelle || {}) };
     if (neu && !s.modelle.claude) s.modelle.claude = 'sonnet';
     if (!GRUENDLICHKEIT[s.gruendlichkeit]) s.gruendlichkeit = 'ausgewogen';
+    s.scanAn = s.scanAn !== false; // KI-Scan (Prüfung der Texte mit dem Skript von ai-tell-audit): standardmäßig an
     // Ab Version 3 wählt die App Anbieter und Modell selbst, solange die Person nichts festgelegt hat.
     // Was ältere Fassungen gespeichert haben, gilt als eigene Wahl.
     if (bestand && (s.version || 0) < 3) {
@@ -79,6 +80,7 @@ class AppStore {
       if (!auto) this.data.settings.anbieterGewaehlt = true;
     }
     if (patch.gruendlichkeit && GRUENDLICHKEIT[patch.gruendlichkeit]) this.data.settings.gruendlichkeit = patch.gruendlichkeit;
+    if (typeof patch.scanAn === 'boolean') this.data.settings.scanAn = patch.scanAn;
     if (typeof patch.updatePruefen === 'boolean') this.data.settings.updatePruefen = patch.updatePruefen;
     if (patch.modelle && typeof patch.modelle === 'object') {
       for (const [anbieter, wert] of Object.entries(patch.modelle)) {

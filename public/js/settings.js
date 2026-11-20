@@ -1,7 +1,7 @@
 // Einstellungen: Darstellung, KI-Anbieter, Facharbeit.
 import { api } from './api.js';
 import { h, iconEl, btn, toast, dialog, copyText } from './ui.js';
-import { S, checkUpdate, openUpdateDialog, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp } from './app.js';
+import { S, checkUpdate, openUpdateDialog, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp, scanUmschalten } from './app.js';
 import { showOnboarding, chooseFolder } from './onboarding.js';
 import { openModelDialog, selectedModel, selectedModelLabel, gruendlichkeitEl } from './modelle.js';
 import { modelLabel } from './modelname.js';
@@ -54,6 +54,13 @@ export function openSettings(focusSection) {
     }
     body.append(prov);
     body.append(h('section', { class: 'settings-section' }, h('h3', {}, 'Gründlichkeit des Assistenten'), gruendlichkeitEl()));
+
+    // KI-Scan (Prüfung der Texte mit dem Skript von ai-tell-audit): Auch im Eingabefeld ein- und ausschaltbar.
+    const scanCb = h('input', { type: 'checkbox', id: 'set-scan', checked: S.state.settings.scanAn !== false || null });
+    scanCb.addEventListener('change', async () => { await scanUmschalten(scanCb.checked); scanCb.checked = S.state.settings.scanAn !== false; });
+    body.append(h('section', { class: 'settings-section', id: 'set-scan-section' }, h('h3', {}, 'KI-Scan (Textprüfung)'),
+      h('label', { class: 'check-row', for: 'set-scan' }, scanCb, h('span', {}, 'Geschriebene Texte mit dem KI-Prüfer prüfen')),
+      h('p', { class: 'mg-note' }, 'Ist der Scan an, prüft Mango jeden Text, den die KI schreibt, auf typische KI-Muster und lässt auffällige Stellen überarbeiten. Ist er aus, gibt es keine Prüfung und keine Überarbeitung danach; die KI schreibt trotzdem nach den Schreib-Skills. Du kannst ihn auch im Eingabefeld umschalten. Die Wahl gilt ab der nächsten Nachricht.')));
 
     // Facharbeit
     const p = S.state.project;

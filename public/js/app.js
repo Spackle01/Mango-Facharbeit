@@ -764,7 +764,9 @@ function stilEl(st) {
   const behoben = Math.max(0, st.gefunden - offen.length);
   const stellen = (n) => `${n} ${n === 1 ? 'Stelle' : 'Stellen'}`;
   let text;
-  if (st.scan) {
+  if (st.scan === false) {
+    text = 'Scan: aus';
+  } else if (st.scan) {
     // Mango hat den Scan von ai-tell-audit auf den Text angewendet (bei Bedarf mit Überarbeitung und erneutem Scan).
     if (rest || offen.length) text = `Scan: ${stellen(Math.max(rest, offen.length))} noch auffällig`;
     else if (st.gefunden) text = `Scan: ${stellen(st.gefunden)} gefunden, Text überarbeitet`;
@@ -1193,11 +1195,12 @@ function buildComposer() {
   const fileInput = h('input', { type: 'file', multiple: true, hidden: true, 'aria-hidden': 'true', tabindex: '-1' });
   const attachBtn = btn('', { iconName: 'clip', cls: 'btn btn-icon', title: 'Datei anhängen', attrs: { 'aria-haspopup': 'menu' } });
   const providerBtn = h('button', { type: 'button', class: 'btn provider-pill', 'aria-haspopup': 'menu' });
+  const scanBtn = h('button', { type: 'button', class: 'btn scan-pill' });
   const sendBtn = h('button', { type: 'button', class: 'send-btn' });
   const composer = h('div', { class: 'composer' },
     h('div', { class: 'att-list', 'aria-label': 'Anhänge' }),
     ta,
-    h('div', { class: 'composer-bar' }, attachBtn, providerBtn, h('span', { class: 'spacer' }), sendBtn),
+    h('div', { class: 'composer-bar' }, attachBtn, providerBtn, scanBtn, h('span', { class: 'spacer' }), sendBtn),
     fileInput);
   wrap.append(h('div', { class: 'banner-slot' }), composer);
   ta.addEventListener('input', () => { autosize(ta); updateComposer(); });
@@ -1218,9 +1221,26 @@ function buildComposer() {
   });
   fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
   providerBtn.addEventListener('click', () => providerMenu(providerBtn));
+  scanBtn.addEventListener('click', () => scanUmschalten());
   sendBtn.addEventListener('click', () => (isStreaming() ? stop() : send()));
   S.els.textarea = ta;
   updateComposer();
+}
+
+// KI-Scan ein- oder ausschalten. Die Einstellung gilt ab der nächsten Nachricht (eine laufende Antwort bleibt, wie sie ist).
+export async function scanUmschalten(wert) {
+  const neu = typeof wert === 'boolean' ? wert : S.state.settings.scanAn === false;
+  try {
+    const r = await api.put('/api/settings', { scanAn: neu });
+    S.state.settings = r.settings;
+    updateComposer();
+    announce(`KI-Scan: ${neu ? 'an' : 'aus'}`);
+    toast(neu ? 'KI-Scan ist an. Texte werden ab der nächsten Nachricht geprüft.' : 'KI-Scan ist aus. Texte werden ab der nächsten Nachricht nicht geprüft.');
+    return neu;
+  } catch (err) {
+    toast(err.message, { error: true });
+    return !neu;
+  }
 }
 
 export function activeProvider() {
@@ -1239,6 +1259,14 @@ export function updateComposer() {
     modelName ? h('span', { class: 'pp-model' }, modelName) : null, iconEl('chevronDown', 14)].filter(Boolean));
   pill.setAttribute('aria-label', prov ? `KI-Anbieter: ${prov.name}, ${prov.label}, Modell: ${modelName || 'Standard'}. Ändern` : 'KI-Anbieter wählen');
   pill.title = prov ? `${prov.name}: ${prov.label} · Modell: ${modelName || 'Standard'}` : '';
+  // KI-Scan: Ein- und Ausschalter (gilt ab der nächsten Nachricht)
+  const scanPill = wrap.querySelector('.scan-pill');
+  const scanAn = S.state.settings.scanAn !== false;
+  scanPill.replaceChildren(iconEl(scanAn ? 'checks' : 'x', 14), h('span', {}, `Scan: ${scanAn ? 'an' : 'aus'}`));
+  scanPill.classList.toggle('aus', !scanAn);
+  scanPill.setAttribute('aria-pressed', scanAn ? 'true' : 'false');
+  scanPill.setAttribute('aria-label', `KI-Scan: ${scanAn ? 'an' : 'aus'}. Umschalten`);
+  scanPill.title = scanAn ? 'KI-Scan ist an: Mango prüft geschriebene Texte mit dem KI-Prüfer und lässt auffällige Stellen überarbeiten. Klicken zum Ausschalten.' : 'KI-Scan ist aus: Texte werden nicht geprüft. Klicken zum Einschalten.';
   if (isStreaming()) {
     sendBtn.className = 'send-btn stop';
     sendBtn.innerHTML = '';

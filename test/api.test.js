@@ -499,6 +499,56 @@ test('Kompletter Ablauf', async (t) => {
     assert.strictEqual(lese().length - vorher, 3, 'kein dritter Durchlauf');
   });
 
+  await t.test('KI-Scan aus: keine Prüfung und keine Überarbeitung, nur das Schreiben nach den Skills; wieder an: Prüfung wie zuvor', async () => {
+    const lese = () => fs.readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.strictEqual((await call('GET', '/api/settings')).settings.scanAn, true, 'standardmäßig an');
+    assert.strictEqual((await call('PUT', '/api/settings', { scanAn: false })).settings.scanAn, false);
+    try {
+      // Datei mit Floskeln: bleibt, wie sie ist, nur ein Durchlauf
+      let chat = await call('POST', '/api/chats');
+      let vorher = lese().length;
+      let m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
+      assert.strictEqual(m.text, 'Eingetragen.');
+      assert.deepStrictEqual(m.stil, { scan: false, gefunden: 0, rest: 0, durchlaeufe: 0, offen: [], skills: ALLE_SKILLS, vollstaendig: true, nachgeholt: false });
+      let calls = lese().slice(vorher);
+      assert.strictEqual(calls.length, 1, 'kein Überarbeitungsdurchlauf nach dem Scan');
+      assert.match(calls[0].input, /<scan>Die Person hat den KI-Scan ausgeschaltet/);
+      assert.ok(!/<schreibregeln>[^<]*2\. `ai-tell-audit`/.test(calls[0].input));
+      const w = m.word.find((x) => x.datei.startsWith('abgabe/Lerntagebuch'));
+      const text = require('../server/extract').docxToText(fs.readFileSync(path.join(WS, ...w.datei.split('/'))));
+      assert.match(text, /In der heutigen Zeit spielt Zeitmanagement eine entscheidende Rolle\./, 'der Text wurde nicht verändert');
+      // Chat-Entwurf voller Muster: bleibt
+      chat = await call('POST', '/api/chats');
+      vorher = lese().length;
+      m = (await send(chat.id, 'Schreib mir CHATKI einen Absatz über Nachhaltigkeit')).done.message;
+      assert.match(m.text, /^Erste Fassung: /);
+      assert.strictEqual(m.stil.scan, false);
+      assert.strictEqual(m.stil.durchlaeufe, 0);
+      assert.strictEqual(lese().length - vorher, 1);
+      // Fehlen die Schreib-Skills, werden sie weiter nachgeholt, aber ohne die Prüfung
+      const wiederherstellen = regelnOhneSkillText();
+      try {
+        chat = await call('POST', '/api/chats');
+        vorher = lese().length;
+        m = (await send(chat.id, 'OHNESKILL LERNTAGEBUCH Ergänzung')).done.message;
+        calls = lese().slice(vorher);
+        assert.strictEqual(calls.length, 2, 'ein Durchlauf zum Nachholen');
+        assert.match(calls[1].input, /fehlt noch: `human-voice` \(neuer Text\) oder `humanize-rewrite` \(vorhandener Text\)\. Lade dafür `human-voice` \(neuer Text\) bzw\. `humanize-rewrite` \(vorhandener Text\) mit dem Skill-Werkzeug\./);
+        assert.ok(!/fehlt noch:[^\n]*ai-tell-audit/.test(calls[1].input), 'die Prüfung wird nicht verlangt');
+      } finally { wiederherstellen(); }
+    } finally {
+      assert.strictEqual((await call('PUT', '/api/settings', { scanAn: true })).settings.scanAn, true);
+    }
+    // Wieder an: Mango scannt und lässt überarbeiten
+    const chat = await call('POST', '/api/chats');
+    const vorher = lese().length;
+    const m = (await send(chat.id, 'Schreib FLOSKEL meine Lernziele ins Lerntagebuch')).done.message;
+    assert.strictEqual(m.stil.scan, true);
+    assert.strictEqual(m.stil.durchlaeufe, 1);
+    assert.strictEqual(lese().length - vorher, 2);
+    assert.ok(!/<scan>/.test(lese()[vorher].input), 'kein Hinweis bei eingeschaltetem Scan');
+  });
+
   await t.test('Dateien erstellen: PowerPoint und PDF, Vorschau und Öffnen', async () => {
     const chat = await call('POST', '/api/chats');
     const m = (await send(chat.id, 'ERSTELLE eine Präsentation und ein PDF')).done.message;

@@ -139,7 +139,13 @@ function schritte(fehlend, anbieter) {
   const skills = fehlend.some((x) => !x.includes('ai_tell_scan'));
   const scan = fehlend.some((x) => x.includes('ai_tell_scan'));
   const teile = [];
-  if (skills) teile.push(`${schreibskills.hatScanWerkzeug(anbieter) ? 'Lies' : 'Lade'} dafür \`human-voice\` (neuer Text) bzw. \`humanize-rewrite\` (vorhandener Text) und \`ai-tell-audit\` mit dem Skill-Werkzeug.`);
+  if (skills) {
+    // Nur nennen, was fehlt (ohne Scan fehlt die Prüfung nie).
+    const welche = [];
+    if (fehlend.some((x) => x.includes('human-voice'))) welche.push('`human-voice` (neuer Text) bzw. `humanize-rewrite` (vorhandener Text)');
+    if (fehlend.some((x) => x.includes('ai-tell-audit'))) welche.push('`ai-tell-audit`');
+    teile.push(`${schreibskills.hatScanWerkzeug(anbieter) ? 'Lies' : 'Lade'} dafür ${welche.join(' und ')} mit dem Skill-Werkzeug.`);
+  }
   if (scan) teile.push('Ruf `ai_tell_scan` mit dem fertigen Text auf und behebe die Befunde.');
   return teile.join(' ');
 }
@@ -174,14 +180,14 @@ function korrekturPrompt(funde, extrakte = {}, { fehlendeSkills = [], dateien = 
 
 // Nachricht, wenn der Assistent einen Text im Chat geschrieben hat, ohne die Pflichtschritte zu erfüllen oder mit auffälligem Scan:
 // Er soll sie nachholen und den Text komplett neu ausgeben (die App ersetzt die erste Fassung).
-function chatNachholenPrompt(fehlendeSkills, anbieter = '', stellen = []) {
+function chatNachholenPrompt(fehlendeSkills, anbieter = '', stellen = [], { scan = true } = {}) {
   const teile = [];
   if (fehlendeSkills.length) teile.push(`Du hast in deiner Antwort einen Text geschrieben, ohne dass folgendes erfüllt war: ${fehlendeSkills.join(', ')}. ${schritte(fehlendeSkills, anbieter)}`);
   else teile.push('Du hast in deiner Antwort einen Text geschrieben. Der Scan von `ai-tell-audit` (Mango hat ihn für dich ausgeführt) findet darin noch Muster.');
   if (stellen.length) {
     teile.push(`Fundstellen (Suchhilfen; „(ändern)“ immer ändern):\n${stellen.slice(0, 12).map((s) => (s.satz ? `- „${s.satz}“ – ${s.grund}${s.hart ? ' (ändern)' : ''}` : `- Ganzer Text – ${s.grund}`)).join('\n')}`);
   }
-  teile.push('Schreib den Text mit `humanize-rewrite` neu bzw. überarbeite ihn: Inhalt herausziehen, Form neu bauen, Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. Prüfe ihn danach mit `ai-tell-audit` und behebe die Befunde. Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.');
+  teile.push(`Schreib den Text mit \`humanize-rewrite\` neu bzw. überarbeite ihn: Inhalt herausziehen, Form neu bauen, Stimme der Person, Fakten und Unsicherheit erhalten, nichts erfinden, kurz und einfach. ${scan ? 'Prüfe ihn danach mit \`ai-tell-audit\` und behebe die Befunde. ' : ''}Gib dann deine ganze Antwort noch einmal aus, mit der neuen Fassung des Textes und allen Blöcken, die schon in der ersten Antwort standen. Kein Hinweis auf die Überarbeitung.`);
   return teile.join('\n\n');
 }
 

@@ -226,6 +226,8 @@ class RunManager {
     const providerId = this.settings().provider;
     let model = ((this.settings().modelle || {})[providerId]) || '';
     let effort = GRUENDLICHKEIT[this.settings().gruendlichkeit] || '';
+    // KI-Scan: Die Person schaltet ihn im Eingabefeld ein und aus; die Wahl gilt für diese Antwort (Prompt, Pflichtschritte, Prüfung durch Mango).
+    const scanAn = this.settings().scanAn !== false;
     const selbstGewaehlt = !!(this.settings().modellGewaehlt || {})[providerId];
     const pstate = this.providers.state[providerId];
     if (!this.providers.usable(providerId)) {
@@ -294,7 +296,7 @@ class RunManager {
       if (!rulesText && regelnName !== 'regeln.md') { rulesFile = path.join(ws.internalDir(project.workspace), 'regeln.md'); rulesText = await fsp.readFile(rulesFile, 'utf8').catch(() => ''); }
       const skillsImKontext = rulesText.includes(schreibskills.BLOCK_TITEL);
       const buildPrompt = (unchanged) => ctx.buildPrompt({
-        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe, skillsImKontext, anbieter: providerId,
+        context: context.text, contextUnchanged: unchanged, attachments: atts, history, schreibaufgabe, skillsImKontext, anbieter: providerId, scanAn,
         text: inv ? `${cleanText}\n\n${importer.importPrompt(inv, { bisher: project.data.uebernahme })}` : cleanText || 'Bitte sieh dir die angehängten Dateien an.',
       });
       let prompt = buildPrompt(!!sessionId && sess.contextHash === context.hash);
@@ -426,15 +428,15 @@ class RunManager {
         const texte = await geschriebeneTexte(project, { dateien: wp.dateien, ergebnisse: msg.word, changes, before, ausgenommen });
         if (texte.length) {
           // Nur auffällige Texte (harte Treffer, mehrere Stellen oder Urteil „reads as AI“) gehen zur Überarbeitung zurück.
-          const auffaellig = (liste) => liste.map((t) => ({ datei: t.datei, ...stil.bewerten(t.text) })).filter((f) => f.schwer).map((f) => ({ datei: f.datei, stellen: f.stellen }));
+          const auffaellig = (liste) => !scanAn ? [] : liste.map((t) => ({ datei: t.datei, ...stil.bewerten(t.text) })).filter((f) => f.schwer).map((f) => ({ datei: f.datei, stellen: f.stellen }));
           const zaehle = (liste) => liste.reduce((n, f) => n + f.stellen.length, 0);
-          const fehlendTexte = () => schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
+          const fehlendTexte = () => schreibskills.fehlend(skillsGeladen, providerId, { scan: scanAn }).map((a) => a.text);
           const funde = auffaellig(texte);
           const gefunden = zaehle(funde);
           // Pflicht-Skills: Wurden sie nicht geladen, holt der Assistent das in einem stillen Durchlauf nach.
           let fehlend = fehlendTexte();
           const fehlteAnfangs = fehlend.length > 0;
-          msg.stil = { scan: true, gefunden, rest: 0, durchlaeufe: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false };
+          msg.stil = { scan: scanAn, gefunden, rest: 0, durchlaeufe: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false };
           // Nach jeder Überarbeitung scannt Mango die neue Fassung noch einmal. Bleibt sie auffällig, folgt ein zweiter Durchlauf.
           let aktuell = funde;
           let dateienNr = texte.map((t) => t.datei);
@@ -488,11 +490,11 @@ class RunManager {
           // Entwurf im Chat statt in einer Datei: Auch dafür sind die Skills Pflicht und der Scan läuft. Fehlen Skills oder ist
           // der Entwurf auffällig, gibt der Assistent die Antwort mit der neuen Fassung noch einmal aus (sie ersetzt die erste).
           // Auch die neue Fassung wird gescannt, höchstens zweimal.
-          const chatBewerten = (text) => stil.bewerten(text.replace(/```[\s\S]*?(?:```|$)/g, ' '));
-          let fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
+          const chatBewerten = (text) => (scanAn ? stil.bewerten(text.replace(/```[\s\S]*?(?:```|$)/g, ' ')) : { stellen: [], schwer: false, urteil: '' });
+          let fehlend = schreibskills.fehlend(skillsGeladen, providerId, { scan: scanAn }).map((a) => a.text);
           const fehlteAnfangs = fehlend.length > 0;
           let bew = chatBewerten(wp.text);
-          msg.stil = { scan: true, gefunden: bew.schwer ? bew.stellen.length : 0, rest: 0, durchlaeufe: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
+          msg.stil = { scan: scanAn, gefunden: bew.schwer ? bew.stellen.length : 0, rest: 0, durchlaeufe: 0, offen: [], skills: schreibskills.geladene(skillsGeladen, providerId), vollstaendig: !fehlend.length, nachgeholt: false, chat: true };
           while ((fehlend.length || bew.schwer) && msg.stil.durchlaeufe < MAX_NACHARBEIT) {
             msg.stil.durchlaeufe += 1;
             const info = { kind: 'info', label: msg.stil.durchlaeufe > 1 ? 'Scan: Text bleibt auffällig, zweiter Durchlauf' : (fehlend.length ? 'Schreib-Skills nachholen und Text neu schreiben' : 'Scan: Text überarbeiten') };
@@ -503,7 +505,7 @@ class RunManager {
             broadcast({ type: 'snapshot', message: msg });
             sessionId = res.sessionId || sessionId;
             resume = true;
-            const res2 = await launch(stil.chatNachholenPrompt(fehlend, providerId, bew.schwer ? bew.stellen : [])).catch((err) => ({ error: err.message }));
+            const res2 = await launch(stil.chatNachholenPrompt(fehlend, providerId, bew.schwer ? bew.stellen : [], { scan: scanAn })).catch((err) => ({ error: err.message }));
             const neuerText = res2.text || msg.text;
             if (res2.error || res2.canceled || !neuerText.trim()) {
               Object.assign(msg, { text: alterText });
@@ -515,7 +517,7 @@ class RunManager {
             // Blöcke aus der neuen Antwort wurden schon aus der ersten angewendet: nur entfernen.
             restText = word.parseBlock(sortieren.parsePlan(neuerText).text).text;
             bew = chatBewerten(restText);
-            fehlend = schreibskills.fehlend(skillsGeladen, providerId).map((a) => a.text);
+            fehlend = schreibskills.fehlend(skillsGeladen, providerId, { scan: scanAn }).map((a) => a.text);
             msg.stil.nachgeholt = fehlteAnfangs;
             msg.stil.skills = schreibskills.geladene(skillsGeladen, providerId);
             msg.stil.vollstaendig = !fehlend.length;

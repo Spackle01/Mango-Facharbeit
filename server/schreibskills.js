@@ -34,8 +34,10 @@ const BLOCK_TITEL = '## Schreib-Skills: Wortlaut (zuerst lesen)';
 const VERALTET = ['wissenschaftlich-schreiben', 'sprachpruefung', 'stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung'];
 
 // Anforderungen, für die in `geladen` (Menge von Skill- bzw. Werkzeugnamen) noch nichts Passendes vorkommt.
-function fehlend(geladen, anbieter = '') {
-  return (hatScanWerkzeug(anbieter) ? DEEPSEEK_ANFORDERUNGEN : ANFORDERUNGEN).filter((a) => !a.skills.some((s) => geladen.has(s)));
+// `scan: false` (Scan von der Person ausgeschaltet): Verlangt wird nur noch das Schreiben bzw. Umschreiben, weder die Prüfung noch das Scan-Werkzeug.
+function fehlend(geladen, anbieter = '', { scan = true } = {}) {
+  const liste = hatScanWerkzeug(anbieter) ? DEEPSEEK_ANFORDERUNGEN : ANFORDERUNGEN;
+  return liste.filter((a) => (scan || a.id === 'schreiben') && !a.skills.some((s) => geladen.has(s)));
 }
 
 // Geladene Schreib-Skills (bei DeepSeek zusätzlich das Scan-Werkzeug) in fester Reihenfolge.
