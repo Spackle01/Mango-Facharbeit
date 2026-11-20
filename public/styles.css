@@ -421,6 +421,9 @@ kbd, .cmd {
 .provider-pill .pp-name { white-space: nowrap; }
 .provider-pill .pp-model { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .provider-pill .pp-model::before { content: '·'; margin-right: 7px; }
+.scan-pill { gap: 6px; font-size: 13px; color: var(--accent); padding: 0 10px; min-height: 32px; border-radius: 999px; background: var(--accent-soft); flex: none; }
+.scan-pill.aus { color: var(--text-3); background: transparent; }
+.scan-pill:hover { background: var(--accent-soft); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--neutral); }
 .status-dot[data-s="verbunden"], .status-dot[data-s="bereit"] { background: var(--ok); }
 .status-dot[data-s="pruefe"], .status-dot[data-s="ungeprueft"] { background: var(--neutral); }

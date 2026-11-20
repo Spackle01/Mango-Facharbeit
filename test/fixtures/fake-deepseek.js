@@ -2,14 +2,16 @@
 // Test-Double für die DeepSeek-API: /models und /chat/completions (Stream, Werkzeugaufrufe).
 const http = require('http');
 
-function start({ key = 'sk-test-0123456789abcdef', skript } = {}) {
+function start({ key = 'sk-test-0123456789abcdef', skript, modelle = ['deepseek-flash', 'deepseek-v4-pro'] } = {}) {
   const calls = [];
+  const anfragen = []; // Kopfzeilen und Pfad jeder Anfrage
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
     req.on('end', () => {
+      anfragen.push({ url: req.url, auth: req.headers.authorization });
       if (req.headers.authorization !== `Bearer ${key}`) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'Authentication Fails' } })); return; }
-      if (req.url === '/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ object: 'list', data: [{ id: 'deepseek-flash' }, { id: 'deepseek-v4-pro' }] })); return; }
+      if (req.url === '/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ object: 'list', data: modelle.map((id) => ({ id })) })); return; }
       if (req.url === '/chat/completions') {
         const j = JSON.parse(body);
         calls.push(j);
@@ -32,7 +34,7 @@ function start({ key = 'sk-test-0123456789abcdef', skript } = {}) {
       res.writeHead(404); res.end('{}');
     });
   });
-  return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve({ srv, calls, url: `http://127.0.0.1:${srv.address().port}`, key, close: () => srv.close() })));
+  return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve({ srv, calls, anfragen, url: `http://127.0.0.1:${srv.address().port}`, key, close: () => srv.close() })));
 }
 
 module.exports = { start };

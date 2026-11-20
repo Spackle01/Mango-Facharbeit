@@ -3,7 +3,7 @@
 
 // Nur Zeichen, die in Modellnamen vorkommen (z. B. „sonnet“, „claude-opus-5-5“,
 // „sonnet[1m]“, „gemini-3.1-pro-high“). Schützt auch den Aufruf über cmd.exe.
-const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,99}$/;
+const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,99}$/; // „/“ für Kennungen wie anbieter/modell
 
 function validModelId(id) {
   return id === '' || MODEL_ID_RE.test(String(id));

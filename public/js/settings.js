@@ -1,7 +1,7 @@
 // Einstellungen: Darstellung, KI-Anbieter, Facharbeit.
 import { api } from './api.js';
 import { h, iconEl, btn, toast, dialog, copyText } from './ui.js';
-import { S, checkUpdate, openUpdateDialog, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp } from './app.js';
+import { S, checkUpdate, openUpdateDialog, applyTheme, chooseProvider, checkProvider, updateComposer, loadState, enterApp, scanUmschalten } from './app.js';
 import { showOnboarding, chooseFolder } from './onboarding.js';
 import { openModelDialog, selectedModel, selectedModelLabel, gruendlichkeitEl } from './modelle.js';
 import { modelLabel } from './modelname.js';
@@ -35,13 +35,13 @@ export function openSettings(focusSection) {
       const card = h('div', { class: 'provider-card', role: 'radio', tabindex: '0', 'aria-checked': active ? 'true' : 'false' },
         h('span', { class: 'radio', 'aria-hidden': 'true' }),
         h('div', { class: 'pc-main' },
-          h('div', { class: 'pc-name' }, { claude: 'Claude Code CLI', antigravity: 'Antigravity CLI (agy)', deepseek: 'DeepSeek (API-Schlüssel)' }[p.id] || p.name),
+          h('div', { class: 'pc-name' }, { claude: 'Claude Code CLI', antigravity: 'Antigravity CLI (agy)', deepseek: 'DeepSeek (API-Schlüssel)', opencodego: 'OpenCode Go (API-Schlüssel)' }[p.id] || p.name),
           h('div', { class: 'pc-state' }, h('span', { class: 'status-dot', 'data-s': p.status }), h('span', {}, [p.label, p.version ? `Version ${p.version}` : '', p.status === 'verbunden' && p.model ? `zuletzt ${modelLabel(p.model, p.models)}` : ''].filter(Boolean).join(' · '))),
-          p.hint && p.hint.aktion === 'schluessel' ? h('div', { class: 'hint-box' }, h('div', {}, p.hint.text), schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); } }))
+          p.hint && p.hint.aktion === 'schluessel' ? h('div', { class: 'hint-box' }, h('div', {}, p.hint.text), schluesselFormular({ provider: p.id, kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); } }))
             : p.hint ? hintEl(p.hint) : (p.status === 'fehler' && p.detail ? h('div', { class: 'hint-box' }, p.detail) : null),
           p.api && !p.hint ? h('div', { class: 'pc-model' }, h('span', {}, 'Schlüssel:'),
-            btn('Neu eingeben', { cls: 'btn btn-sm', onClick: () => { const f = h('div', { class: 'hint-box' }, schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); } })); card.querySelector('.pc-main').append(f); } }),
-            btn('Entfernen', { cls: 'btn btn-sm', onClick: async () => { try { const r = await schluesselEntfernen(); Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); toast('Schlüssel entfernt.'); } catch (err) { toast(err.message, { error: true }); } } })) : null,
+            btn('Neu eingeben', { cls: 'btn btn-sm', onClick: () => { const f = h('div', { class: 'hint-box' }, schluesselFormular({ provider: p.id, kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); } })); card.querySelector('.pc-main').append(f); } }),
+            btn('Entfernen', { cls: 'btn btn-sm', onClick: async () => { try { const r = await schluesselEntfernen(p.id); Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); render(); toast('Schlüssel entfernt.'); } catch (err) { toast(err.message, { error: true }); } } })) : null,
           p.modelWahl !== false ? h('div', { class: 'pc-model' },
             h('span', {}, 'Modell:'), h('b', { title: selectedModel(p.id) || 'Voreinstellung der CLI' }, selectedModelLabel(p.id)),
             btn('Ändern', { cls: 'btn btn-sm', attrs: { 'aria-label': `Modell für ${p.name} ändern` }, onClick: () => openModelDialog(p.id, { onClose: render }) })) : null));
@@ -54,6 +54,13 @@ export function openSettings(focusSection) {
     }
     body.append(prov);
     body.append(h('section', { class: 'settings-section' }, h('h3', {}, 'Gründlichkeit des Assistenten'), gruendlichkeitEl()));
+
+    // KI-Scan (Prüfung der Texte mit dem Skript von ai-tell-audit): Auch im Eingabefeld ein- und ausschaltbar.
+    const scanCb = h('input', { type: 'checkbox', id: 'set-scan', checked: S.state.settings.scanAn !== false || null });
+    scanCb.addEventListener('change', async () => { await scanUmschalten(scanCb.checked); scanCb.checked = S.state.settings.scanAn !== false; });
+    body.append(h('section', { class: 'settings-section', id: 'set-scan-section' }, h('h3', {}, 'KI-Scan (Textprüfung)'),
+      h('label', { class: 'check-row', for: 'set-scan' }, scanCb, h('span', {}, 'Geschriebene Texte mit dem KI-Prüfer prüfen')),
+      h('p', { class: 'mg-note' }, 'Ist der Scan an, prüft Mango jeden Text, den die KI schreibt, auf typische KI-Muster und lässt auffällige Stellen überarbeiten. Ist er aus, gibt es keine Prüfung und keine Überarbeitung danach; die KI schreibt trotzdem nach den Schreib-Skills. Du kannst ihn auch im Eingabefeld umschalten. Die Wahl gilt ab der nächsten Nachricht.')));
 
     // Facharbeit
     const p = S.state.project;

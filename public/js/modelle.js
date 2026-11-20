@@ -47,6 +47,7 @@ export function gruendlichkeitEl({ onChange } = {}) {
 
 function standardInfo(pid) {
   if (pid === 'deepseek') return 'Das neueste Modell von DeepSeek (V4.1 Flash).';
+  if (pid === 'opencodego') return 'Das erste Modell aus der Liste von OpenCode Go.';
   return pid === 'claude' ? 'Das Modell, das in Claude Code voreingestellt ist.' : 'Das Modell, das in Antigravity voreingestellt ist.';
 }
 
@@ -107,6 +108,8 @@ export function openModelDialog(pid, { onClose } = {}) {
       group('Bestimmte Version', models.filter((m) => m.gruppe === 'version'), 'Bleibt fest, auch wenn neuere Versionen erscheinen.'));
   } else if (pid === 'deepseek') {
     body.append(group('Modelle von DeepSeek', models, 'Bei „Gründlich“ denkt das Modell länger nach. Das dauert länger und kostet mehr.'));
+  } else if (pid === 'opencodego') {
+    body.append(group('Modelle von OpenCode Go', models, 'Die Liste kommt von OpenCode Go. Funktioniert ein Modell nicht, wähle ein anderes.') || h('p', { class: 'mg-note' }, 'Die Modellliste konnte nicht gelesen werden. Prüfe den Anbieter in den Einstellungen oder trage die Modell-ID selbst ein.'));
   } else {
     const g = group('Verfügbare Modelle', models.filter((m) => m.gruppe === 'verfuegbar'), 'Liste aus „agy models“. Steht eine Denkstufe im Namen (Low, Medium, High), gilt sie statt der Gründlichkeit.');
     body.append(g || h('p', { class: 'mg-note' }, 'Die Modellliste von Antigravity konnte nicht gelesen werden. Prüfe den Anbieter in den Einstellungen oder trage die Modell-ID selbst ein.'));
@@ -114,13 +117,13 @@ export function openModelDialog(pid, { onClose } = {}) {
 
   // Eigene Modell-ID
   const known = [{ id: '' }, ...models].some((m) => m.id === current);
-  const input = h('input', { class: 'input', id: 'model-own', spellcheck: 'false', autocomplete: 'off', value: known ? '' : current, placeholder: pid === 'claude' ? 'z. B. claude-opus-4-7' : pid === 'deepseek' ? 'z. B. deepseek-v4-pro' : 'z. B. gemini-3.1-pro-high' });
+  const input = h('input', { class: 'input', id: 'model-own', spellcheck: 'false', autocomplete: 'off', value: known ? '' : current, placeholder: pid === 'claude' ? 'z. B. claude-opus-4-7' : pid === 'deepseek' ? 'z. B. deepseek-v4-pro' : pid === 'opencodego' ? 'Modell-ID aus der Liste von OpenCode Go' : 'z. B. gemini-3.1-pro-high' });
   const use = btn('Verwenden', { cls: 'btn btn-soft' });
   const err = h('div', { class: 'field-note err', 'aria-live': 'polite' });
   const submit = () => {
     const v = input.value.trim();
     if (!v) { input.focus(); return; }
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,99}$/.test(v)) { err.textContent = 'Erlaubt sind Buchstaben, Ziffern und . - _ : [ ]'; input.focus(); return; }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,99}$/.test(v)) { err.textContent = 'Erlaubt sind Buchstaben, Ziffern und . - _ : / [ ]'; input.focus(); return; }
     pick(v);
   };
   use.addEventListener('click', submit);
@@ -130,6 +133,7 @@ export function openModelDialog(pid, { onClose } = {}) {
   body.append(h('p', { class: 'mg-note foot' }, pid === 'claude'
     ? 'Welche Modelle du nutzen kannst, hängt von deinem Claude-Konto ab. Die Auswahl gilt ab der nächsten Nachricht, auch in laufenden Chats.'
     : pid === 'deepseek' ? 'Die Abrechnung läuft über dein DeepSeek-Guthaben. Die Auswahl gilt ab der nächsten Nachricht.'
+      : pid === 'opencodego' ? 'Die Nutzung läuft über dein OpenCode-Go-Abo und seine Grenzen. Die Auswahl gilt ab der nächsten Nachricht.'
       : 'Welche Modelle du nutzen kannst, hängt von deinem Google-Konto ab. Die Auswahl gilt ab der nächsten Nachricht.'));
 
   d = dialog({ title: `Modell für ${p.name}`, body, onClose });

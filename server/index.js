@@ -19,6 +19,10 @@ const konvertieren = require('./konvertieren');
 const { Updater } = require('./update');
 const { Geheim } = require('./geheim');
 const deepseek = require('./providers/deepseek');
+const opencodego = require('./providers/opencodego');
+
+// Anbieter mit API-Schlüssel (Mango führt die Arbeitsschleife selbst aus): Modul je Kennung.
+const API_ANBIETER = { deepseek, opencodego };
 const system = require('./system');
 const { STATUS_INFO, PHASEN } = require('./aufgaben');
 const { kindLabel } = require('./extract');
@@ -61,14 +65,15 @@ async function autoSelect() {
   let ziel = s.provider;
   if (!st[ziel]) {
     // Der gewählte Anbieter gibt es auf diesem System nicht (z. B. auf dem Mac nur DeepSeek).
-    ziel = ['claude', 'antigravity', 'deepseek'].find((id) => st[id]) || ziel;
+    ziel = ['claude', 'antigravity', 'deepseek', 'opencodego'].find((id) => st[id]) || ziel;
   } else if (!s.anbieterGewaehlt) {
     if (bereit('claude')) ziel = 'claude';
     else if (installiert('antigravity') && st.antigravity.api !== true) ziel = 'antigravity';
     else if (st.claude && installiert('claude')) ziel = 'claude';
     else if (bereit('deepseek')) ziel = 'deepseek';
+    else if (bereit('opencodego')) ziel = 'opencodego';
   } else if (!installiert(ziel)) {
-    const anderer = ['claude', 'antigravity', 'deepseek'].find((id) => id !== ziel && installiert(id));
+    const anderer = ['claude', 'antigravity', 'deepseek', 'opencodego'].find((id) => id !== ziel && installiert(id));
     if (anderer) ziel = anderer;
   }
   const patch = {};
@@ -346,32 +351,35 @@ route('POST', /^\/api\/providers\/pruefen$/, async () => {
   return { settings: app.settings, providers: providers.publicState(), pruefung: false };
 });
 
-// DeepSeek: API-Schlüssel verbinden (wird geprüft, dann gespeichert) oder entfernen. Der Schlüssel
+// API-Schlüssel (DeepSeek, OpenCode Go) verbinden (wird geprüft, dann gespeichert) oder entfernen. Der Schlüssel
 // wird nie an die Oberfläche zurückgegeben.
-route('POST', /^\/api\/providers\/deepseek\/schluessel$/, async (req) => {
-  if (!providers.state.deepseek) throw new HttpError(404, 'DeepSeek ist hier nicht verfügbar.');
+route('POST', /^\/api\/providers\/(deepseek|opencodego)\/schluessel$/, async (req, url, m) => {
+  const id = m[1];
+  const anbieter = API_ANBIETER[id];
+  if (!providers.state[id]) throw new HttpError(404, `${anbieter.NAME} ist hier nicht verfügbar.`);
   const body = await readBody(req);
   const key = String(body.schluessel || '').trim();
-  if (!/^sk-[A-Za-z0-9_-]{16,200}$/.test(key)) throw new HttpError(400, 'Das sieht nicht wie ein DeepSeek-Schlüssel aus. Er beginnt mit „sk-“.');
-  const r = await deepseek.pruefeSchluessel(key);
+  if (!anbieter.SCHLUESSEL_MUSTER.test(key)) throw new HttpError(400, anbieter.SCHLUESSEL_FEHLER);
+  const r = await anbieter.pruefeSchluessel(key);
   if (!r.ok) throw new HttpError(r.netz ? 502 : 400, r.fehler);
-  await geheim.set('deepseek', key);
-  await providers.detect('deepseek');
+  await geheim.set(id, key);
+  await providers.detect(id);
   // Wer einen Schlüssel verbindet, will ihn nutzen.
-  await app.updateSettings({ provider: 'deepseek' });
+  await app.updateSettings({ provider: id });
   await autoSelect();
   return { settings: app.settings, providers: providers.publicState() };
 });
 
-route('DELETE', /^\/api\/providers\/deepseek\/schluessel$/, async () => {
-  if (!providers.state.deepseek) throw new HttpError(404, 'DeepSeek ist hier nicht verfügbar.');
-  await geheim.entfernen('deepseek');
-  await providers.detect('deepseek');
+route('DELETE', /^\/api\/providers\/(deepseek|opencodego)\/schluessel$/, async (req, url, m) => {
+  const id = m[1];
+  if (!providers.state[id]) throw new HttpError(404, `${API_ANBIETER[id].NAME} ist hier nicht verfügbar.`);
+  await geheim.entfernen(id);
+  await providers.detect(id);
   await autoSelect();
   return { settings: app.settings, providers: providers.publicState() };
 });
 
-route('POST', /^\/api\/providers\/(claude|antigravity|deepseek)\/check$/, async (req, url, m) => {
+route('POST', /^\/api\/providers\/(claude|antigravity|deepseek|opencodego)\/check$/, async (req, url, m) => {
   if (!providers.state[m[1]]) throw new HttpError(404, 'Diesen Anbieter gibt es hier nicht.');
   if (m[1] === 'antigravity') await providers.verify('antigravity', arbeitsordner());
   else await providers.detect(m[1]);
@@ -686,7 +694,7 @@ async function start({ port, open = false, host = null, log = console.log } = {}
   if (host) system.setHost(host);
   await app.load();
   geheim = new Geheim(app.dir, system.getHost());
-  deepseek.init({ geheim });
+  for (const a of Object.values(API_ANBIETER)) a.init({ geheim });
   const last = app.data.projects.find((p) => p.id === app.data.lastProjectId) || app.data.projects[0];
   if (last) {
     try {

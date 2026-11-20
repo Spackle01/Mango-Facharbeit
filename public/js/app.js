@@ -35,7 +35,7 @@ export function isStreaming(chatId = S.chatId) {
 
 const STATUS_SYMBOL = { offen: '×', in_arbeit: '?', erledigt: '✓' };
 const STATUS_LABEL = { offen: 'Offen', in_arbeit: 'In Arbeit', erledigt: 'Erledigt' };
-const PROVIDER_NAME = { claude: 'Claude Code', antigravity: 'Antigravity', deepseek: 'DeepSeek' };
+const PROVIDER_NAME = { claude: 'Claude Code', antigravity: 'Antigravity', deepseek: 'DeepSeek', opencodego: 'OpenCode Go' };
 
 // ---------- Farbschema ----------
 
@@ -764,7 +764,9 @@ function stilEl(st) {
   const behoben = Math.max(0, st.gefunden - offen.length);
   const stellen = (n) => `${n} ${n === 1 ? 'Stelle' : 'Stellen'}`;
   let text;
-  if (st.scan) {
+  if (st.scan === false) {
+    text = 'Scan: aus';
+  } else if (st.scan) {
     // Mango hat den Scan von ai-tell-audit auf den Text angewendet (bei Bedarf mit Überarbeitung und erneutem Scan).
     if (rest || offen.length) text = `Scan: ${stellen(Math.max(rest, offen.length))} noch auffällig`;
     else if (st.gefunden) text = `Scan: ${stellen(st.gefunden)} gefunden, Text überarbeitet`;
@@ -1193,11 +1195,12 @@ function buildComposer() {
   const fileInput = h('input', { type: 'file', multiple: true, hidden: true, 'aria-hidden': 'true', tabindex: '-1' });
   const attachBtn = btn('', { iconName: 'clip', cls: 'btn btn-icon', title: 'Datei anhängen', attrs: { 'aria-haspopup': 'menu' } });
   const providerBtn = h('button', { type: 'button', class: 'btn provider-pill', 'aria-haspopup': 'menu' });
+  const scanBtn = h('button', { type: 'button', class: 'btn scan-pill' });
   const sendBtn = h('button', { type: 'button', class: 'send-btn' });
   const composer = h('div', { class: 'composer' },
     h('div', { class: 'att-list', 'aria-label': 'Anhänge' }),
     ta,
-    h('div', { class: 'composer-bar' }, attachBtn, providerBtn, h('span', { class: 'spacer' }), sendBtn),
+    h('div', { class: 'composer-bar' }, attachBtn, providerBtn, scanBtn, h('span', { class: 'spacer' }), sendBtn),
     fileInput);
   wrap.append(h('div', { class: 'banner-slot' }), composer);
   ta.addEventListener('input', () => { autosize(ta); updateComposer(); });
@@ -1218,9 +1221,26 @@ function buildComposer() {
   });
   fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
   providerBtn.addEventListener('click', () => providerMenu(providerBtn));
+  scanBtn.addEventListener('click', () => scanUmschalten());
   sendBtn.addEventListener('click', () => (isStreaming() ? stop() : send()));
   S.els.textarea = ta;
   updateComposer();
+}
+
+// KI-Scan ein- oder ausschalten. Die Einstellung gilt ab der nächsten Nachricht (eine laufende Antwort bleibt, wie sie ist).
+export async function scanUmschalten(wert) {
+  const neu = typeof wert === 'boolean' ? wert : S.state.settings.scanAn === false;
+  try {
+    const r = await api.put('/api/settings', { scanAn: neu });
+    S.state.settings = r.settings;
+    updateComposer();
+    announce(`KI-Scan: ${neu ? 'an' : 'aus'}`);
+    toast(neu ? 'KI-Scan ist an. Texte werden ab der nächsten Nachricht geprüft.' : 'KI-Scan ist aus. Texte werden ab der nächsten Nachricht nicht geprüft.');
+    return neu;
+  } catch (err) {
+    toast(err.message, { error: true });
+    return !neu;
+  }
 }
 
 export function activeProvider() {
@@ -1239,6 +1259,14 @@ export function updateComposer() {
     modelName ? h('span', { class: 'pp-model' }, modelName) : null, iconEl('chevronDown', 14)].filter(Boolean));
   pill.setAttribute('aria-label', prov ? `KI-Anbieter: ${prov.name}, ${prov.label}, Modell: ${modelName || 'Standard'}. Ändern` : 'KI-Anbieter wählen');
   pill.title = prov ? `${prov.name}: ${prov.label} · Modell: ${modelName || 'Standard'}` : '';
+  // KI-Scan: Ein- und Ausschalter (gilt ab der nächsten Nachricht)
+  const scanPill = wrap.querySelector('.scan-pill');
+  const scanAn = S.state.settings.scanAn !== false;
+  scanPill.replaceChildren(iconEl(scanAn ? 'checks' : 'x', 14), h('span', {}, `Scan: ${scanAn ? 'an' : 'aus'}`));
+  scanPill.classList.toggle('aus', !scanAn);
+  scanPill.setAttribute('aria-pressed', scanAn ? 'true' : 'false');
+  scanPill.setAttribute('aria-label', `KI-Scan: ${scanAn ? 'an' : 'aus'}. Umschalten`);
+  scanPill.title = scanAn ? 'KI-Scan ist an: Mango prüft geschriebene Texte mit dem KI-Prüfer und lässt auffällige Stellen überarbeiten. Klicken zum Ausschalten.' : 'KI-Scan ist aus: Texte werden nicht geprüft. Klicken zum Einschalten.';
   if (isStreaming()) {
     sendBtn.className = 'send-btn stop';
     sendBtn.innerHTML = '';
@@ -1278,7 +1306,7 @@ function renderProviderBanner() {
     : [h('b', {}, `${prov.name}: ${prov.label}. `), prov.hint ? prov.hint.text : prov.detail || ''];
   const banner = h('div', { class: `provider-banner${bad ? ' danger' : ''}`, role: 'status' }, h('span', { class: 'txt' }, text));
   if (prov.hint && prov.hint.aktion === 'schluessel') {
-    banner.append(schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
+    banner.append(schluesselFormular({ provider: prov.id, kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
   } else {
     if (prov.hint && prov.hint.befehl) {
       banner.append(h('code', { class: 'cmd' }, prov.hint.befehl), btn('Kopieren', { iconName: 'copy', cls: 'btn btn-sm', size: 15, onClick: () => copyText(prov.hint.befehl) }));
@@ -1294,6 +1322,7 @@ const SETUP_INFO = {
   claude: 'Von Anthropic. Du brauchst ein Claude-Konto mit Abo (z. B. Pro oder Max).',
   antigravity: 'Von Google. Du meldest dich mit deinem Google-Konto an.',
   deepseek: 'Über die DeepSeek-API mit eigenem Schlüssel. Es wird nichts installiert, du zahlst nach Verbrauch.',
+  opencodego: 'Über das OpenCode-Go-Abo mit eigenem Schlüssel. Es wird nichts installiert, die Nutzung ist im Abo enthalten.',
 };
 
 function setupCard() {
@@ -1302,9 +1331,9 @@ function setupCard() {
     const hint = p.hint || {};
     if (p.api) {
       return h('div', { class: 'setup-option' },
-        h('div', { class: 'so-head' }, h('b', {}, 'DeepSeek')),
-        h('p', { class: 'so-info' }, SETUP_INFO.deepseek),
-        schluesselFormular({ kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
+        h('div', { class: 'so-head' }, h('b', {}, p.name)),
+        h('p', { class: 'so-info' }, SETUP_INFO[p.id] || ''),
+        schluesselFormular({ provider: p.id, kompakt: true, onFertig: (r) => { Object.assign(S.state, { settings: r.settings, providers: r.providers }); updateComposer(); } }));
     }
     return h('div', { class: 'setup-option' },
       h('div', { class: 'so-head' }, h('b', {}, p.name),
@@ -1317,9 +1346,9 @@ function setupCard() {
   return h('div', { class: 'provider-banner setup', role: 'status' },
     S.state.providers.some((p) => !p.api)
       ? h('div', { class: 'setup-head' }, h('b', {}, 'Bitte richte einen KI-Anbieter ein.'),
-        h('span', {}, 'Damit Mango antworten kann, brauchst du Claude Code, Antigravity oder einen DeepSeek-Schlüssel. Einer reicht. Danach hier auf „Erneut prüfen“ klicken.'))
-      : h('div', { class: 'setup-head' }, h('b', {}, 'Bitte verbinde deinen DeepSeek-Schlüssel.'),
-        h('span', {}, 'Damit Mango antworten kann, braucht es einen API-Schlüssel von DeepSeek. Du erstellst ihn in wenigen Minuten auf platform.deepseek.com.')),
+        h('span', {}, 'Damit Mango antworten kann, brauchst du Claude Code, Antigravity oder einen API-Schlüssel (DeepSeek oder OpenCode Go). Einer reicht. Danach hier auf „Erneut prüfen“ klicken.'))
+      : h('div', { class: 'setup-head' }, h('b', {}, 'Bitte verbinde einen API-Schlüssel.'),
+        h('span', {}, 'Damit Mango antworten kann, braucht es einen API-Schlüssel von DeepSeek oder OpenCode Go. Einer reicht.')),
     h('div', { class: 'setup-options' }, S.state.providers.map(option)),
     h('div', { class: 'setup-foot' }, btn('Erneut prüfen', { iconName: 'refresh', cls: 'btn btn-sm btn-soft', size: 15, onClick: checkAllProviders })));
 }

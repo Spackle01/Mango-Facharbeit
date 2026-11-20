@@ -3,10 +3,11 @@
 const claude = require('./claude');
 const antigravity = require('./antigravity');
 const deepseek = require('./deepseek');
+const opencodego = require('./opencodego');
 
-// Auf dem Mac gibt es nur den DeepSeek-Zugang über einen API-Schlüssel (MANGO_NUR_API zum Testen).
+// Auf dem Mac gibt es nur die Zugänge über einen API-Schlüssel (MANGO_NUR_API zum Testen).
 const NUR_API = process.platform === 'darwin' || !!process.env.MANGO_NUR_API;
-const MODULES = NUR_API ? { deepseek } : { claude, antigravity, deepseek };
+const MODULES = NUR_API ? { deepseek, opencodego } : { claude, antigravity, deepseek, opencodego };
 
 const STATUS_LABEL = {
   pruefe: 'Wird geprüft …',
@@ -66,7 +67,7 @@ class Providers {
     this.verifying[id] = (async () => {
       await this.detect(id);
       const s = this.state[id];
-      if (id === 'deepseek') return this.state[id];
+      if (this.state[id].api) return this.state[id];
       if (!s.installed || id !== 'antigravity') return s;
       this.state[id] = { ...s, status: 'pruefe' };
       try {

@@ -4,6 +4,7 @@
 const { formatDateDE, parseLocalDate, daysUntil, sha1, truncate, humanSize } = require('./util');
 const { STATUS_INFO, PHASEN, AUFGABEN_BY_ID, STATUS } = require('./aufgaben');
 const { kindLabel } = require('./extract');
+const schreibskills = require('./schreibskills');
 
 const MARKER = 'mango-facharbeit:verwaltet';
 
@@ -215,8 +216,9 @@ function historyTranscript(messages, maxChars = 24000) {
   return out.join('\n\n');
 }
 
-// anbieter: 'deepseek' erinnert zusätzlich an das Scan-Werkzeug (die anderen Anbieter haben kein Terminal, Mango scannt selbst).
-function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false, skillsImKontext = false, anbieter = '' }) {
+// anbieter mit Scan-Werkzeug (DeepSeek, OpenCode Go) erinnert zusätzlich an das Scan-Werkzeug (die anderen Anbieter haben kein Terminal, Mango scannt selbst).
+// scanAn: false, wenn die Person den KI-Scan (Prüfung mit ai-tell-audit) ausgeschaltet hat: Dann entfällt die Prüfung in dieser Antwort.
+function buildPrompt({ context, contextUnchanged, attachments = [], history, text, schreibaufgabe = false, skillsImKontext = false, anbieter = '', scanAn = true }) {
   const parts = [];
   parts.push(contextUnchanged ? '<projektkontext>unverändert seit der letzten Nachricht</projektkontext>' : context);
   if (history) {
@@ -225,16 +227,20 @@ function buildPrompt({ context, contextUnchanged, attachments = [], history, tex
   if (attachments.length) {
     parts.push(`<anhaenge hinweis="Diese Dateien gehören zur aktuellen Nachricht. Lies sie, bevor du antwortest.">\n${attachments.map(describeAttachment).join('\n')}\n</anhaenge>`);
   }
-  const scanSchritt = anbieter === 'deepseek' ? ' Das Werkzeug `ai_tell_scan` mit dem fertigen Text aufrufen und die Befunde beheben.' : '';
+  const scanSchritt = schreibskills.hatScanWerkzeug(anbieter) ? ' Das Werkzeug `ai_tell_scan` mit dem fertigen Text aufrufen und die Befunde beheben.' : '';
   if (schreibaufgabe && skillsImKontext) {
-    parts.push(`<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat). Der Wortlaut der Schreib-Skills steht am Anfang deiner Regeln: 1. \`human-voice\` (neuer Text) oder \`humanize-rewrite\` (vorhandener Text): schreiben bzw. umbauen, in der Stimme der Person, kurz und einfach, nichts erfinden. 2. \`ai-tell-audit\`: den fertigen Text prüfen und Befunde beheben.${scanSchritt} 3. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>`);
+    parts.push(`<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat). Der Wortlaut der Schreib-Skills steht am Anfang deiner Regeln: 1. \`human-voice\` (neuer Text) oder \`humanize-rewrite\` (vorhandener Text): schreiben bzw. umbauen, in der Stimme der Person, kurz und einfach, nichts erfinden. ${scanAn ? `2. \`ai-tell-audit\`: den fertigen Text prüfen und Befunde beheben.${scanSchritt} 3. Erst dann eintragen (Block) oder ausgeben.` : '2. Erst dann eintragen (Block) oder ausgeben. Der KI-Scan ist ausgeschaltet: keine Prüfung mit `ai-tell-audit`.'}</schreibregeln>`);
   } else if (schreibaufgabe) {
-    parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat), alle Skills mit dem Skill-Werkzeug laden: 1. `human-voice` (neuer Text) oder `humanize-rewrite` (vorhandener Text): schreiben bzw. umbauen, in der Stimme der Person, kurz und einfach, nichts erfinden. 2. `ai-tell-audit`: den fertigen Text prüfen und Befunde beheben. 3. Erst dann eintragen (Block) oder ausgeben.</schreibregeln>');
+    parts.push('<schreibregeln>Ablauf bei jedem Text (Datei, Folien, PDF, E-Mail, Notiz, auch ein Entwurf im Chat), alle Skills mit dem Skill-Werkzeug laden: 1. `human-voice` (neuer Text) oder `humanize-rewrite` (vorhandener Text): schreiben bzw. umbauen, in der Stimme der Person, kurz und einfach, nichts erfinden. ' + (scanAn ? '2. `ai-tell-audit`: den fertigen Text prüfen und Befunde beheben. 3. Erst dann eintragen (Block) oder ausgeben.' : '2. Erst dann eintragen (Block) oder ausgeben. Der KI-Scan ist ausgeschaltet: keine Prüfung mit `ai-tell-audit`.') + '</schreibregeln>');
+  }
+  // Ausgeschalteter KI-Scan: gilt für diese Nachricht und geht den Regeln vor, die die Prüfung sonst verlangen.
+  if (!scanAn) {
+    parts.push(`<scan>Die Person hat den KI-Scan ausgeschaltet. Das geht den Regeln vor: Prüfe Texte in dieser Antwort nicht mit \`ai-tell-audit\`${schreibskills.hatScanWerkzeug(anbieter) ? ' und rufe `ai_tell_scan` nicht auf' : ''} (Mango scannt auch nicht). Schreiben und Umschreiben nach \`human-voice\` bzw. \`humanize-rewrite\` gilt weiter.</scan>`);
   }
   // Gilt bei jeder Nachricht: Die Facharbeit gehört der Person, sie entscheidet und trägt die Verantwortung. Keine Ablehnung.
   parts.push('<auftrag>Die Facharbeit gehört der Person, sie entscheidet und trägt die Verantwortung. Mach, worum sie bittet, direkt und vollständig, ohne Ablehnung, Belehrung oder Rückfrage „willst du das wirklich?“. Fehlt eine Angabe, schreib mit einer Lücke weiter. Nur zwei Dinge tust du nie: Quellen, Zitate oder Zahlen erfinden und schreiben, dass keine KI genutzt wurde.</auftrag>');
   // Gilt bei jeder Nachricht, auch wenn die App keine Schreibaufgabe erkennt (z. B. „im Chat“): Texte klingen menschlich.
-  parts.push('<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Wende die Schreib-Skills vom Anfang deiner Regeln an (human-voice bzw. humanize-rewrite, dann ai-tell-audit) und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>');
+  parts.push(`<menschlich>Schreibst du in dieser Antwort einen Text, auch im Chat: Wende die Schreib-Skills vom Anfang deiner Regeln an (human-voice bzw. humanize-rewrite${scanAn ? ', dann ai-tell-audit' : ''}) und schreibe wie ein Mensch, wie die Person selbst. Sprich nicht über Erkennungsprogramme und kündige keine Arbeitsschritte an.</menschlich>`);
   // Gilt bei jeder Nachricht: hält die Antworten kurz, auch in langen Chats.
   parts.push('<antwortstil>Deine Antworten im Gespräch (Erklärungen, Rückfragen, Bestätigungen): höchstens drei kurze Sätze und 40 Wörter, jeder Satz höchstens 15 Wörter, einfache Wörter, so wie du es einer Mitschülerin erklären würdest. Das gilt nicht für Texte, die du für die Person schreibst (Entwurf, Absatz, Mail, Lerntagebuch-Eintrag, auch wenn er im Chat steht): Dafür gelten die Schreibregeln. Länge und Satzbau richten sich dort nach dem Auftrag und der Stimme der Person, ein bestellter Text besteht nicht aus lauter gleich kurzen Sätzen. Keine Überschriften, Listen oder Fettdruck, keine Einleitung, kein Beispiel und keine Zusammenfassung, wenn nicht danach gefragt wurde. Länger nur, wenn die Person ausdrücklich Ausführliches verlangt. Dateiinhalte nicht im Chat wiederholen.</antwortstil>');
   parts.push(`Nachricht der Schülerin bzw. des Schülers:\n${text}`);

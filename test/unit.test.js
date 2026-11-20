@@ -209,7 +209,7 @@ test('Einstellungen: automatische Wahl überschreibt keine eigene Wahl', async (
     let st = new AppStore();
     await st.load();
     assert.strictEqual(st.settings.provider, 'claude');
-    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '' });
+    assert.deepStrictEqual(st.settings.modelle, { claude: 'sonnet', antigravity: '', deepseek: '', opencodego: '' });
     assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt);
     await st.updateSettings({ provider: 'antigravity', modelle: { antigravity: 'gemini-3.1-pro-high' } }, { auto: true });
     assert.ok(!st.settings.anbieterGewaehlt && !st.settings.modellGewaehlt, 'automatisch heißt nicht gewählt');
@@ -921,6 +921,48 @@ test('Sprachprüfung: harte Treffer müssen geändert werden, Prüfhinweise ents
   const c2 = stil.chatNachholenPrompt([], '', [{ satz: 'Gerne!', grund: 'Chatbot-Rest', hart: true }, { satz: '', grund: 'Absätze alle ähnlich lang' }]);
   assert.match(c2, /Der Scan von `ai-tell-audit`[\s\S]*findet darin noch Muster/);
   assert.match(c2, /- „Gerne!“ – Chatbot-Rest \(ändern\)\n- Ganzer Text – Absätze alle ähnlich lang/);
+});
+
+test('KI-Scan ein- und ausschalten: Einstellung, Pflichtschritte und Prompt', async () => {
+  const { AppStore } = require('../server/store');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-scan-an-'));
+  const prev = process.env.MANGO_DATA_DIR;
+  process.env.MANGO_DATA_DIR = dir;
+  try {
+    let st = new AppStore();
+    await st.load();
+    assert.strictEqual(st.settings.scanAn, true, 'standardmäßig an');
+    await st.updateSettings({ scanAn: 'nein' });
+    assert.strictEqual(st.settings.scanAn, true, 'nur Wahrheitswerte gelten');
+    await st.updateSettings({ scanAn: false });
+    assert.strictEqual(st.settings.scanAn, false);
+    st = new AppStore();
+    await st.load();
+    assert.strictEqual(st.settings.scanAn, false, 'bleibt gespeichert');
+    await st.updateSettings({ scanAn: true });
+    assert.strictEqual(st.settings.scanAn, true);
+  } finally {
+    if (prev === undefined) delete process.env.MANGO_DATA_DIR; else process.env.MANGO_DATA_DIR = prev;
+  }
+  // Ohne Scan verlangt Mango nur noch das Schreiben bzw. Umschreiben, bei keinem Anbieter die Prüfung oder das Scan-Werkzeug.
+  for (const anbieter of ['claude', 'deepseek', 'opencodego']) {
+    assert.deepStrictEqual(schreibskills.fehlend(new Set(), anbieter, { scan: false }).map((a) => a.id), ['schreiben'], anbieter);
+    assert.deepStrictEqual(schreibskills.fehlend(new Set(['human-voice']), anbieter, { scan: false }), [], anbieter);
+    assert.ok(schreibskills.fehlend(new Set(['human-voice']), anbieter).length >= 1, `${anbieter}: mit Scan fehlt die Prüfung weiter`);
+  }
+  // Prompt: Der Hinweis steht nur bei ausgeschaltetem Scan und geht den Regeln vor.
+  const p = (o) => ctx.buildPrompt({ context: '<k/>', text: 'Schreib einen Absatz', schreibaufgabe: true, skillsImKontext: true, ...o });
+  assert.ok(!/<scan>/.test(p({ anbieter: 'claude' })), 'bei eingeschaltetem Scan kein Hinweis');
+  assert.match(p({ anbieter: 'claude' }), /<schreibregeln>.*2\. `ai-tell-audit`/);
+  const aus = p({ anbieter: 'claude', scanAn: false });
+  assert.match(aus, /<scan>Die Person hat den KI-Scan ausgeschaltet\. Das geht den Regeln vor: Prüfe Texte in dieser Antwort nicht mit `ai-tell-audit` \(Mango scannt auch nicht\)/);
+  assert.ok(!/ai_tell_scan/.test(aus), 'Anbieter ohne Werkzeug: kein Hinweis auf das Werkzeug');
+  assert.match(aus, /<schreibregeln>[^<]*Der KI-Scan ist ausgeschaltet: keine Prüfung mit `ai-tell-audit`\./);
+  assert.ok(!/<schreibregeln>[^<]*2\. `ai-tell-audit`/.test(aus));
+  assert.match(aus, /<menschlich>[^<]*\(human-voice bzw\. humanize-rewrite\) und schreibe wie ein Mensch/, 'Menschlich-Erinnerung ohne Prüfung');
+  assert.match(p({ anbieter: 'deepseek', scanAn: false }), /rufe `ai_tell_scan` nicht auf/);
+  assert.ok(!/ai_tell_scan/.test(p({ anbieter: 'deepseek', scanAn: false }).match(/<schreibregeln>[\s\S]*?<\/schreibregeln>/)[0]), 'auch die Schreibregeln verlangen das Werkzeug dann nicht');
+  assert.match(ctx.buildPrompt({ context: '', text: 'Hallo', scanAn: false }), /<scan>/, 'der Hinweis gilt auch ohne erkannte Schreibaufgabe');
 });
 
 test('Chat-Liste: Datumsgruppen und Suche nach Titel', async () => {

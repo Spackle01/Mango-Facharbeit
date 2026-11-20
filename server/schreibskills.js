@@ -5,6 +5,10 @@
 
 const SCAN_WERKZEUG = 'ai_tell_scan';
 
+// Anbieter mit API-Schlüssel ohne Terminal (eigene Arbeitsschleife in Mango): Sie rufen den Scan als Werkzeug auf.
+const API_ANBIETER = ['deepseek', 'opencodego'];
+const hatScanWerkzeug = (anbieter) => API_ANBIETER.includes(anbieter);
+
 const ANFORDERUNGEN = [
   { id: 'schreiben', skills: ['human-voice', 'humanize-rewrite'], text: '`human-voice` (neuer Text) oder `humanize-rewrite` (vorhandener Text)' },
   { id: 'pruefung', skills: ['ai-tell-audit'], text: '`ai-tell-audit`' },
@@ -30,13 +34,15 @@ const BLOCK_TITEL = '## Schreib-Skills: Wortlaut (zuerst lesen)';
 const VERALTET = ['wissenschaftlich-schreiben', 'sprachpruefung', 'stimmenprofil', 'natuerlich-schreiben', 'stilrevision', 'textpruefung'];
 
 // Anforderungen, für die in `geladen` (Menge von Skill- bzw. Werkzeugnamen) noch nichts Passendes vorkommt.
-function fehlend(geladen, anbieter = '') {
-  return (anbieter === 'deepseek' ? DEEPSEEK_ANFORDERUNGEN : ANFORDERUNGEN).filter((a) => !a.skills.some((s) => geladen.has(s)));
+// `scan: false` (Scan von der Person ausgeschaltet): Verlangt wird nur noch das Schreiben bzw. Umschreiben, weder die Prüfung noch das Scan-Werkzeug.
+function fehlend(geladen, anbieter = '', { scan = true } = {}) {
+  const liste = hatScanWerkzeug(anbieter) ? DEEPSEEK_ANFORDERUNGEN : ANFORDERUNGEN;
+  return liste.filter((a) => (scan || a.id === 'schreiben') && !a.skills.some((s) => geladen.has(s)));
 }
 
 // Geladene Schreib-Skills (bei DeepSeek zusätzlich das Scan-Werkzeug) in fester Reihenfolge.
 function geladene(geladen, anbieter = '') {
-  return [...ALLE, ...(anbieter === 'deepseek' ? [SCAN_WERKZEUG] : [])].filter((s) => geladen.has(s));
+  return [...ALLE, ...(hatScanWerkzeug(anbieter) ? [SCAN_WERKZEUG] : [])].filter((s) => geladen.has(s));
 }
 
-module.exports = { ANFORDERUNGEN, DEEPSEEK_ANFORDERUNGEN, SCAN_WERKZEUG, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, VERALTET, fehlend, geladene };
+module.exports = { API_ANBIETER, hatScanWerkzeug, ANFORDERUNGEN, DEEPSEEK_ANFORDERUNGEN, SCAN_WERKZEUG, ALLE, REIHENFOLGE, PLATZHALTER, BLOCK_TITEL, VERALTET, fehlend, geladene };
