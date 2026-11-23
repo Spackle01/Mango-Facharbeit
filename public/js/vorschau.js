@@ -3,8 +3,11 @@ import { api } from './api.js';
 import { h, btn, toast, dialog, iconEl, fmtRelative } from './ui.js';
 import { fileIcon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
+import { S } from './app.js';
 
 export async function openExternal(path, { reveal = false } = {}) {
+  // iPad-App: Datei laden und über „Teilen“ anbieten (siehe openFile in app.js)
+  if (S.state.ipad) { window.location.href = api.rawUrl(path, true); return; }
   try {
     await api.post('/api/files/open', { path, reveal });
   } catch (err) {

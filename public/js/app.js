@@ -113,6 +113,9 @@ export async function setTaskStatus(id, status) {
 // ---------- Dateien öffnen ----------
 
 export async function openFile(path, { reveal = false } = {}) {
+  // iPad-App: Es gibt keinen Dateimanager und keine Programme zum Öffnen. Die Datei wird geladen und über „Teilen“ angeboten
+  // (Sichern in „Dateien“, Öffnen in Word usw.).
+  if (S.state.ipad) { window.location.href = api.rawUrl(path, true); return; }
   try {
     await api.post('/api/files/open', { path, reveal });
   } catch (err) {
@@ -430,6 +433,7 @@ export function openUpdateDialog() {
 
 // Öffnet den Arbeitsordner im Dateimanager.
 export async function openWorkspaceFolder() {
+  if (S.state.ipad) { toast('Auf dem iPad liegen deine Dateien in der Dateien-App unter „Auf meinem iPad“ → „Mango Facharbeit“.'); return; }
   try { await api.post('/api/workspace/open', {}); } catch (err) { toast(err.message, { error: true }); }
 }
 

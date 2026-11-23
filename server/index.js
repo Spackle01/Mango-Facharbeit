@@ -124,6 +124,7 @@ async function statePayload() {
   return {
     version: PKG.version,
     platform: process.platform,
+    ipad: !!process.env.MANGO_IPAD, // läuft in der iPad-App: Dateien werden über „Teilen“ geöffnet, es gibt keinen Dateimanager
     settings: app.settings,
     hasProjects: app.data.projects.length > 0,
     project: projectPayload(project),

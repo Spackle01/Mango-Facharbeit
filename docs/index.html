@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mango-Facharbeit – dein Assistent für die Facharbeit</title>
-<meta name="description" content="Mango-Facharbeit begleitet dich durch die Facharbeit: Lerntagebuch und Facharbeit direkt in Word, PDF und PowerPoint erstellen, Ordner aufräumen. Kostenloser Download für Windows und Mac.">
+<meta name="description" content="Mango-Facharbeit begleitet dich durch die Facharbeit: Lerntagebuch und Facharbeit direkt in Word, PDF und PowerPoint erstellen, Ordner aufräumen. Kostenloser Download für Windows, Mac und iPad (experimentell).">
 <meta name="theme-color" content="#f2ead7">
 <meta property="og:title" content="Mango-Facharbeit">
-<meta property="og:description" content="Dein Assistent für die Facharbeit. Download für Windows und Mac.">
+<meta property="og:description" content="Dein Assistent für die Facharbeit. Download für Windows, Mac und iPad (experimentell).">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="favicon.png">
 <style>
@@ -86,6 +86,10 @@ h1 .zwei { margin-left: .04em; }
 .dl-row.zwei { align-items: stretch; gap: 18px 22px; }
 .dl-row.zwei .dl { padding: 16px 26px; }
 .meta { margin-top: 22px; }
+.dl.ipad { background: var(--paper, #fff); color: var(--ink); }
+.ipad-karte { max-width: 760px; }
+.ipad-karte p, .ipad-karte li { line-height: 1.5; }
+.ipad-karte ol { padding-left: 1.2em; }
 .macnote { display: none; }
 .ist-mac .macnote { display: block; }
 .ist-mac .winnote { display: none; }
@@ -148,7 +152,7 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
 <header class="hero">
   <div class="wrap top">
     <a class="brand" href="#"><img src="logo.png" alt="" width="30" height="30"> Mango</a>
-    <span class="tag">Beta · Windows &amp; Mac</span>
+    <span class="tag">Beta · Windows, Mac &amp; iPad</span>
   </div>
 
   <div class="poster" aria-hidden="true">
@@ -189,6 +193,10 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
         <span class="t">Für Mac<small>Apple-Chip (M1 und neuer)</small></span>
       </a>
+      <a class="dl zweit ipad" id="dl-ipad" href="#ipad">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+        <span class="t">Für iPad<small>experimentell · iPadOS 15 und neuer</small></span>
+      </a>
     </div>
     <p class="meta" id="meta">Kostenlos · <a href="https://github.com/Spackle01/Mango-Facharbeit/releases">Alle Versionen</a></p>
   </div>
@@ -217,6 +225,21 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
         <p>Sag der KI, was du gemacht hast. Sie trägt es ins Lerntagebuch ein, in kurzen, einfachen Sätzen.</p>
       </li>
     </ol>
+  </div>
+</section>
+
+<section class="band" id="ipad">
+  <div class="wrap ipad-karte">
+    <h2>Mango auf dem iPad (experimentell)</h2>
+    <p>Die iPad-Version ist eine <b>.ipa-Datei</b>. Sie ist <b>nicht von Apple signiert</b> und noch <b>nicht auf einem echten iPad getestet</b>. Du kannst sie deshalb nicht einfach antippen und installieren, sondern spielst sie mit einem Hilfsprogramm auf das iPad:</p>
+    <ol>
+      <li>Lade die <b>.ipa</b> mit dem Knopf „Für iPad“ oben herunter (auf deinem Computer).</li>
+      <li>Installiere auf dem Computer <b>Sideloadly</b> oder <b>AltStore</b>, verbinde das iPad per Kabel und wähle die .ipa. Du meldest dich dabei mit deiner Apple-ID an.</li>
+      <li>Mit einer kostenlosen Apple-ID läuft die App <b>7 Tage</b>, danach installierst du sie neu. Ein Entwicklerkonto von Apple (99 Dollar im Jahr) verlängert das auf ein Jahr.</li>
+      <li>Auf dem iPad: Einstellungen → Allgemein → VPN und Geräteverwaltung → deiner Apple-ID vertrauen. Dann Mango öffnen.</li>
+    </ol>
+    <p><b>Was geht:</b> Mango mit einem <b>DeepSeek</b>- oder <b>OpenCode-Go</b>-Schlüssel, deine Dateien liegen in der Dateien-App unter „Auf meinem iPad“ → „Mango Facharbeit“. Word, PDF und ZIP öffnest du über „Teilen“.</p>
+    <p><b>Was nicht geht:</b> Claude Code und Antigravity (gibt es nur am Computer), Word-Dateien direkt in einem Programm öffnen, eine Antwort im Hintergrund zu Ende schreiben lassen, wenn du die App für länger verlässt.</p>
   </div>
 </section>
 
@@ -258,10 +281,19 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
   var repo = 'Spackle01/Mango-Facharbeit';
   var seite = 'https://github.com/' + repo + '/releases';
   var ua = navigator.userAgent || '';
-  var istMac = /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad|iPod/.test(ua);
+  var istMac = /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad|iPod/.test(ua) && !(navigator.maxTouchPoints > 1);
   var win = document.getElementById('dl-win');
   var mac = document.getElementById('dl-mac');
   var meta = document.getElementById('meta');
+  var ipad = document.getElementById('dl-ipad');
+  // iPads melden sich seit iPadOS 13 wie ein Mac, verraten sich aber durch den Touchscreen.
+  var istIpad = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+
+  if (istIpad) {
+    ipad.classList.remove('zweit');
+    win.classList.add('zweit');
+    ipad.parentNode.insertBefore(ipad, win); // das eigene System steht vorn
+  }
 
   if (istMac) {
     document.documentElement.classList.add('ist-mac');
@@ -282,7 +314,7 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
     return true;
   }
 
-  var muster = { win: /\.exe$/i, arm: /-Mac-arm64\.dmg$/i, intel: /-Mac-x64\.dmg$/i };
+  var muster = { win: /\.exe$/i, arm: /-Mac-arm64\.dmg$/i, intel: /-Mac-x64\.dmg$/i, ipad: /-iPad\.ipa$/i };
   function finde(rel, art) { return rel.assets.find(function (a) { return muster[art].test(a.name); }); }
 
   fetch('https://api.github.com/repos/' + repo + '/releases?per_page=15', { headers: { Accept: 'application/vnd.github+json' } })
@@ -290,8 +322,9 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
     .then(function (list) {
       var offen = list.filter(function (r) { return !r.draft; });
       function neueste(art) { var rel = offen.find(function (r) { return !!finde(r, art); }); return rel && { rel: rel, a: finde(rel, art) }; }
-      var w = neueste('win'), arm = neueste('arm'), intel = neueste('intel');
+      var w = neueste('win'), arm = neueste('arm'), intel = neueste('intel'), ip = neueste('ipad');
       if (w) win.href = w.a.browser_download_url;
+      if (ip) ipad.href = ip.a.browser_download_url;
 
       var macArt = (istMac && !appleChip() && intel) ? intel : (arm || intel);
       if (macArt) {
@@ -311,6 +344,7 @@ footer a { color: var(--ink); font-weight: 700; text-underline-offset: 3px; }
         var anderer = macArt === intel ? arm : intel;
         html += '<br>Mac mit ' + (macArt === intel ? 'Apple-Chip' : 'Intel-Chip') + '? <a href="' + anderer.a.browser_download_url + '">Hier herunterladen</a>';
       }
+      html += '<br>iPad? <a href="#ipad">Anleitung zur iPad-Version (experimentell)</a>';
       html += '<br><a href="' + seite + '">Alle Versionen</a>';
       meta.innerHTML = html;
     })
