@@ -965,45 +965,6 @@ test('KI-Scan ein- und ausschalten: Einstellung, Pflichtschritte und Prompt', as
   assert.match(ctx.buildPrompt({ context: '', text: 'Hallo', scanAn: false }), /<scan>/, 'der Hinweis gilt auch ohne erkannte Schreibaufgabe');
 });
 
-test('iPad-App: Das Startskript (nodejs-mobile) startet den Server nur mit API-Anbietern und meldet die Adresse', async () => {
-  const { spawn } = require('child_process');
-  const net = require('net');
-  const frei = await new Promise((res) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ipad-'));
-  const daten = path.join(dir, 'Library', 'Application Support', 'Mango-Facharbeit');
-  const heim = path.join(dir, 'home');
-  fs.mkdirSync(heim, { recursive: true });
-  const env = { ...process.env };
-  for (const k of ['MANGO_NUR_API', 'MANGO_IPAD', 'MANGO_DATA_DIR']) delete env[k];
-  const proc = spawn(process.execPath, [path.join(ROOT, 'ios', 'nodejs-project', 'main.js'), daten, heim, String(frei)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  try {
-    const datei = path.join(daten, 'laeuft.txt');
-    const fehlerDatei = path.join(daten, 'fehler.txt');
-    const start = Date.now();
-    while (!fs.existsSync(datei) && !fs.existsSync(fehlerDatei) && Date.now() - start < 20000) await new Promise((r) => setTimeout(r, 100));
-    assert.ok(!fs.existsSync(fehlerDatei), fs.existsSync(fehlerDatei) ? fs.readFileSync(fehlerDatei, 'utf8') : '');
-    const url = fs.readFileSync(datei, 'utf8');
-    assert.strictEqual(url, `http://127.0.0.1:${frei}/`);
-    const html = await (await fetch(url)).text();
-    const token = /name="mango-token" content="([a-f0-9]+)"/.exec(html)[1];
-    const get = async (p) => (await fetch(url.replace(/\/$/, '') + p, { headers: { 'x-mango-token': token } })).json();
-    const st = await get('/api/state');
-    assert.strictEqual(st.ipad, true, 'die Oberfläche weiß, dass sie in der iPad-App läuft');
-    const anbieter = await get('/api/providers');
-    assert.deepStrictEqual(anbieter.map((p) => p.id), ['deepseek', 'opencodego'], 'keine Kommandozeilen-Anbieter auf dem iPad');
-    assert.ok(fs.existsSync(daten), 'Daten liegen im Datenordner der App');
-  } finally {
-    proc.kill();
-    await new Promise((r) => (proc.exitCode !== null ? r() : proc.once('exit', r)));
-  }
-  // Ohne Argumente: verständliche Fehlerdatei statt Absturz
-  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mango-ipad2-'));
-  const r = require('child_process').spawnSync(process.execPath, [path.join(ROOT, 'ios', 'nodejs-project', 'main.js'), path.join(dir2, 'daten'), '', '4317'], { encoding: 'utf8' });
-  assert.ok(fs.existsSync(path.join(dir2, 'daten', 'fehler.txt')));
-  assert.match(fs.readFileSync(path.join(dir2, 'daten', 'fehler.txt'), 'utf8'), /Aufruf: main\.js/);
-  void r;
-});
-
 test('Chat-Liste: Datumsgruppen und Suche nach Titel', async () => {
   const { chatGruppe, gruppiere, GRUPPEN } = await import('../public/js/chatliste.js');
   const jetzt = new Date(2026, 10, 3, 9, 30); // 03.11.2026

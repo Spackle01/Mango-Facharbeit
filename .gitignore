@@ -3,14 +3,3 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
-
-# iPad-App: Build-Zwischenstände (erzeugt von ios/vorbereiten.sh und XcodeGen)
-ios/nodejs-project/server/
-ios/nodejs-project/public/
-ios/nodejs-project/ressourcen/
-ios/nodejs-project/package.json
-ios/Frameworks/
-ios/tmp/
-ios/build/
-ios/*.xcodeproj/
-ios/App/Info.plist

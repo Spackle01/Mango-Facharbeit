@@ -1,4 +1,4 @@
-name: Release (Windows-, Mac- und iPad-App)
+name: Release (Windows-App)
 
 # Läuft bei jedem Push: Tests, Bau des Windows-Installers, Starttest der gebauten und der
 # installierten App. Ein Release entsteht, wenn es für die Version aus package.json noch
@@ -132,86 +132,10 @@ jobs:
             dist/Mango-Facharbeit-*-Mac-*.dmg.sha256
           if-no-files-found: error
 
-  # Die iPad-App läuft mit Node.js 18 (nodejs-mobile). Dieser Lauf zeigt, ob Mango dort noch funktioniert.
-  node18:
-    name: Tests mit Node 18 (iPad)
-    needs: test
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      - name: Tests
-        run: npm test
-
-  ipad:
-    name: iPad-App bauen
-    needs: test
-    runs-on: macos-latest
-    # Ein Fehler beim iPad-Bau blockiert das Windows-Release nicht.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: XcodeGen installieren
-        run: brew install xcodegen
-      - name: Vorbereiten (Server in die App, NodeMobile laden)
-        run: ./ios/vorbereiten.sh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Xcode-Projekt erzeugen
-        working-directory: ios
-        run: xcodegen generate
-      - name: App bauen (ohne Signatur)
-        working-directory: ios
-        run: |
-          set -o pipefail
-          xcodebuild -project MangoFacharbeit.xcodeproj -scheme MangoFacharbeit -configuration Release \
-            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log | tail -80
-      - name: IPA packen und prüfen
-        working-directory: ios
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('../package.json').version")"
-          APP="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)"
-          echo "App: $APP"
-          ls "$APP"
-          test -f "$APP/nodejs-project/main.js"
-          test -f "$APP/nodejs-project/server/index.js"
-          test -d "$APP/Frameworks/NodeMobile.framework"
-          plutil -p "$APP/Info.plist" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|UIDeviceFamily|MinimumOSVersion|UIFileSharingEnabled'
-          lipo -info "$APP/MangoFacharbeit" || true
-          lipo -info "$APP/Frameworks/NodeMobile.framework/NodeMobile" || true
-          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
-          mkdir -p ../dist
-          IPA="../dist/Mango-Facharbeit-${VERSION}-iPad.ipa"
-          zip -qry "$IPA" Payload
-          H="$(shasum -a 256 "$IPA" | cut -d' ' -f1)"
-          printf "%s  %s" "$H" "$(basename "$IPA")" > "$IPA.sha256"
-          ls -lh ../dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mango-facharbeit-ipad
-          path: |
-            dist/Mango-Facharbeit-*-iPad.ipa
-            dist/Mango-Facharbeit-*-iPad.ipa.sha256
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ipad-build-log
-          path: ios/build.log
-          if-no-files-found: ignore
-
   release:
     name: Release veröffentlichen
-    needs: [build, mac, ipad]
-    # Windows entscheidet über das Release; die Mac- und iPad-Dateien kommen dazu, wenn ihr Bau gelungen ist.
+    needs: [build, mac]
+    # Windows entscheidet über das Release; die Mac-Dateien kommen dazu, wenn ihr Bau gelungen ist.
     if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
@@ -225,12 +149,6 @@ jobs:
         continue-on-error: true
         with:
           name: mango-facharbeit-mac
-          path: dist
-      - uses: actions/download-artifact@v4
-        # Fehlt das iPad-Artefakt (Bau fehlgeschlagen), geht das Release trotzdem raus.
-        continue-on-error: true
-        with:
-          name: mango-facharbeit-ipad
           path: dist
       - name: GitHub-Release anlegen
         env:

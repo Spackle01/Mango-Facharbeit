@@ -287,7 +287,6 @@ async function renderFiles(body, headExtra) {
 }
 
 async function openWorkspace(app) {
-  if (S.state.ipad) { toast('Auf dem iPad liegen deine Dateien in der Dateien-App unter „Auf meinem iPad“ → „Mango Facharbeit“.'); return; }
   try { await api.post('/api/workspace/open', { app }); } catch (err) { toast(err.message, { error: true }); }
 }
 
