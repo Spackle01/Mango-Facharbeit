@@ -15,6 +15,9 @@ module.exports = erstelleAnbieter({
   standardModell: '', // das erste Modell der Liste
   modelleLaden: true,
   denken: false,
+  // Seit September 2026 verlangt OpenCode Go bei jeder Anfrage eine stabile Sitzungskennung (Routing, Zwischenspeicher).
+  // Mango nutzt die Kennung der eigenen Sitzung: gleich in allen Runden einer Antwort und in allen Nachrichten eines Chats.
+  sitzungsKopf: 'x-opencode-session',
   schluesselMuster: /^[A-Za-z0-9][A-Za-z0-9._~+/=-]{15,299}$/,
   schluesselFehler: 'Das sieht nicht wie ein OpenCode-Go-Schlüssel aus. Kopiere ihn vollständig aus der OpenCode-Konsole.',
   loginText: 'Abonniere OpenCode Go, erstelle in der OpenCode-Konsole einen API-Schlüssel und füge ihn hier ein. Die Nutzung ist im Abo enthalten, es gelten die Grenzen des Plans.',

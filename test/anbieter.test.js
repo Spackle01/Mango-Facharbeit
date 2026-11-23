@@ -234,7 +234,7 @@ test('Nur DeepSeek: Ruft die KI den Scan nicht auf, holt die App ihn nach', asyn
 
 test('OpenCode Go: Schlüssel verbinden, Modellliste vom Anbieter, Antwort mit Werkzeugen, Schlüssel bleibt geheim', async () => {
   const key = 'ocg-test-0123456789abcdef';
-  const fake = await require('./fixtures/fake-deepseek').start({ key, modelle: ['kimi-test', 'glm-test'], skript: (req) => {
+  const fake = await require('./fixtures/fake-deepseek').start({ key, modelle: ['kimi-test', 'glm-test'], verlangeKopf: 'x-opencode-session', skript: (req) => {
     const letzte = req.messages[req.messages.length - 1];
     if (letzte.role === 'user' && /FEHLER402/.test(letzte.content)) return { status: 402, meldung: 'Quota' };
     if (letzte.role === 'user') return { tools: [{ name: 'Write', args: { file_path: '01_themenfindung_und_mindmap/ocgnotiz.md', content: 'Meine Notiz.' } }, { name: 'ai_tell_scan', args: { text: 'Meine Notiz.' } }] };
@@ -286,10 +286,17 @@ test('OpenCode Go: Schlüssel verbinden, Modellliste vom Anbieter, Antwort mit W
     const verlauf = fake.calls[fake.calls.length - 1].messages;
     assert.ok(!verlauf.some((x) => 'reasoning_content' in x), 'kein reasoning_content bei OpenCode Go');
     assert.ok(fs.existsSync(path.join(srv.home, 'Dokumente', 'OCG Test', '.facharbeit', 'sitzungen')) && fs.readdirSync(path.join(srv.home, 'Dokumente', 'OCG Test', '.facharbeit', 'sitzungen')).some((f) => f.startsWith('opencodego-')));
+    // OpenCode Go verlangt bei jeder Anfrage die Sitzungskennung (x-opencode-session), sonst „missing x-opencode-session“.
+    const chatAnfragen = () => fake.anfragen.filter((a) => a.url === '/chat/completions');
+    const ersteSitzung = chatAnfragen()[0].sitzung;
+    assert.ok(ersteSitzung && /^[0-9a-f-]{36}$/.test(ersteSitzung), 'Kennung der Mango-Sitzung');
+    assert.ok(chatAnfragen().length >= 3 && chatAnfragen().every((a) => a.sitzung === ersteSitzung), 'gleiche Kennung in allen Runden und Nachrichten desselben Chats');
     // Eigene Modellwahl (auch mit „/“ in der Kennung)
     await srv.call('PUT', '/api/settings', { modelle: { opencodego: 'glm-test' } });
     await srv.send((await srv.call('POST', '/api/chats')).id, 'Noch eine Notiz.');
     assert.strictEqual(fake.calls[fake.calls.length - 1].model, 'glm-test');
+    assert.notStrictEqual(chatAnfragen()[chatAnfragen().length - 1].sitzung, ersteSitzung, 'neuer Chat, neue Sitzung');
+    assert.ok(fake.anfragen.filter((a) => a.url === '/models').every((a) => a.sitzung === undefined), 'die Modellliste braucht die Kennung nicht');
     const r2 = await srv.call('PUT', '/api/settings', { modelle: { opencodego: 'opencode-go/kimi-test' } });
     assert.strictEqual(r2.settings.modelle.opencodego, 'opencode-go/kimi-test');
     // Kontingent erreicht: verständliche Meldung
@@ -377,6 +384,7 @@ test('Nur DeepSeek (Mac): Anbieterliste, Schlüssel verbinden, Antwort mit Werkz
     assert.strictEqual(m.status, 'fertig');
     assert.strictEqual(m.text, 'Notiz angelegt.');
     assert.ok(m.files.some((f) => f.path === '01_themenfindung_und_mindmap/dsnotiz.md' && f.aktion === 'neu'));
+    assert.ok(fake.anfragen.every((a) => a.sitzung === undefined), 'DeepSeek bekommt die OpenCode-Kopfzeile nicht');
     // DeepSeek bekommt dieselben Skills im Systemprompt und ruft den Scan als Werkzeug auf; die App zählt, was genutzt wurde.
     assert.deepStrictEqual(m.stil.skills, ['human-voice', 'humanize-rewrite', 'ai-tell-audit', 'ai_tell_scan']);
     assert.strictEqual(m.stil.werkzeuge, undefined);
