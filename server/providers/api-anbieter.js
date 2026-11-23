@@ -70,7 +70,8 @@ async function leseStrom(res, onText) {
 
 // cfg: id, name, keyLink, base, standardModell ('' = erstes Modell der Liste), modelle (feste Liste) oder
 // modelleLaden (true: Liste kommt von GET /models), schluesselMuster, denken (Nachdenken-Modus wie bei DeepSeek),
-// loginText, guthabenText (Fehler 402), keinSchluesselFehler.
+// loginText, guthabenText (Fehler 402), sitzungsKopf (Name einer Kopfzeile, die bei jeder Anfrage die Sitzung nennt;
+// OpenCode Go verlangt `x-opencode-session` und lehnt Anfragen ohne sie ab).
 function erstelleAnbieter(cfg) {
   const { id: ID, name: NAME } = cfg;
   let geheim = null;
@@ -196,7 +197,7 @@ function erstelleAnbieter(cfg) {
           for (let versuch = 0; ; versuch++) {
             const res = await fetchFn(`${cfg.base}/chat/completions`, {
               method: 'POST', signal: ac.signal,
-              headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+              headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(cfg.sitzungsKopf ? { [cfg.sitzungsKopf]: sid } : {}) },
               body: JSON.stringify(anfrage()),
             });
             if (!res.ok) {

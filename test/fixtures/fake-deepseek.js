@@ -2,16 +2,18 @@
 // Test-Double für die DeepSeek-API: /models und /chat/completions (Stream, Werkzeugaufrufe).
 const http = require('http');
 
-function start({ key = 'sk-test-0123456789abcdef', skript, modelle = ['deepseek-flash', 'deepseek-v4-pro'] } = {}) {
+function start({ key = 'sk-test-0123456789abcdef', skript, modelle = ['deepseek-flash', 'deepseek-v4-pro'], verlangeKopf = '' } = {}) {
   const calls = [];
   const anfragen = []; // Kopfzeilen und Pfad jeder Anfrage
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
     req.on('end', () => {
-      anfragen.push({ url: req.url, auth: req.headers.authorization });
+      anfragen.push({ url: req.url, auth: req.headers.authorization, sitzung: req.headers['x-opencode-session'] });
       if (req.headers.authorization !== `Bearer ${key}`) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { message: 'Authentication Fails' } })); return; }
       if (req.url === '/models') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ object: 'list', data: modelle.map((id) => ({ id })) })); return; }
+      // Wie OpenCode Go: Ohne die verlangte Kopfzeile wird die Anfrage abgelehnt.
+      if (req.url === '/chat/completions' && verlangeKopf && !req.headers[verlangeKopf]) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { type: 'MissingSessionID', message: `Request is missing ${verlangeKopf} and cannot be routed efficiently.` } })); return; }
       if (req.url === '/chat/completions') {
         const j = JSON.parse(body);
         calls.push(j);
